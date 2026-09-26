@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
+import time
 
 from . import hosts
 
@@ -336,6 +338,29 @@ def cmd_report(a: argparse.Namespace) -> None:
 
 def cmd_recipe(a) -> None:
     from . import recipe as rc
+    if a.action == "new":
+        from . import draft
+        if not a.ids:
+            raise SystemExit("recipe new <hf-repo>")
+        repo = a.ids[0]
+        rid = a.rid or re.sub(r"[^a-z0-9]+", "-", repo.split("/")[-1].lower().replace("-gguf", "")).strip("-")
+        prof = hosts.load(a.host)
+        cpu = prof["hw"].get("cpu") or {}
+        runtimes = sorted(prof["hw"].get("runtimes") or [], key=lambda x: int((re.search(r"build (\d+)", x.get("version", "")) or [0, 0])[1]))
+        r, report = draft.draft(repo, hosts.spec(prof), rid, file=a.file, models_dir=prof["hw"].get("models_dir_guess") or "",
+                                server=runtimes[-1]["path"] if runtimes else "", cores=cpu.get("cores") or cpu.get("threads"))
+        from . import fit as F
+        print(report + "\n")
+        text = F.to_toml(r, header=[f"Draft recipe {rid} for {a.host}, {time.strftime('%Y-%m-%d')}. Edit the TODOs, then `llmbox bench` gives it a score."])
+        out = os.path.join(rc.recipes_dir(a.host), f"{rid}.toml")
+        if not a.write:
+            print(text + f"\n(not written; --write saves it as {out})")
+        elif os.path.exists(out):
+            raise SystemExit(f"{out} exists; pick another --id")
+        else:
+            open(out, "w").write(text)
+            print(f"wrote {out}")
+        return
     if a.action == "list":
         for rid in rc.ids(a.host):
             r = rc.load(a.host, rid)
@@ -510,9 +535,12 @@ def main(argv: list[str] | None = None) -> None:
     rg.set_defaults(fn=cmd_regrade)
 
     rc_ = sub.add_parser("recipe", help="recipes: list / show / render a launcher / check the host runs what the recipe says")
-    rc_.add_argument("action", choices=["list", "show", "render", "check"])
-    rc_.add_argument("ids", nargs="*")
+    rc_.add_argument("action", choices=["list", "show", "render", "check", "new"])
+    rc_.add_argument("ids", nargs="*", help="recipe ids; for `new`: the Hugging Face repo")
     rc_.add_argument("--host", default="box")
+    rc_.add_argument("--file", help="new: use this GGUF file (substring) instead of picking one")
+    rc_.add_argument("--id", dest="rid", help="new: recipe id (default: from the repo name)")
+    rc_.add_argument("--write", action="store_true", help="new: save the draft under the host's recipes")
     rc_.set_defaults(fn=cmd_recipe)
 
     tr = sub.add_parser("traces", help="budget / loop audit of a run's saved thinking (~/.llmbox/traces/<run>)")

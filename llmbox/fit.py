@@ -152,8 +152,8 @@ def fit(r: dict, shape: E.ModelShape, hw: E.HostSpec, cores: int | None = None, 
     base = dict(want_ctx=want, threads=threads, cpu_affinity=r["runtime"]["cpu_affinity"] if same_host else "",
                 calibration=cal, deep_k=cal.deep_k)
     chosen = None
-    for ub in (2048, 1024, 512):   # a smaller compute buffer frees VRAM, at some prompt-processing speed
-        for c in _ctx_ladder(top):
+    for c in _ctx_ladder(top):     # context first (it carries the long-document score), then prompt speed:
+        for ub in (2048, 1024, 512):   # a smaller compute buffer frees VRAM for a longer context
             p = E.plan(shape, hw, ctx=c, kv_type=kv, ubatch=ub, depth=cal.deep_k * 1000)
             if p.fits:
                 chosen = (c, ub, p)

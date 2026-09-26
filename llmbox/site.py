@@ -143,7 +143,7 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
         cal = F.calibration(rec, sh, host)
         kv, ctx = rec["placement"]["kv_type"], rec["placement"]["ctx"] or sh.context_length
         out[r["id"]] = {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
-                        "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used, "rec": sh.recurrent_state_bytes,
+                        "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used, "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv),
                         "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "ctx": ctx, "k2": round(cal.k2, 4), "kd": round(cal.kd, 4),
                         "deepK": cal.deep_k, "size": round((sh.total_bytes or 0) / 1e9, 1)}
     return {"recipes": out, "ref": {"gpu": prof["hw"]["gpus"][0]["name"].replace("NVIDIA GeForce ", "") if prof["hw"]["gpus"] else "",

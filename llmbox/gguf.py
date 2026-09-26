@@ -119,7 +119,8 @@ def _read_value(src: _Source, vtype: int):
     raise ValueError(f"unknown GGUF value type {vtype}")
 
 
-def read_header(fetch, file_size: int | None = None) -> GGUFHeader:
+def read_header(fetch, file_size: int | None = None, keep: frozenset = frozenset()) -> GGUFHeader:
+    """`keep`: big arrays to keep in full (e.g. 'tokenizer.ggml.tokens'); the others are only summarized."""
     src = _Source(fetch)
     if src.read(4) != GGUF_MAGIC:
         raise ValueError("not a GGUF file")
@@ -132,6 +133,10 @@ def read_header(fetch, file_size: int | None = None) -> GGUFHeader:
     for _ in range(n_kv):
         key = src.string()
         vtype = src.unpack("<I")
+        if key in keep and vtype == T_ARRAY:
+            etype, n = src.unpack("<I"), src.unpack("<Q")
+            h.kv[key] = [_read_value(src, etype) for _ in range(n)]
+            continue
         val = _read_value(src, vtype)
         if isinstance(val, tuple) and val and val[0] == "__array__":
             h.arrays[key] = (val[1], val[2])

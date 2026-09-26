@@ -83,10 +83,12 @@ def list_gguf(repo: str) -> list[GGUFFile]:
     return sorted(files.values(), key=lambda f: f.size)
 
 
-def read_headers(f: GGUFFile) -> list[gguf.GGUFHeader]:
-    """Header of every part (tensors of split models are spread over the parts)."""
+def read_headers(f: GGUFFile, keep: frozenset = frozenset()) -> list[gguf.GGUFHeader]:
+    """Header of every part (tensors of split models are spread over the parts). `keep`: big arrays to read in full
+    (the vocabulary lives in the first part)."""
     tok = _token()
-    return [gguf.read_header(gguf.http_fetcher(f.url(p), tok), size) for p, size in zip(f.parts, f.sizes)]
+    return [gguf.read_header(gguf.http_fetcher(f.url(p), tok), size, keep=keep if i == 0 else frozenset())
+            for i, (p, size) in enumerate(zip(f.parts, f.sizes))]
 
 
 def model_card(repo: str) -> str:

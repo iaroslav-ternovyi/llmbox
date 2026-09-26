@@ -23,6 +23,9 @@ GPU_RESERVE_MIB = 700              # driver + display + fit-target margin
 COMPUTE_BUFFER_MIB = {512: 900, 1024: 1300, 2048: 2100}  # by -ub, measured-ish for 35B-A3B class
 
 KV_BYTES = {"f16": 2.0, "bf16": 2.0, "q8_0": 34 / 32, "q5_1": 24 / 32, "q4_0": 18 / 32}
+# sliding-window attention: every Nth layer is global, the rest keep only `sliding_window` tokens of KV (llama.cpp's
+# per-architecture swa pattern; the GGUF carries the window but not the pattern)
+SWA_PATTERN = {"gemma2": 2, "gemma3": 6, "gpt-oss": 2, "cohere2": 4}
 
 _BLK = re.compile(r"^blk\.(\d+)\.")
 
@@ -54,6 +57,8 @@ class ModelShape:
     embed_bytes: int = 0
     mtp_bytes: int = 0
     recurrent_state_bytes: int = 0    # per sequence, for hybrid SSM / linear-attention layers
+    swa_layers: int = 0               # attention layers with a sliding window (their KV stops growing at swa_window)
+    swa_window: int = 0
     expert_cpu_eff: float = 1.0       # relative CPU dequant speed of the expert quant type (IQ* are slower)
     context_length: int = 0
     total_params: int = 0
@@ -64,11 +69,18 @@ class ModelShape:
     def is_moe(self) -> bool:
         return self.n_expert > 1 and self.expert_bytes > 0
 
-    def kv_bytes_per_token(self, kv_type: str = "q8_0") -> float:
+    def _kv_per_layer(self, kv_type: str) -> float:
         b = KV_BYTES.get(kv_type, 2.0)
-        if self.mla_kv_dim:
-            return self.attn_layers * self.mla_kv_dim * b
-        return self.attn_layers * self.kv_heads * (self.k_len + self.v_len) * b
+        return self.mla_kv_dim * b if self.mla_kv_dim else self.kv_heads * (self.k_len + self.v_len) * b
+
+    def kv_bytes_per_token(self, kv_type: str = "q8_0") -> float:
+        """KV bytes per token of context, over the layers whose cache grows with the context (not the windowed ones)."""
+        return (self.attn_layers - self.swa_layers) * self._kv_per_layer(kv_type)
+
+    def kv_swa_bytes(self, kv_type: str = "q8_0", ctx: int | None = None) -> float:
+        """Fixed KV of the sliding-window layers (up to the window, or ctx if smaller)."""
+        w = min(self.swa_window, ctx) if ctx else self.swa_window
+        return self.swa_layers * w * self._kv_per_layer(kv_type)
 
 
 def analyze(headers: list[GGUFHeader]) -> ModelShape:
@@ -128,6 +140,9 @@ def analyze(headers: list[GGUFHeader]) -> ModelShape:
                 return False
             return any(n.startswith(("attn_k.", "attn_k_b", "attn_kv_a", "attn_qkv.", "attn_q.")) for n in names)
         s.attn_layers = sum(1 for i, names in layer_names.items() if i < n_layers and has_kv(names)) or n_layers
+    win, pat = int(h0.get("attention.sliding_window", 0) or 0), SWA_PATTERN.get(h0.arch)
+    if win and pat:
+        s.swa_window, s.swa_layers = win, s.attn_layers - s.attn_layers // pat
     embed_params = sum(t.n_elements for t in tensors if t.name == "token_embd.weight")
     mtp_params = sum(t.n_elements for t in tensors if _in(t.name, mtp_ids))
     base = s.total_params - embed_params - mtp_params
@@ -179,7 +194,7 @@ def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv
          ubatch: int = 2048, depth: int = 50_000) -> Plan:
     ctx = ctx or s.context_length or 32768
     mib = 1 / 2**20
-    kv = s.kv_bytes_per_token(kv_type) * ctx + s.recurrent_state_bytes * slots
+    kv = s.kv_bytes_per_token(kv_type) * ctx + s.kv_swa_bytes(kv_type, ctx) + s.recurrent_state_bytes * slots
     buf = COMPUTE_BUFFER_MIB.get(ubatch, 2100)
     gpu_fixed = (s.nonexpert_bytes + kv) * mib + buf + GPU_RESERVE_MIB
     free_for_experts = hw.vram_mib - gpu_fixed
@@ -206,7 +221,7 @@ def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv
     vram_used = min(hw.vram_mib, gpu_fixed + (s.expert_bytes * gpu_frac * mib if s.is_moe else s.embed_bytes * mib))
 
     def tps(d: int) -> float:
-        kv_read = s.kv_bytes_per_token(kv_type) * d
+        kv_read = s.kv_bytes_per_token(kv_type) * d + s.kv_swa_bytes(kv_type, d)
         t = (per_token_cpu / (hw.ram_bw_gbs * 1e9 * RAM_EFFICIENCY * s.expert_cpu_eff)
              + (per_token_gpu + kv_read) / (hw.vram_bw_gbs * 1e9 * VRAM_EFFICIENCY)
              + s.n_layers * OVERHEAD_MS_PER_LAYER / 1000)
