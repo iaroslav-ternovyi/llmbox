@@ -57,10 +57,17 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
     return rs
 
 
+def _depth_k(key: str) -> float:
+    """'28k' / '88k' (speed probe) or '32-96k' / '96k+' (in-run buckets) -> lower bound in thousands of tokens"""
+    import re
+    m = re.match(r"(\d+)", key)
+    return float(m.group(1)) if m else 0.0
+
+
 def _deep(sp: dict) -> str:
-    """decode speed deep in the context (32k+ tokens), where long agent sessions and documents spend their time"""
+    """slowest decode deep in the context (>= 24k tokens), where long agent sessions and documents spend their time"""
     bd = sp.get("by_depth") or {}
-    v = [bd[k]["decode_tps"] for k in ("32-96k", "96k+") if bd.get(k, {}).get("decode_tps")]
+    v = [d["decode_tps"] for k, d in bd.items() if _depth_k(k) >= 24 and d.get("decode_tps")]
     return f"{min(v):.1f}" if v else "-"
 
 
@@ -69,7 +76,7 @@ def text_table(rs: list[dict]) -> str:
         return "no suite results yet"
     blocks = [b for b in BLOCK_NAMES if any(b in r["blocks"] for r in rs)]
     head = (f"{'#':>2} {'model / recipe':24s} {'capability':>16s} {'vs ref':>6s} " + " ".join(f"{b[:7]:>7s}" for b in blocks)
-            + f" {'tok/s':>6s} {'@32k+':>6s} {'step s':>6s} {'solved/h':>8s}  suite")
+            + f" {'tok/s':>6s} {'deep':>6s} {'step s':>6s} {'solved/h':>8s}  suite")
     lines = [head, "-" * len(head)]
     for i, r in enumerate(rs, 1):
         ci = f"({r['ci'][0]:.0f}-{r['ci'][1]:.0f})" if r.get("ci") else ""
