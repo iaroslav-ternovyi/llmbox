@@ -2,6 +2,7 @@
 capability (0-100 ± 95% CI), speed (tok/s + typical agent step), and solved tasks per hour on this hardware."""
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import random
@@ -22,8 +23,14 @@ TEXT_GRADED = {"longctx", "writing", "reasoning", "code"}
 # wall-clock limit per item (seconds): a model that needs longer is graded on what it reached (v0.7; v0.6 had none)
 DEADLINE_S = {"agentic": 2700}
 
+# full thinking of every step, one gzip file per item (~/.llmbox/traces/<run>/<item>.json.gz): for loop / budget audits
+TRACES = os.path.join(os.path.expanduser("~"), ".llmbox", "traces")
+# the reasoning-budget message of the anti-loop launchers: its presence means the budget cut the thinking
+BUDGET_MSG = "I have reasoned enough"
 
-def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, deadline_scale: float = 1.0) -> dict:
+
+def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, deadline_scale: float = 1.0,
+             trace_dir: str | None = None) -> dict:
     """base_url is an OpenAI-compatible endpoint, or "claude-code[:effort]" for a frontier reference run through the
     user's Claude subscription (see frontier.py). deadline_scale: > 1 when items share the server (parallel slots)."""
     t0 = time.time()
@@ -42,10 +49,15 @@ def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, de
     except Exception as e:  # a crash/timeout of one item scores 0 and is reported, it does not stop the run
         res, score, err = {"timings": [], "usage": {}, "seconds": round(time.time() - t0, 1), "finish_reason": None,
                            "steps": 0, "final": ""}, 0.0, str(e)[:300]
+    thinking = _thinking(res)
+    if trace_dir and thinking:
+        _save_trace(trace_dir, it.id, thinking, res)
     return {"id": it.id, "block": it.block, "kind": it.kind, "lang": it.lang, "score": round(score, 4), "error": err,
             "seconds": res["seconds"], "steps": res.get("steps"), "finish_reason": res.get("finish_reason"),
             "usage": res.get("usage"), "timings": res.get("timings"), "final": res.get("final") or "",
             "final_tail": (res.get("final") or "")[-300:], "reasoning_tail": _reasoning_tail(res), "expected": it.meta.get("expected"),
+            "reasoning_cut": sum(BUDGET_MSG in t for t in thinking),
+            "max_reply_tokens": max([t.get("predicted_n") or 0 for t in res.get("timings") or []] or [0]),
             "tool_calls": [{"name": c.get("name"), "args": _clip(c.get("args")), "result": _clip(c.get("result"), 300)}
                            for c in (res.get("tool_calls") or [])][:400]}
 
@@ -54,6 +66,20 @@ def _clip(v, n: int = 2000):
     """Tool-call log for audits: keep it small (agent file writes can be large)."""
     s = json.dumps(v, ensure_ascii=False, default=str)
     return v if len(s) <= n else s[:n] + "…"
+
+
+def _thinking(res: dict) -> list[str]:
+    return [m["reasoning_content"] for m in res.get("messages") or [] if m.get("role") == "assistant" and m.get("reasoning_content")]
+
+
+def _save_trace(trace_dir: str, item_id: str, thinking: list[str], res: dict) -> None:
+    try:
+        os.makedirs(trace_dir, exist_ok=True)
+        with gzip.open(os.path.join(trace_dir, item_id + ".json.gz"), "wt", encoding="utf-8") as f:
+            json.dump({"id": item_id, "thinking": thinking, "finish_reason": res.get("finish_reason"),
+                       "reply_tokens": [t.get("predicted_n") for t in res.get("timings") or []]}, f, ensure_ascii=False)
+    except OSError:
+        pass   # an audit aid: never fail a run over it
 
 
 def _reasoning_tail(res: dict) -> str:
@@ -148,6 +174,7 @@ def summarize(rows: list[dict], wall_s: float) -> dict:
     return {"capability": round(cap, 1), "capability_ci95": [round(lo, 1), round(hi, 1)],
             "blocks": {b: round(100 * v, 1) for b, v in _block_scores(rows).items()},
             "items": len(rows), "solved": round(solved, 2), "errors": sum(1 for r in rows if r["error"]),
+            "reasoning_cut_items": sum(1 for r in rows if r.get("reasoning_cut")),
             "wall_minutes": round(wall_s / 60, 1), "solved_per_hour": round(solved / (wall_s / 3600), 1) if wall_s else None,
             "speed": speed(rows)}
 
@@ -167,8 +194,9 @@ def run(base_url: str, model: str, tier: str = "quick", seed0: int = 0, blocks: 
     rows = []
     t0 = time.time() - sum(r["seconds"] for r in done.values())
     out = open(jsonl_path, "a") if jsonl_path else None
+    trace_dir = os.path.join(TRACES, os.path.splitext(os.path.basename(jsonl_path))[0]) if jsonl_path else None
     if parallel > 1:
-        rows = _run_parallel(base_url, model, items, done, api_key, parallel, out, progress)
+        rows = _run_parallel(base_url, model, items, done, api_key, parallel, out, progress, trace_dir)
         items = []   # all handled above
     for i, it in enumerate(items, 1):
         if it.id in done:
@@ -185,7 +213,7 @@ def run(base_url: str, model: str, tier: str = "quick", seed0: int = 0, blocks: 
                 out.flush()
             progress(f"  [{i:3d}/{len(items)}] {row['score']:4.2f}  (reused{', regraded from ' + str(row['regraded_from']) if 'regraded_from' in row else ''})  {it.id}")
             continue
-        row = run_item(base_url, model, it, api_key)
+        row = run_item(base_url, model, it, api_key, trace_dir=trace_dir)
         rows.append(row)
         if out:
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -220,7 +248,8 @@ def regrade(rec: dict) -> tuple[dict, list[str]]:
     return new, changes
 
 
-def _run_parallel(base_url: str, model: str, items: list, done: dict, api_key, n: int, out, progress) -> list[dict]:
+def _run_parallel(base_url: str, model: str, items: list, done: dict, api_key, n: int, out, progress,
+                  trace_dir: str | None = None) -> list[dict]:
     """Capability run with n concurrent items on a server with n slots (unified KV). Long-document items still run one
     at a time afterwards (two 200k-token prompts do not fit one KV pool). Item deadlines scale by n."""
     lock = threading.Lock()
@@ -247,11 +276,11 @@ def _run_parallel(base_url: str, model: str, items: list, done: dict, api_key, n
     par = [it for it in todo if it.block != "longctx"]
     seq = [it for it in todo if it.block == "longctx"]
     with ThreadPoolExecutor(max_workers=n) as ex:
-        futs = {ex.submit(run_item, base_url, model, it, api_key, float(n)): it for it in par}
+        futs = {ex.submit(run_item, base_url, model, it, api_key, float(n), trace_dir): it for it in par}
         for f in as_completed(futs):
             record(futs[f], f.result())
     for it in seq:
-        record(it, run_item(base_url, model, it, api_key))
+        record(it, run_item(base_url, model, it, api_key, trace_dir=trace_dir))
     return [rows[it.id] for it in items]
 
 
