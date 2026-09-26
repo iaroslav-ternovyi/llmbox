@@ -149,7 +149,7 @@ def _extract_code(text: str, lang: str) -> str:
     return t
 
 
-def _run(lang: str, fn: str, code: str, tests: list) -> float:
+def _run(lang: str, fn: str, code: str, tests: list, timeout: int = 20) -> float:
     d = os.path.realpath(tempfile.mkdtemp(prefix="llmbox-code-"))
     try:
         json.dump(tests, open(os.path.join(d, "tests.json"), "w"))
@@ -166,7 +166,7 @@ def _run(lang: str, fn: str, code: str, tests: list) -> float:
         cmd = _sandbox_cmd(d, argv)
         if cmd is None:
             raise RuntimeError("no sandbox available (sandbox-exec or bwrap) - refusing to run model code")
-        p = subprocess.run(cmd, cwd=d, capture_output=True, text=True, timeout=20)
+        p = subprocess.run(cmd, cwd=d, capture_output=True, text=True, timeout=timeout)
         m = re.search(r"\{.*\}", p.stdout)
         res = json.loads(m.group(0)) if m else {"passed": 0, "total": len(tests)}
         return res["passed"] / res["total"]
@@ -425,4 +425,91 @@ def make(kind: str):
 
 
 SIMPLE = ("rle", "merge", "levels", "base", "topk")
+
+
+# ---- expert level (6): cron schedules across time zones and DST ---------------------------------------------------
+
+def _cron_field(spec: str, lo: int, hi: int) -> set[int]:
+    out = set()
+    for part in spec.split(","):
+        step = 1
+        if "/" in part:
+            part, st = part.split("/")
+            step = int(st)
+        if part == "*":
+            a, b = lo, hi
+        elif "-" in part:
+            a, b = (int(x) for x in part.split("-"))
+        else:
+            a = b = int(part)
+        out.update(range(a, b + 1, step))
+    return out
+
+
+def _ref_cron(expr: str, tz: str, start: str, n: int) -> list[str]:
+    """Reference: walk UTC minute by minute, judge each minute on the local wall clock. Nonexistent local times never
+    occur in the walk (spring-forward gap -> skipped); a repeated local time (fall-back) counts only at its first
+    occurrence (fold == 0)."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    mi, ho, dom, mo, dow = expr.split()
+    M, H, D, MO = _cron_field(mi, 0, 59), _cron_field(ho, 0, 23), _cron_field(dom, 1, 31), _cron_field(mo, 1, 12)
+    W = {x % 7 for x in _cron_field(dow, 0, 7)}
+    dom_any, dow_any = dom == "*", dow == "*"
+    z = ZoneInfo(tz)
+    t = _dt.datetime.fromisoformat(start.replace("Z", "+00:00")).replace(second=0, microsecond=0) + _dt.timedelta(minutes=1)
+    out = []
+    while len(out) < n:
+        loc = t.astimezone(z)
+        if loc.fold == 0 and loc.minute in M and loc.hour in H and loc.month in MO:
+            dm, dw = loc.day in D, (loc.weekday() + 1) % 7 in W
+            day = True if dom_any and dow_any else dw if dom_any else dm if dow_any else (dm or dw)
+            if day:
+                out.append(t.strftime("%Y-%m-%dT%H:%MZ"))
+        t += _dt.timedelta(minutes=1)
+    return out
+
+
+_CRON_CASES = [
+    ("30 2 * * *", "Europe/Madrid", "2026-03-27T12:00Z"),   # 29 Mar: 02:30 does not exist
+    ("30 2 * * *", "Europe/Madrid", "2026-10-23T12:00Z"),   # 25 Oct: 02:30 happens twice
+    ("0 2 * * *", "America/New_York", "2026-03-06T12:00Z"), # 8 Mar gap
+    ("0 1 * * *", "America/New_York", "2026-10-30T12:00Z"), # 1 Nov overlap
+    ("0 9 1,15 * 1", "America/New_York", "2026-06-01T00:00Z"),  # day-of-month OR Monday
+    ("*/20 9-10 * * 1-5", "Europe/Madrid", "2026-09-25T06:00Z"),
+    ("15 3 * * 0", "Europe/Madrid", "2026-10-18T00:00Z"),
+    ("0 0 31 * *", "Asia/Tokyo", "2026-04-01T00:00Z"),
+    ("5 4 * 2 *", "Europe/Madrid", "2026-01-30T00:00Z"),
+    ("0 12 * * 7", "Australia/Sydney", "2026-04-01T00:00Z"),   # 7 = Sunday; Sydney leaves DST on 5 Apr
+    ("45 23 28-31 * *", "America/New_York", "2026-02-20T00:00Z"),
+    ("0 */6 * * *", "Europe/London", "2026-03-28T20:00Z"),
+]
+
+
+def cron(seed: int, level: int = 6) -> Item:
+    """Expert: next run times of a 5-field cron schedule in an IANA time zone, across DST changes. Strict (every case)."""
+    r = rng(BLOCK, f"cron{level}", seed)
+    cases = r.sample(_CRON_CASES, 10)
+    tests = [[[e, tz, st, 5], _ref_cron(e, tz, st, 5)] for e, tz, st in cases]
+    desc = ("next_runs(expr: str, tz: str, start: str, n: int) -> list[str]. expr is a standard 5-field cron schedule "
+            "'minute hour day-of-month month day-of-week' (numbers, '*', lists 'a,b', ranges 'a-b', steps '*/s' and "
+            "'a-b/s'; day-of-week 0-7 with 0 and 7 = Sunday). The schedule is evaluated on the local wall clock of the IANA "
+            "time zone tz. If both day-of-month and day-of-week are restricted (neither is '*'), a day matches when EITHER "
+            "matches (classic cron). Return the next n run times strictly after start (UTC, 'YYYY-MM-DDTHH:MMZ'), in UTC, "
+            "format 'YYYY-MM-DDTHH:MMZ'. Daylight-saving rules: a local time that does not exist (spring-forward gap) is "
+            "skipped; a local time that occurs twice (fall-back) runs only once, at its first occurrence. Use zoneinfo.")
+    example = tests[0]
+    prompt = (f"Implement this function in Python 3:\n\n{desc}\n\nExample: next_runs({json.dumps(example[0][0])}, "
+              f"{json.dumps(example[0][1])}, {json.dumps(example[0][2])}, 5) returns {json.dumps(example[1])}.\n"
+              "Use only the standard library. Reply with a single ```python``` code block containing the complete function.")
+
+    def check(text, _t=None, tests=tests) -> float:
+        frac = _run("python", "next_runs", _extract_code(text, "python"), tests, timeout=120)
+        return 1.0 if frac >= 1.0 else 0.0
+    return Item(f"{BLOCK}.cron.L{level}.{seed}", BLOCK, "cron", [{"role": "user", "content": prompt}], check, lang="python",
+                meta={"fn": "next_runs", "lang": "python", "tests": len(tests), "level": level,
+                      "expected": [t[1][0] for t in tests]})
+
+
 KINDS = {k: make(k) for k in SIMPLE + HARD}
+KINDS["cron"] = cron
