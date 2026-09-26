@@ -92,7 +92,8 @@ def draft(repo: str, hw: E.HostSpec, rid: str, file: str | None = None, models_d
     sh = E.analyze(h0)
     hd = h0[0]
     tmpl = hd.kv.get("tokenizer.chat_template") or ""
-    thinking = "<think>" in tmpl or "enable_thinking" in tmpl or "reasoning_content" in tmpl
+    # <think> tags (Qwen, DeepSeek), a switch (enable_thinking), or OpenAI's harmony analysis channel (gpt-oss)
+    thinking = any(k in tmpl for k in ("<think>", "enable_thinking", "reasoning_content", "<|channel|>analysis", "analysis<|message|>"))
     marks = marker_ids(hd.kv.get(TOKENS) or [])
     notes = [f"Draft by `llmbox recipe new` from {repo}: no score until `llmbox bench` runs it."]
     r = rc._merge(base, {"model": {"file": f.name, "sha256": f.sha256[0] or "", "path": os.path.join(models_dir, os.path.basename(f.name)) if models_dir else ""},
