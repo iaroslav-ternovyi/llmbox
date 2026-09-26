@@ -104,8 +104,23 @@ def cmd_bench(a: argparse.Namespace) -> None:
         ok, why = frontier.available()
         if not ok:
             raise SystemExit(why)
+    cap = None
+    if a.host and not a.endpoint.startswith("claude-code"):   # record what the server really runs with + telemetry
+        from . import runinfo
+        cap = runinfo.begin(a.host, a.endpoint, a.model)
+        st = (cap.get("start") or {})
+        print(f"  settings captured: build {((st.get('props') or {}).get('build_info'))}, {len(st.get('argv') or [])} argv items, "
+              f"telemetry {'on' if (cap.get('telemetry') or {}).get('pid') else 'off'}" + (f"  ({'; '.join(cap['errors'])})" if cap.get("errors") else ""), flush=True)
     res = bench.run(a.endpoint, a.model, tier=a.tier, seed0=a.seed, blocks=a.block, jsonl_path=jl,
                     progress=lambda m: print(m, flush=True), resume=a.resume, rerun=a.rerun, parallel=a.parallel)
+    info = None
+    if cap is not None:
+        from . import recipe as rc
+        rr = rc.load(a.host, a.recipe or a.model) if (a.recipe or a.model) in rc.ids(a.host) else None
+        info = runinfo.end(cap, rr)
+        rt = info["runtime"] or {}
+        print(f"  settings: {rt.get('variant', 'no recipe to compare')} · consistent {rt.get('settings_consistent')} · "
+              f"sha256 {str((info.get('sha256') or {}).get('sha256'))[:12]} · telemetry {(info.get('telemetry') or {}).get('samples', 0)} samples", flush=True)
     if (a.parallel > 1 or a.speed_probe) and not a.endpoint.startswith("claude-code"):   # 1-stream speed as a user feels it
         pm = a.speed_model or a.recipe or a.model
         print(f"  speed probe (1 stream) on {pm} ...", flush=True)
@@ -141,6 +156,14 @@ def cmd_bench(a: argparse.Namespace) -> None:
         r = rc.load(a.host, a.recipe or a.model) if (a.recipe or a.model) in rc.ids(a.host) else {"id": a.recipe or a.model}
         rec = results.new("suite", prof, recipe=r, model={k: (r.get("model") or {}).get(k) for k in ("hf_repo", "file", "path", "sha256")})
         rec.update(res)
+        if info:
+            rec["runtime"] = info["runtime"]
+            rec["telemetry"] = info["telemetry"]
+            if info.get("sha256"):
+                rec["model"]["sha256"] = info["sha256"].get("sha256")
+                rec["model"]["bytes"] = info["sha256"].get("bytes")
+            if info.get("errors"):
+                rec["capture_errors"] = info["errors"]
         rec["vram"] = _vram_check(prof)
         print(f"  saved {results.save(a.host, rec)}")
 

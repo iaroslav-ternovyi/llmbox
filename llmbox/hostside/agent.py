@@ -8,6 +8,10 @@ Commands:
   gguf-header <path>          header of a local GGUF (kv, big-array summaries, tensor directory)
   probe-server <json>         start llama-server with the given argv on a free port, measure speed, stop it
   unload                      ask llama-swap to unload its models (frees the GPU for a probe)
+  server-settings <port|model> what a running llama-server really uses: its argv (/proc) and /props (sampling, ctx, build)
+  sha256 <path>               sha256 of a model file (all parts of a split model), cached by path + size + mtime
+  telemetry-start <file> [s]  sample GPU/CPU/RAM every s seconds (default 5) into <file> in the background; prints the pid
+  telemetry-stop <file> <pid> stop the sampler; aggregates + per-minute series of the samples
 """
 from __future__ import annotations
 
@@ -243,6 +247,134 @@ def probe_server(spec: dict) -> dict:
     return out
 
 
+def _get(url: str, timeout: int = 10):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+
+def server_settings(target: str) -> dict:
+    """target: a llama-server port, or a llama-swap model id (its upstream port is looked up in /running)."""
+    port, via = None, "port"
+    if target.isdigit():
+        port = target
+    else:
+        via = "llama-swap"
+        for m in (_get("http://localhost:8080/running") or {}).get("running", []):
+            if m.get("model") == target and m.get("proxy"):
+                port = m["proxy"].rsplit(":", 1)[-1].strip("/")
+    out = {"target": target, "via": via, "port": port, "argv": None, "props": None}
+    if not port:
+        out["error"] = f"no running server for {target}"
+        return out
+    for pid in sh("pgrep -x llama-server").split():
+        try:
+            argv = open(f"/proc/{pid}/cmdline", "rb").read().decode(errors="replace").split("\0")[:-1]
+        except OSError:
+            continue
+        if "--port" in argv and argv[argv.index("--port") + 1] == str(port):
+            out["argv"], out["pid"] = argv, int(pid)
+            break
+    props = _get(f"http://localhost:{port}/props")
+    if props:
+        g = props.get("default_generation_settings") or {}
+        out["props"] = {"build_info": props.get("build_info"), "model_path": props.get("model_path"), "n_ctx": g.get("n_ctx"),
+                        "total_slots": props.get("total_slots"), "params": g.get("params") or {},
+                        "chat_template_sha": __import__("hashlib").sha256((props.get("chat_template") or "").encode()).hexdigest()[:16]}
+    return out
+
+
+def sha256_file(path: str) -> dict:
+    import hashlib
+    parts = [path]
+    if "-00001-of-" in path:
+        n = int(path.split("-of-")[1][:5])
+        parts = [path.replace("-00001-of-", f"-{i:05d}-of-") for i in range(1, n + 1)]
+    cache_dir = os.path.expanduser("~/.cache/llmbox/sha256")
+    os.makedirs(cache_dir, exist_ok=True)
+    out = []
+    for f in parts:
+        st = os.stat(f)
+        key = os.path.join(cache_dir, f"{os.path.basename(f)}.{st.st_size}.{int(st.st_mtime)}")
+        if os.path.exists(key):
+            out.append(open(key).read().strip())
+            continue
+        h = hashlib.sha256()
+        with open(f, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 24), b""):
+                h.update(chunk)
+        open(key, "w").write(h.hexdigest())
+        out.append(h.hexdigest())
+    return {"path": path, "sha256": out[0] if len(out) == 1 else out, "bytes": sum(os.path.getsize(f) for f in parts)}
+
+
+def _cpu_temp() -> float | None:
+    for h in glob.glob("/sys/class/hwmon/hwmon*"):
+        try:
+            name = open(f"{h}/name").read().strip()
+        except OSError:
+            continue
+        if name in ("k10temp", "coretemp", "zenpower"):
+            try:
+                return int(open(f"{h}/temp1_input").read()) / 1000
+            except OSError:
+                pass
+    return None
+
+
+def telemetry_loop(path: str, interval: float) -> None:
+    """Background sampler: one CSV line per sample (t, gpu °C, W, util %, VRAM MiB, CPU °C, RAM used MiB, load)."""
+    q = "temperature.gpu,power.draw,utilization.gpu,memory.used"
+    with open(path, "a", buffering=1) as f:
+        while True:
+            g = sh(f"nvidia-smi --query-gpu={q} --format=csv,noheader,nounits", timeout=10).splitlines()
+            g = [x.strip() for x in (g[0].split(",") if g else ["", "", "", ""])]
+            mi = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo") if l.split(":")[0] in ("MemTotal", "MemAvailable")}
+            ram_used = (mi.get("MemTotal", 0) - mi.get("MemAvailable", 0)) // 1024
+            f.write(",".join(str(x) for x in (round(time.time(), 1), *g, _cpu_temp() or "", ram_used, os.getloadavg()[0])) + "\n")
+            time.sleep(interval)
+
+
+def telemetry_start(path: str, interval: float = 5.0) -> dict:
+    p = subprocess.Popen([sys.executable, os.path.abspath(__file__), "telemetry-loop", path, str(interval)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return {"pid": p.pid, "file": path}
+
+
+def telemetry_stop(path: str, pid: int) -> dict:
+    try:
+        os.kill(pid, 15)
+    except OSError:
+        pass
+    rows = []
+    try:
+        for l in open(path):
+            v = l.strip().split(",")
+            if len(v) == 8:
+                rows.append([float(x) if x not in ("", "[N/A]") else None for x in v])
+        os.unlink(path)
+    except OSError:
+        pass
+    if not rows:
+        return {"samples": 0}
+    names = ["gpu_temp_c", "gpu_power_w", "gpu_util_pct", "vram_used_mib", "cpu_temp_c", "ram_used_mib", "load1"]
+    out = {"samples": len(rows), "seconds": round(rows[-1][0] - rows[0][0]), "interval_s": round((rows[-1][0] - rows[0][0]) / max(1, len(rows) - 1), 1)}
+    t0 = rows[0][0]
+    for i, n in enumerate(names, 1):
+        vals = [r[i] for r in rows if r[i] is not None]
+        if not vals:
+            continue
+        per_min: dict = {}
+        for r in rows:
+            if r[i] is not None:
+                per_min.setdefault(int((r[0] - t0) // 60), []).append(r[i])
+        out[n] = {"avg": round(sum(vals) / len(vals), 1), "max": round(max(vals), 1), "min": round(min(vals), 1),
+                  "per_min": [round(sum(v) / len(v), 1) for _, v in sorted(per_min.items())]}
+    return out
+
+
 def main(argv: list[str]) -> None:
     cmd, args = (argv[0], argv[1:]) if argv else ("hwinfo", [])
     if cmd == "hwinfo":
@@ -261,6 +393,17 @@ def main(argv: list[str]) -> None:
             out = {"error": str(e)}
     elif cmd == "probe-server":
         out = probe_server(json.loads(args[0]))
+    elif cmd == "server-settings":
+        out = server_settings(args[0])
+    elif cmd == "sha256":
+        out = sha256_file(args[0])
+    elif cmd == "telemetry-start":
+        out = telemetry_start(args[0], float(args[1]) if len(args) > 1 else 5.0)
+    elif cmd == "telemetry-stop":
+        out = telemetry_stop(args[0], int(args[1]))
+    elif cmd == "telemetry-loop":
+        telemetry_loop(args[0], float(args[1]))
+        return
     else:
         out = {"error": f"unknown command {cmd}"}
     json.dump(out, sys.stdout, default=str)
