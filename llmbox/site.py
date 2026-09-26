@@ -226,7 +226,7 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
 <svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>
 <div class="wrap">
 <header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>
- <nav class="tabs"><a class="on" href="index.html">MODELS</a><a href="{esc(compare_tab)}">COMPARE</a></nav></header>
+ <nav class="tabs"><a class="on" href="index.html">MODELS</a><a href="{esc(compare_tab)}">COMPARE</a><a href="method.html">METHOD</a></nav></header>
 <h1 class="q1">What should I run on my box?</h1>
 <section class="boxbar"><span class="sc">Your box</span>
  <select id="gpu" aria-label="GPU"><option value="">reference box ({esc(ref_box)})</option></select>
@@ -243,7 +243,7 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
  <section class="panel chart"><div class="lbl">Smarter vs faster</div><div id="scatter">{_scatter(local)}</div></section>
  <section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
 </div>
-<footer><span>Every number comes from a saved run. The score does not depend on the box; speed does.</span><span>generated {time.strftime('%b %d, %Y %H:%M')}</span></footer>
+<footer><span>Every number comes from a saved run. The score does not depend on the box; speed does. <a href="method.html">How scores work →</a></span><span>generated {time.strftime('%b %d, %Y %H:%M')}</span></footer>
 </div>
 <script>const DATA = {json.dumps(data)};
 {PLAN_JS}{_JS}</script></body></html>"""
@@ -413,12 +413,12 @@ function savedBox(DATA) {
     return { name: s.gpu, gpu: g[0].replace(/ \d+ GB$/, ""), vram: g[1], vrambw: g[2], ram: parseInt(s.ram) * 1024, rambw: parseFloat(s.bwn) || parseFloat(s.bw) }; } catch (e) { return null; }
 }
 """
-TAB_LINKS = {"MODELS": "index.html", "COMPARE": "#"}   # build() points COMPARE at the top pair
+TAB_LINKS = {"MODELS": "index.html", "COMPARE": "#", "METHOD": "method.html"}   # build() points COMPARE at the top pair
 
 
 def _page(title: str, tab: str, body: str, css: str = "", js: str = "", links: dict | None = None) -> str:
     links = dict(TAB_LINKS, **(links or {}))
-    nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "COMPARE"))
+    nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "COMPARE", "METHOD"))
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title><link rel="stylesheet" href="osc.css"><style>{_PAGES_CSS}{css}</style></head><body>'
             '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
@@ -660,7 +660,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict
  <div class="meta">{esc(m.get("hf_repo") or "")}{f' · {m["bytes"]/1e9:.1f} GB' if m.get("bytes") else ""} · suite v{esc(rec["suite"]["version"])}</div></div>
  <div class="acts"><a class="btn" href="hardware-{esc(rid)}.html">SPEED ON OTHER BOXES →</a>{f'<a class="btn" href="{esc(cmp_href)}">COMPARE WITH {esc(rival.upper())}</a>' if rival else ""}</div></section>
 <section class="panel"><div class="lbl">Score</div><div class="top">
- <div class="score"><div class="n glow">{f"{vs:.0f}" if vs is not None else "—"}<small>%</small></div><div class="of">of frontier</div><div class="rk">rank {rk} of {n_measured}<br><span class="q">1 run</span></div></div>
+ <div class="score"><div class="n glow">{f"{vs:.0f}" if vs is not None else "—"}<small>%</small></div><div class="of">of frontier</div><div class="rk">rank {rk} of {n_measured}<br><span class="q">1 run</span></div><a class="q" href="method.html" style="display:block;margin-top:14px">how scores work</a></div>
  <div class="lines">{line_html}</div>
  <div>{_star(s["blocks"], (ref or {}).get("summary", {}).get("blocks") or {}, lost)}</div></div>{sw}</section>
 <section class="panel pad"><div class="lbl">Speed as the context grows</div>{_depth_bars([(rid, bd)])}
@@ -786,6 +786,92 @@ def compare_page(a: str, b: str, ra: dict, rb: dict, ref: dict | None, fa: dict,
     return _page(f"llmbox · {a} vs {b}", "COMPARE", body, _CMP_CSS, links={"COMPARE": f"compare-{a}-vs-{b}.html"})
 
 
+_GRADING = {   # how each block is graded (from the suite modules' own descriptions)
+    "agentic": "A sandboxed copy of a real multi-module project with injected bugs or a missing feature; the model works with bash / read / edit tools, "
+               "and in {sessions} of {agentic} tasks the requirements change turn by turn, the way people talk to a coding assistant. "
+               "Graded by hidden tests copied in only at grading time: doing nothing scores 0.",
+    "code": "One function or module from a written spec, in Python or JavaScript. Hidden unit tests from a reference implementation decide.",
+    "tools": "Function calls against a simulated CRM with fresh customers and invoices. Graded on the final state of that world: "
+             "a wrong or extra email, discount or payment costs points.",
+    "longctx": "Questions on documents of about 30k to 200k tokens, with later corrections that override earlier facts. Exact answers.",
+    "writing": "Minutes, rewrites, proofreading, UI strings with plural rules. Every constraint (length, facts, glossary terms) is checked by a program; "
+               "the score is the share of constraints met.",
+    "reasoning": "Multi-step problems with one exact answer: tiered prices and taxes, tracing code by hand, scheduling.",
+}
+
+
+def method_page(ref: dict | None) -> str:
+    """How the numbers are made. The figures (weights, task counts, versions, resamples, depths) come from the code."""
+    import inspect
+    from . import bench, suite
+    per = {}
+    for b, _k, lvl in suite.QUICK_ITEMS:
+        per.setdefault(b, []).append(lvl)
+    from .suite import sessions
+    counts = {"sessions": sum(1 for b, k, _l in suite.QUICK_ITEMS if b == "agentic" and k in sessions.KINDS), "agentic": len(per.get("agentic", []))}
+    rows = "".join(f'<tr><td class="l"><span class="m2">{esc(TIPS[b][0].split(" ·")[0])}</span></td><td>{suite.WEIGHTS[b] * 100:.0f}%</td>'
+                   f'<td>{len(per.get(b, []))}</td><td class="l q">{esc(_GRADING[b].format(**counts))}</td></tr>' for b in BLOCKS)
+    n = len(suite.QUICK_ITEMS)
+    n6 = sum(1 for *_x, lvl in suite.QUICK_ITEMS if lvl >= 6)
+    nboot = inspect.signature(bench.capability_ci).parameters["n_boot"].default
+    ref_name = (ref or {}).get("recipe", {}).get("id") or "the frontier model"
+    ref_cap = (ref or {}).get("summary", {}).get("capability")
+    body = f'''
+<section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / how scores work</div><h1>How the numbers are made</h1>
+ <p class="q" style="margin-top:6px">Suite v{esc(suite.VERSION)} · content hash {esc(suite.content_hash())}</p></div></section>
+<article class="doc">
+<h2>The score</h2>
+<p>Every model gets the same {n} tasks. A program grades each one from 0 to 100; no model grades another. The blocks are
+weighted by how people use local models, and the weighted average is the <b>capability</b>.</p>
+<p>The <b>score</b> is that capability as a share of what a frontier model gets on the same tasks: {esc(ref_name)}{f" scored {ref_cap:.1f}, which is 100%" if ref_cap else ""}.
+It runs under the same conditions as a local model: the task's own system prompt, the same tools and the same graders.
+Only the model differs.</p>
+
+<h2>The tasks</h2>
+<div class="tw"><table><tr><th class="l">BLOCK</th><th>WEIGHT</th><th>TASKS</th><th class="l">WHAT AND HOW IT IS GRADED</th></tr>{rows}</table></div>
+<p>Each kind of task has difficulty levels. The quick suite uses hard ones (level 5), a few normal ones (level 3) so that weak models
+still register, and {n6} expert tasks (level 6) that local models rarely solve, so the frontier has room above them.
+Tasks are generated from a seed: a new seed gives fresh tasks of the same difficulty, so a model cannot have seen the answers.</p>
+
+<h2>How sure the numbers are</h2>
+<p>With about thirty tasks, one lucky or unlucky task moves the score by a few points. The range next to each score is a 95% interval:
+tasks are resampled within each block {nboot:,} times and the middle 95% of the results is shown.</p>
+<p>When two ranges overlap, the difference is not settled, and both models share a rank range such as <b>1–2</b>. More runs narrow the
+ranges. Verdicts: 85% of the frontier or more is excellent, 70% very good, 50% good.</p>
+
+<h2>Speed</h2>
+<p>Speed is measured with one conversation at a time, the way one person uses the model: a fresh prompt of real code at about 2k, 30k
+and 90k tokens, so nothing comes from the cache, with code as the answer, so speculative decoding sees realistic text.
+<b>Tok/s</b> is how fast the answer is written; <b>first word</b> is how long the model reads the whole context before it starts.</p>
+<p>Speed on other boxes is predicted: a token needs the active weights read once, from VRAM for what fits on the card and from system RAM for the rest,
+so the time per token follows from the model file and the two memory speeds. The prediction is then scaled by what the measured run got
+against the same prediction on its own box. When most of a model moves onto a bigger card, it is outside what was measured, and the page says
+<i>rough estimate</i>.</p>
+
+<h2>What a run records</h2>
+<p>Every run keeps the server's exact command line and sampling defaults, the llama.cpp build, the model file's sha256, and the GPU and CPU
+temperature, power and memory every five seconds. The settings are compared with the recipe: differences in speed settings keep the
+recipe's score; differences in sampling, template, KV cache or model file make it a different recipe that needs its own score.</p>
+
+<h2>Thinking</h2>
+<p>Replies are capped at 32k tokens and thinking at 24k, so there is always room left for the answer. A reply cut at that limit, or
+thinking that repeats itself (detected from the text, not from its length), is flagged on the run page. Flagged tasks still count as they were graded.</p>
+
+<h2>Versions</h2>
+<p>Scores compare only within one suite version. The content hash identifies the exact tasks and graders; a changed task means a new version,
+and older results stay on their own version.</p>
+</article>'''
+    return _page(f"llmbox · how scores work (suite v{suite.VERSION})", "METHOD", body, _METHOD_CSS)
+
+
+_METHOD_CSS = """
+.doc{max-width:860px;margin:10px 0 0;padding:6px 22px 10px}
+.doc h2{font:600 22px "IBM Plex Sans Condensed";margin:34px 0 10px}
+.doc p{font-size:14px;line-height:1.75;color:var(--soft);max-width:74ch;margin-top:10px}.doc p b{color:var(--ink);font-weight:500}
+.doc table{margin-top:12px}.doc td.q{font-size:12.5px;line-height:1.55;padding:12px 8px}.doc td{vertical-align:top}
+"""
+
+
 def build(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str = "quick") -> list[str]:
     """The whole site: home, a page per recipe, per run, hardware per recipe, compare per pair of measured recipes."""
     import itertools
@@ -814,6 +900,7 @@ def build(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str
             w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
     for a, b in itertools.combinations(order, 2):
         w(f"compare-{a}-vs-{b}.html", compare_page(a, b, local[a], local[b], ref, flags[a], flags[b]))
+    w("method.html", method_page(ref))
     return written
 
 
