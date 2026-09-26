@@ -59,6 +59,8 @@ class ModelShape:
     recurrent_state_bytes: int = 0    # per sequence, for hybrid SSM / linear-attention layers
     swa_layers: int = 0               # attention layers with a sliding window (their KV stops growing at swa_window)
     swa_window: int = 0
+    kv_full_dim: int = 0              # sum over growing-KV layers of kv_heads * (k_len + v_len), per-layer exact
+    kv_swa_dim: int = 0               # the same over the sliding-window layers (their own head count / key length)
     expert_cpu_eff: float = 1.0       # relative CPU dequant speed of the expert quant type (IQ* are slower)
     context_length: int = 0
     total_params: int = 0
@@ -75,11 +77,15 @@ class ModelShape:
 
     def kv_bytes_per_token(self, kv_type: str = "q8_0") -> float:
         """KV bytes per token of context, over the layers whose cache grows with the context (not the windowed ones)."""
+        if self.kv_full_dim and not self.mla_kv_dim:
+            return self.kv_full_dim * KV_BYTES.get(kv_type, 2.0)
         return (self.attn_layers - self.swa_layers) * self._kv_per_layer(kv_type)
 
     def kv_swa_bytes(self, kv_type: str = "q8_0", ctx: int | None = None) -> float:
         """Fixed KV of the sliding-window layers (up to the window, or ctx if smaller)."""
         w = min(self.swa_window, ctx) if ctx else self.swa_window
+        if self.kv_swa_dim and not self.mla_kv_dim:
+            return self.kv_swa_dim * w * KV_BYTES.get(kv_type, 2.0)
         return self.swa_layers * w * self._kv_per_layer(kv_type)
 
 
@@ -140,9 +146,30 @@ def analyze(headers: list[GGUFHeader]) -> ModelShape:
                 return False
             return any(n.startswith(("attn_k.", "attn_k_b", "attn_kv_a", "attn_qkv.", "attn_q.")) for n in names)
         s.attn_layers = sum(1 for i, names in layer_names.items() if i < n_layers and has_kv(names)) or n_layers
-    win, pat = int(h0.get("attention.sliding_window", 0) or 0), SWA_PATTERN.get(h0.arch)
-    if win and pat:
-        s.swa_window, s.swa_layers = win, s.attn_layers - s.attn_layers // pat
+    # per-layer KV: heads may differ per layer (0 = no attention there), windowed layers may use shorter keys (Gemma 4)
+    win = int(h0.get("attention.sliding_window", 0) or 0)
+    heads = kvh if isinstance(kvh, list) else [int(kvh or 0)] * n_layers
+    has_attn = [bool(heads[i]) if isinstance(kvh, list) else True for i in range(n_layers)]
+    if not isinstance(kvh, list):   # scalar head count: attention layers were found from the tensors above
+        att = [i for i, names in sorted(layer_names.items()) if i < n_layers]
+        has_attn = [False] * n_layers
+        for i in att[: s.attn_layers] if s.attn_layers < n_layers else range(n_layers):
+            has_attn[i] = True
+    pat_kv = h0.get("attention.sliding_window_pattern")
+    if win and isinstance(pat_kv, list):
+        swa = [bool(pat_kv[i]) if i < len(pat_kv) else False for i in range(n_layers)]
+    elif win and SWA_PATTERN.get(h0.arch):
+        p = SWA_PATTERN[h0.arch]
+        swa = [(i + 1) % p != 0 for i in range(n_layers)]
+    else:
+        swa = [False] * n_layers
+    ks = int(h0.get("attention.key_length_swa", 0) or k_len)
+    vs = int(h0.get("attention.value_length_swa", 0) or v_len)
+    if not mla_dim:
+        s.kv_full_dim = sum(int(heads[i] or 0) * (k_len + v_len) for i in range(n_layers) if has_attn[i] and not swa[i])
+        s.kv_swa_dim = sum(int(heads[i] or 0) * (ks + vs) for i in range(n_layers) if has_attn[i] and swa[i])
+    if win and any(swa[i] and has_attn[i] for i in range(n_layers)):
+        s.swa_window, s.swa_layers = win, sum(1 for i in range(n_layers) if swa[i] and has_attn[i])
     embed_params = sum(t.n_elements for t in tensors if t.name == "token_embd.weight")
     mtp_params = sum(t.n_elements for t in tensors if _in(t.name, mtp_ids))
     base = s.total_params - embed_params - mtp_params

@@ -43,8 +43,11 @@ def _bits(quant: str) -> int:
 
 
 def _rank(f: hf.GGUFFile) -> tuple:
-    """Preference among files of one repo: 4-bit first, then 3, 2, then 5, 6, 8, 1-bit, 16-bit; larger within a class."""
-    return ([4, 3, 2, 5, 6, 8, 1, 16].index(_bits(f.quant)) if _bits(f.quant) in (4, 3, 2, 5, 6, 8, 1, 16) else 9, -f.size)
+    """Preference among files of one repo: 4-bit first, then 3, 2, then 5, 6, 8, 1-bit, 16-bit; within a class K-quants
+    and imatrix I-quants before the legacy Q4_0 / Q4_1 / Q5_0 / Q5_1, then larger."""
+    q = f.quant.replace("UD-", "").upper()
+    legacy = bool(__import__("re").fullmatch(r"Q\d_[01]", q))
+    return ([4, 3, 2, 5, 6, 8, 1, 16].index(_bits(f.quant)) if _bits(f.quant) in (4, 3, 2, 5, 6, 8, 1, 16) else 9, legacy, -f.size)
 
 
 def _card_sampling(repo: str) -> list[str]:

@@ -360,7 +360,8 @@ def cmd_recipe(a) -> None:
         if not a.ids:
             raise SystemExit("recipe new <hf-repo>")
         repo = a.ids[0]
-        rid = a.rid or re.sub(r"[^a-z0-9]+", "-", repo.split("/")[-1].lower().replace("-gguf", "")).strip("-")
+        from .candidates import recipe_id
+        rid = a.rid or recipe_id(repo)
         prof = hosts.load(a.host)
         cpu = prof["hw"].get("cpu") or {}
         runtimes = sorted(prof["hw"].get("runtimes") or [], key=lambda x: int((re.search(r"build (\d+)", x.get("version", "")) or [0, 0])[1]))

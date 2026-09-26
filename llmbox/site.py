@@ -226,7 +226,7 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
 <svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>
 <div class="wrap">
 <header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>
- <nav class="tabs"><a class="on" href="index.html">MODELS</a><a href="{esc(compare_tab)}">COMPARE</a><a href="method.html">METHOD</a></nav></header>
+ <nav class="tabs"><a class="on" href="index.html">MODELS</a><a href="new.html">NEW</a><a href="{esc(compare_tab)}">COMPARE</a><a href="method.html">METHOD</a></nav></header>
 <h1 class="q1">What should I run on my box?</h1>
 <section class="boxbar"><span class="sc">Your box</span>
  <select id="gpu" aria-label="GPU"><option value="">reference box ({esc(ref_box)})</option></select>
@@ -397,8 +397,8 @@ try { const h = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
 # every page: records -> HTML. Flat folder, simple relative links: index, recipe-<id>, run-<id8>, hardware-<id>, compare-<a>-vs-<b>
 
 PLAN_JS = r"""
-function plan(sh, hw, ctx, depth) {
-  const mib = 1 / 1048576, kv = sh.kvB * ctx + sh.rec, gpuFixed = (sh.nonexp + kv) * mib + 2100 + 700, free = hw.vram - gpuFixed;
+function plan(sh, hw, ctx, depth, buf = 2100) {   // buf: compute buffer MiB for -ub 2048 / 1024 / 512 = 2100 / 1300 / 900
+  const mib = 1 / 1048576, kv = sh.kvB * ctx + sh.rec, gpuFixed = (sh.nonexp + kv) * mib + buf + 700, free = hw.vram - gpuFixed;
   let gf, ramUsed, fits, perCpu, perGpu;
   if (!sh.moe) { const need = gpuFixed + sh.embed * mib; fits = need <= hw.vram; gf = 1; ramUsed = sh.embed * mib; perGpu = sh.nonexp; perCpu = 0; }
   else { gf = Math.max(0, Math.min(1, free / (sh.exp * mib))); const cpuExp = sh.exp * (1 - gf); ramUsed = (cpuExp + sh.embed) * mib;
@@ -406,9 +406,10 @@ function plan(sh, hw, ctx, depth) {
   const tps = d => 1 / (perCpu / (hw.rambw * 1e9 * 0.8 * sh.cpuEff) + (perGpu + sh.kvB * d) / (hw.vrambw * 1e9 * 0.75) + sh.layers * 0.025 / 1000);
   return { fits, gf, ramUsed, vram: Math.min(hw.vram, gpuFixed + (sh.moe ? sh.exp * gf * mib : sh.embed * mib)), t2: tps(2000), td: tps(Math.min(depth, ctx)) };
 }
-function forBox(sh, hw) {
-  let ctx = sh.ctx, p = plan(sh, hw, ctx, sh.deepK * 1000);
-  while (!p.fits && ctx > 8192) { ctx = ctx / 2; p = plan(sh, hw, ctx, sh.deepK * 1000); }
+function forBox(sh, hw) {   // as llmbox fit: the recipe's context if it fits, else halve it; a smaller prompt batch before a smaller context
+  let p = null, ctx = sh.ctx;
+  for (let c = sh.ctx; c >= 8192 && !(p && p.fits); c = c / 2)
+    for (const buf of [2100, 1300, 900]) { p = plan(sh, hw, c, sh.deepK * 1000, buf); ctx = c; if (p.fits) break; }
   return Object.assign(p, { ctx, t2: p.t2 * sh.k2, td: p.td * sh.kd });
 }
 function savedBox(DATA) {
@@ -417,12 +418,12 @@ function savedBox(DATA) {
     return { name: s.gpu, gpu: g[0].replace(/ \d+ GB$/, ""), vram: g[1], vrambw: g[2], ram: parseInt(s.ram) * 1024, rambw: parseFloat(s.bwn) || parseFloat(s.bw) }; } catch (e) { return null; }
 }
 """
-TAB_LINKS = {"MODELS": "index.html", "COMPARE": "#", "METHOD": "method.html"}   # build() points COMPARE at the top pair
+TAB_LINKS = {"MODELS": "index.html", "NEW": "new.html", "COMPARE": "#", "METHOD": "method.html"}   # build() points COMPARE at the top pair
 
 
 def _page(title: str, tab: str, body: str, css: str = "", js: str = "", links: dict | None = None) -> str:
     links = dict(TAB_LINKS, **(links or {}))
-    nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "COMPARE", "METHOD"))
+    nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "NEW", "COMPARE", "METHOD"))
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title><link rel="stylesheet" href="osc.css"><style>{_PAGES_CSS}{css}</style></head><body>'
             '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
@@ -804,6 +805,82 @@ _GRADING = {   # how each block is graded (from the suite modules' own descripti
 }
 
 
+def new_page(rs: list[dict], data: dict, host: str) -> str | None:
+    """Models on Hugging Face nobody has measured here: speed predicted for the visitor's box, the expected score from
+    measured relatives (same architecture and size), and the four commands that measure one."""
+    from . import candidates as C, estimate as E, fit as F, recipe as rc
+    cs = C.load()
+    if not cs:
+        return None
+    measured = {}
+    in_campaign = set()
+    for rid in rc.ids(host):
+        try:
+            r = rc.load(host, rid)
+            in_campaign.add(r["model"].get("hf_repo"))
+        except (OSError, ValueError):
+            continue
+    for r in rs:
+        try:
+            measured[r["id"]] = (F.shape_for(rc.load(host, r["id"])), r.get("vs_ref"))
+        except (OSError, ValueError, SystemExit):
+            continue
+    rows = []
+    for c in cs:
+        if c["repo"] in in_campaign:
+            continue
+        sh = E.ModelShape(**c["shape"])
+        rel = C.relatives(sh, measured)
+        kv = "q8_0"
+        rows.append({"repo": c["repo"], "rid": C.recipe_id(c["repo"]), "quant": c["quant"], "gb": round(c["bytes"] / 1e9, 1),
+                     "dl": c["downloads"], "total": round(sh.total_params / 1e9, 1), "active": round(sh.active_params / 1e9, 1),
+                     "arch": sh.arch, "mtp": bool(sh.n_mtp_layers), "rel": rel,
+                     "sh": {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
+                            "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used,
+                            "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv), "cpuEff": sh.expert_cpu_eff,
+                            "kvB": sh.kv_bytes_per_token(kv), "ctx": sh.context_length or 32768, "k2": 1, "kd": 1, "deepK": 32}})
+    body = f"""
+<section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / not tested yet</div><h1>Not tested yet</h1>
+ <p class="q" style="margin-top:6px">Popular models on Hugging Face that have no run here. Speed is predicted for <b id="boxname">the reference box</b>
+ from each model's file (<a href="index.html">pick your box</a>); the expected score comes only from measured models with the same
+ architecture and size. Measure one and it moves into the ranking.</p></div></section>
+<section class="panel"><div class="lbl">{len(rows)} models · most downloaded and trending GGUF</div>
+ <div class="tw"><table class="cand"><tr><th class="l">MODEL</th><th>SIZE<br><span class="faint">total · active</span></th><th>EXPECTED SCORE</th>
+ <th>TOK/S ON YOUR BOX<br><span class="faint">predicted</span></th><th>FILE</th><th>DOWNLOADS<br><span class="faint">30 days</span></th><th></th></tr>
+ <tbody id="rows"></tbody></table></div></section>"""
+    js = PLAN_JS + "\nconst DATA = " + json.dumps(dict(ref=data["ref"], gpus=data["gpus"], ramKinds=data["ramKinds"], rows=rows)) + ";\n" + _NEW_JS
+    return _page("llmbox · not tested yet", "NEW", body, _NEW_CSS, js)
+
+
+_NEW_CSS = """
+.cand td{padding:10px 8px}.cand td.l .m{display:block}.cand .repo{font-size:11px;color:var(--faint)}
+.cand tr.nofit td{opacity:.45}.cand .rel{display:block;font-size:10.5px;color:var(--muted)}
+.cand .go{font-size:11px;padding:5px 10px;white-space:nowrap}
+.cmds{background:#0b0c09;border:1px solid var(--line);padding:12px 14px;margin:4px 0 8px;text-align:left;font-size:12.5px;line-height:1.8;color:var(--soft)}
+.cmds code{display:block;color:var(--amber)}.cmds code:before{content:"$ ";color:var(--faint)}
+"""
+_NEW_JS = r"""
+const $ = s => document.querySelector(s);
+const box = savedBox(DATA) || { name: "the reference box", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
+$("#boxname").textContent = box.name === "the reference box" ? `the reference box (${DATA.ref.gpu} · ${Math.round(DATA.ref.ram / 1024)} GB · ${DATA.ref.rambw} GB/s)` : `your box (${box.name} · ${Math.round(box.ram / 1024)} GB · ${box.rambw} GB/s)`;
+const fmtDl = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : n;
+const rows = DATA.rows.map(r => { const f = forBox(r.sh, box); return Object.assign({}, r, { f, fits: f.fits,
+  exp: r.rel.length ? [Math.min(...r.rel.map(x => x[1])), Math.max(...r.rel.map(x => x[1]))] : null }); });
+rows.sort((a, b) => (b.fits - a.fits) || ((b.exp ? b.exp[1] : -1) - (a.exp ? a.exp[1] : -1)) || (b.dl - a.dl));
+const tile = v => `<span class="tile pred ${v >= 50 ? "hi" : v >= 25 ? "mid" : "lo"}">${v > 200 ? "200+" : "~" + Math.round(v)}</span>`;   // above ~200 the formula ignores per-token overheads
+$("#rows").innerHTML = rows.map((r, i) => `<tr class="${r.fits ? "" : "nofit"}"><td class="l"><span class="m">${r.repo.split("/")[1].replace(/-GGUF$/i, "")}</span><a class="repo" href="https://huggingface.co/${r.repo}" rel="noopener">${r.repo}</a></td>` +
+  `<td>${r.total}B · ${r.active}B</td>` +
+  `<td>${r.exp ? `${Math.round(r.exp[0])}–${Math.round(r.exp[1])}%<span class="rel" title="${r.rel.map(x => x[0] + " " + Math.round(x[1]) + "%").join(", ")}">${r.rel.length} relative${r.rel.length > 1 ? "s" : ""} measured</span>` : `<span class="q">—</span><span class="rel">no measured relative</span>`}</td>` +
+  `<td>${r.fits ? tile(r.f.t2) + `<span class="rel">${r.f.td > 200 ? "200+" : "~" + Math.round(r.f.td)} at 32k · ${Math.round(r.f.ctx / 1024)}k ctx</span>` : `<span class="red">✗ too big</span>`}</td>` +
+  `<td><span class="q">${r.quant} · ${r.gb} GB</span></td><td>${fmtDl(r.dl)}</td>` +
+  `<td><button class="btn go" data-i="${i}">TEST IT</button></td></tr>` +
+  `<tr class="cmdrow" id="c${i}" hidden><td colspan="7"><div class="cmds">Draft the recipe, download and fit it, tune the speed, run the suite (~2 h):` +
+  `<code>llmbox recipe new ${r.repo} --write</code><code>llmbox install ${r.rid} --apply</code><code>llmbox tune ${r.rid}</code>` +
+  `<code>llmbox bench ${r.rid} --recipe ${r.rid} --speed-probe</code></div></td></tr>`).join("");
+document.querySelectorAll(".go").forEach(b => b.addEventListener("click", () => { const c = $("#c" + b.dataset.i); c.hidden = !c.hidden; }));
+"""
+
+
 def method_page(ref: dict | None) -> str:
     """How the numbers are made. The figures (weights, task counts, versions, resamples, depths) come from the code."""
     import inspect
@@ -905,6 +982,13 @@ def build(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str
     for a, b in itertools.combinations(order, 2):
         w(f"compare-{a}-vs-{b}.html", compare_page(a, b, local[a], local[b], ref, flags[a], flags[b]))
     w("method.html", method_page(ref))
+    try:
+        np_ = new_page(rs, data, host)
+    except Exception as e:   # the list needs Hugging Face; the rest of the site must not depend on it
+        np_ = None
+        print(f"new.html skipped: {e}")
+    if np_:
+        w("new.html", np_)
     return written
 
 
