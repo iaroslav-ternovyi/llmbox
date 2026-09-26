@@ -13,6 +13,9 @@ import tomllib
 
 from .hosts import HOME
 
+LLAMA_SWAP_CONFIG = "~/llama-swap/config.yaml"
+_ARGV_OF = os.path.join(os.path.dirname(__file__), "hostside", "argv_of.sh")
+
 DEFAULTS = {
     "runtime": {"server": "llama-server", "cpu_affinity": "", "threads": 0},
     "placement": {"ctx": 0, "kv_type": "q8_0", "fit": True, "fit_target_mib": 256, "flash_attn": True, "load_mode": "none",
@@ -24,7 +27,7 @@ DEFAULTS = {
     "antiloop": {"marker_ids": [], "marker_bias": 0.5, "reasoning_budget": -1,
                  "budget_message": "I have reasoned enough. I will now act on my best plan.",
                  "dry_think_only": False, "dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 24,
-                 "dry_penalty_last_n": 4096},
+                 "dry_penalty_last_n": 4096, "reasoning_loop": 0},
     "serve": {"wait_vram_below_mib": 600, "ttl": 3600, "aliases": []},
     "extra": {"args": []},
 }
@@ -65,10 +68,12 @@ def server_args(r: dict, port: str = "$PORT") -> list[str]:
     a = ["--port", port, "-m", r["model"]["path"]]
     if p["fit"]:
         a += ["--fit", "on", "--fit-target", str(p["fit_target_mib"])]
-    a += ["--flash-attn", "on" if p["flash_attn"] else "off",
-          "--cache-type-k", p["kv_type"], "--cache-type-v", p["kv_type"], "--load-mode", p["load_mode"],
-          "-c", str(p["ctx"]), "-b", str(p["batch"]), "-ub", str(p["ubatch"]),
-          "--parallel", str(p["slots"]), "--kv-unified" if p["kv_unified"] else "--no-kv-unified"]
+    a += ["--flash-attn", "on" if p["flash_attn"] else "off", "--cache-type-k", p["kv_type"], "--cache-type-v", p["kv_type"]]
+    if p["load_mode"]:   # "" = do not pass (builds without the flag, e.g. the PrismML fork)
+        a += ["--load-mode", p["load_mode"]]
+    a += ["-c", str(p["ctx"]), "-b", str(p["batch"]), "-ub", str(p["ubatch"]), "--parallel", str(p["slots"])]
+    if p["kv_unified"] != "auto":   # "auto" = leave it to the server default
+        a.append("--kv-unified" if p["kv_unified"] else "--no-kv-unified")
     if r["runtime"]["threads"]:
         a += ["--threads", str(r["runtime"]["threads"])]
     for k, flag in SAMPLING_FLAGS.items():
@@ -90,6 +95,8 @@ def server_args(r: dict, port: str = "$PORT") -> list[str]:
               "--dry-allowed-length", str(al["dry_allowed_length"]), "--dry-penalty-last-n", str(al["dry_penalty_last_n"])]
     if al["reasoning_budget"] >= 0:
         a += ["--reasoning-budget", str(al["reasoning_budget"]), "--reasoning-budget-message", al["budget_message"]]
+    if al["reasoning_loop"]:   # content-based loop detector (local llama.cpp patch 0002)
+        a += ["--reasoning-loop", str(al["reasoning_loop"])]
     a += [str(x) for x in r["extra"]["args"]]
     return a
 
@@ -133,3 +140,76 @@ def llama_swap_entry(r: dict, launcher_path: str) -> str:
         out += ["    aliases:"] + [f"      - {a}" for a in sv["aliases"]]
     out += [f"    cmd: {launcher_path} ${{PORT}}", f"    ttl: {sv['ttl']}"]
     return "\n".join(out) + "\n"
+
+
+# ---- drift check: does the host really run what the recipe says? ------------------------------------------------------
+
+def live_argv(h, entry: str, config: str = LLAMA_SWAP_CONFIG) -> list[str]:
+    """The argv a llama-swap entry really starts with (its launcher chain run with `exec` stubbed, nothing is started)."""
+    # the entry's cmd line, e.g. "start-tiel.sh ${PORT} --parallel 3 --kv-unified" (extra args are part of what runs)
+    prog = '$0==id{f=1;next} f&&/cmd:/{sub(/^ *cmd: */,""); gsub(/[$][{]PORT[}]/,"5825"); print; exit}'
+    cmd = (f"C=$(awk -v id={shlex.quote('  ' + entry + ':')} {shlex.quote(prog)} {config}); "
+           f'[ -n "$C" ] || {{ echo "no llama-swap entry {entry}" >&2; exit 3; }}; '
+           'env -i HOME="$HOME" PATH=/usr/bin:/bin bash -s $C')
+    r = h.run(cmd, input=open(_ARGV_OF).read(), timeout=60)
+    if r.returncode:
+        raise RuntimeError(f"{entry}: {r.stderr.strip()[-300:]}")
+    return r.stdout.rstrip("\n").split("\n")
+
+
+def _isnum(t: str) -> bool:
+    try:
+        float(t)
+        return True
+    except ValueError:
+        return False
+
+
+REPEATABLE = {"--logit-bias", "-ot", "--override-tensor", "--lora", "--dry-sequence-breaker"}
+_NEGATED = {"--no-kv-unified": "--kv-unified", "--no-jinja": "--jinja", "--no-mmap": "--mmap", "--no-cont-batching": "--cont-batching"}
+
+
+def _flags(args: list[str]) -> dict:
+    """{flag: [values of each occurrence]} with llama.cpp semantics: a repeated flag keeps its LAST value unless it is
+    repeatable (logit biases, tensor overrides); `--no-x` and `--x` are one switch whose last form wins."""
+    occ: list = []
+    for t in args:
+        if t.startswith("-") and not _isnum(t):
+            occ.append([t, ()])
+        elif occ:
+            occ[-1][1] = occ[-1][1] + (t,)
+    out: dict = {}
+    for f, v in occ:
+        if f in _NEGATED or f in _NEGATED.values():
+            key = _NEGATED.get(f, f)
+            out[key] = [("off",) if f in _NEGATED else ("on",)]
+        elif f in REPEATABLE:
+            out.setdefault(f, []).append(v)
+        else:
+            out[f] = [v]
+    return out
+
+
+def _same(a: str, b: str) -> bool:
+    if "$CRAM" in (a, b) and (_isnum(a) or _isnum(b)):
+        return True   # cache_ram = auto: the launcher computes it on the host
+    return a == b or (_isnum(a) and _isnum(b) and float(a) == float(b))
+
+
+def diff(r: dict, live: list[str]) -> list[str]:
+    """Differences between the recipe and the host's real command line (order of flags ignored)."""
+    rt = r["runtime"]
+    want_prefix = (["taskset", "-c", rt["cpu_affinity"]] if rt["cpu_affinity"] else []) + [rt["server"]]
+    n = len(want_prefix)
+    out = []
+    if live[:n] != want_prefix:
+        out.append(f"runtime: recipe {' '.join(want_prefix)} | host {' '.join(live[:n])}")
+    want, have = _flags(server_args(r, port="5825")), _flags(live[n:])
+    for f in sorted(set(want) | set(have)):
+        w, h = want.get(f, []), have.get(f, [])
+        if f == "--logit-bias":
+            w, h = sorted(w), sorted(h)
+        if len(w) != len(h) or any(len(x) != len(y) or not all(_same(a, b) for a, b in zip(x, y)) for x, y in zip(w, h)):
+            fmt = lambda v: " ".join(" ".join(x) for x in v) if v else "(absent)"
+            out.append(f"{f}: recipe {fmt(w)} | host {fmt(h)}")
+    return out

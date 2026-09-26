@@ -255,6 +255,41 @@ def cmd_report(a: argparse.Namespace) -> None:
         print(f"\nwrote {a.html}")
 
 
+def cmd_recipe(a) -> None:
+    from . import recipe as rc
+    if a.action == "list":
+        for rid in rc.ids(a.host):
+            r = rc.load(a.host, rid)
+            print(f"{rid:22s} {r.get('description', '')}")
+        return
+    ids = a.ids or (rc.ids(a.host) if a.action == "check" else [])
+    if not ids:
+        raise SystemExit("which recipe?")
+    if a.action == "show":
+        for rid in ids:
+            r = rc.load(a.host, rid)
+            print(json.dumps(r, indent=1, ensure_ascii=False))
+    elif a.action == "render":
+        for rid in ids:
+            r = rc.load(a.host, rid)
+            print(rc.launcher(r))
+            print(rc.llama_swap_entry(r, f"<launchers>/start-{rid}.sh"))
+    elif a.action == "check":   # recipe vs what the host's llama-swap entry really starts
+        h = hosts.host_of(hosts.load(a.host))
+        bad = 0
+        for rid in ids:
+            try:
+                d = rc.diff(rc.load(a.host, rid), rc.live_argv(h, rid))
+            except RuntimeError as e:
+                print(f"?? {rid}: {e}")
+                bad += 1
+                continue
+            print(f"{'OK' if not d else 'DIFF'} {rid}" + "".join(f"\n     {x}" for x in d))
+            bad += bool(d)
+        if bad:
+            raise SystemExit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="llmbox", description="Get the most quality x speed out of local LLMs on your hardware.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -345,6 +380,12 @@ def main(argv: list[str] | None = None) -> None:
     rg.add_argument("results", nargs="+", help="result json files (~/.llmbox/results/<host>/*.json)")
     rg.add_argument("--dry-run", action="store_true")
     rg.set_defaults(fn=cmd_regrade)
+
+    rc_ = sub.add_parser("recipe", help="recipes: list / show / render a launcher / check the host runs what the recipe says")
+    rc_.add_argument("action", choices=["list", "show", "render", "check"])
+    rc_.add_argument("ids", nargs="*")
+    rc_.add_argument("--host", default="box")
+    rc_.set_defaults(fn=cmd_recipe)
 
     rp = sub.add_parser("report", help="leaderboard of saved suite results (terminal + optional static HTML)")
     rp.add_argument("--host")
