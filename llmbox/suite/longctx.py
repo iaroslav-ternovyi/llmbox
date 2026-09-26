@@ -81,9 +81,12 @@ def _render(staff, mgr_info, incidents) -> str:
 
 
 def _item(kind: str, seed: int, level: int, build) -> Item:
-    r = rng(BLOCK, f"{kind}{level}", seed)
-    staff, mgr_info, incidents = _world(r, TOKENS[level], corrections=0 if level < 3 else 1 if level == 3 else 2)
+    # v0.8: ONE document per (level, seed), shared by every question kind - how documents are really used (several
+    # questions about the same file) and the server's prompt cache prefills it once instead of once per question.
+    wr = rng(BLOCK, f"doc{level}", seed)
+    staff, mgr_info, incidents = _world(wr, TOKENS[level], corrections=0 if level < 3 else 1 if level == 3 else 2)
     doc = _render(staff, mgr_info, incidents)
+    r = rng(BLOCK, f"{kind}{level}", seed)
     question, check, expected = build(r, staff, mgr_info, incidents, level)
     note = "\nLater updates in the log override earlier facts." if level >= 3 else ""
     return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind,

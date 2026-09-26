@@ -253,17 +253,19 @@ def _run_parallel(base_url: str, model: str, items: list, done: dict, api_key, n
 
 def speed_probe(base_url: str, model: str, depths: tuple = (2000, 32000, 96000), api_key: str | None = None) -> dict:
     """Single-stream speed at several context depths (unique prompts, so no cache hits): what one user feels.
-    Used when the capability run was parallel, and to fill speed-by-depth for older results."""
-    words = ("the quick brown fox jumps over lazy dogs while engineers measure throughput latency bandwidth memory "
-             "cache river mountain signal").split()
+    Content is real code (this package's own sources) and the answer is code, so speculative decoding (MTP) sees
+    realistic text - random words made MTP models look ~35% slower than on real tasks (Tiel 42.8 vs ~64 tok/s)."""
+    import pathlib
+    src = "\n\n".join(p.read_text() for p in sorted(pathlib.Path(__file__).resolve().parent.rglob("*.py")))
     res = {}
     client.run_chat(base_url, model, [{"role": "user", "content": "Say OK."}], max_tokens=8, api_key=api_key,
                     extra={"chat_template_kwargs": {"enable_thinking": False}})   # load / warm up
     for d in depths:
-        r = random.Random(d)
-        text = f"[probe {d} {time.time()}] " + " ".join(r.choice(words) for _ in range(int(d / 1.25)))
-        out = client.run_chat(base_url, model, [{"role": "user", "content": text + "\nNow write a short story about a lighthouse keeper."}],
-                              max_tokens=256, api_key=api_key, extra={"chat_template_kwargs": {"enable_thinking": False}})
+        body = (src * (1 + (d * 4) // max(1, len(src))))[: d * 3]   # ~3 chars per code token
+        text = f"# probe {d} {time.time()}\n" + body
+        out = client.run_chat(base_url, model, [{"role": "user", "content": text + "\n\nRewrite the function `speed` above with type hints and a "
+                                                 "docstring. Output only the code."}],
+                              max_tokens=384, api_key=api_key, extra={"chat_template_kwargs": {"enable_thinking": False}})
         t = (out.get("timings") or [{}])[-1]
         res[d] = {"ctx": t.get("ctx"), "prefill_tps": round(t.get("prompt_per_second") or 0, 1),
                   "decode_tps": round(t.get("predicted_per_second") or 0, 1)}
