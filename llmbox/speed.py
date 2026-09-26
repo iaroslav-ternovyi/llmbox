@@ -49,7 +49,7 @@ def measure(host_name: str, rid: str, overrides: list[str] | None = None, depths
         set_path(r, k, v)
     r = recipe._merge(recipe.DEFAULTS, r)
     if unload:
-        h.agent("unload")
+        hosts.free_up(h)
     args = recipe.server_args(r)
     i = args.index("--port")
     args = args[:i] + args[i + 2:]

@@ -44,7 +44,7 @@ def _remote_size(h, path: str) -> int:
         return -1
 
 
-def plan(rid: str, src: str, target: str, force: bool = False) -> tuple[dict, list[Step], object]:
+def plan(rid: str, src: str, target: str, force: bool = False, unload: bool = False) -> tuple[dict, list[Step], object]:
     """The fitted recipe and the steps with their current state on the host (read-only probes)."""
     from . import hf
     prof = hosts.load(target)
@@ -61,7 +61,7 @@ def plan(rid: str, src: str, target: str, force: bool = False) -> tuple[dict, li
     fitted = r if same else F.apply(r, f, models_dir=prof["hw"].get("models_dir_guess"))
     steps.append(Step("fit", "done", f"context {f.ctx // 1024}k, ~{f.tps:.0f} tok/s predicted ({f.calibration.source})"))
 
-    busy = h.agent("busy", timeout=60)
+    busy = hosts.free_up(h) if unload else h.agent("busy", timeout=60)   # --unload: an idle loaded model may go
     idle = not busy.get("busy")
 
     # 2-3: model parts
@@ -119,8 +119,8 @@ def plan(rid: str, src: str, target: str, force: bool = False) -> tuple[dict, li
     return fitted, steps, h
 
 
-def run(rid: str, src: str, target: str, dry_run: bool = True, force: bool = False, out=print) -> int:
-    fitted, steps, h = plan(rid, src, target, force)
+def run(rid: str, src: str, target: str, dry_run: bool = True, force: bool = False, out=print, unload: bool = False) -> int:
+    fitted, steps, h = plan(rid, src, target, force, unload=unload and not dry_run)
     for s in steps:
         out(f"{s.state.upper():8s} {s.name:9s} {s.detail}")
         if dry_run and s.cmd and s.state == "todo":

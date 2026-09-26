@@ -101,3 +101,16 @@ def spec(prof: dict, ram_headroom_mib: int = 4096) -> HostSpec:
     return HostSpec(vram_mib=gpus[0]["vram_mib"] if gpus else 0, ram_mib=prof["hw"]["ram_mib"],
                     ram_bw_gbs=float(bw), vram_bw_gbs=float(prof.get("vram_bw_gbs") or 500.0),
                     ram_headroom_mib=ram_headroom_mib)
+
+
+def free_up(h, wait_s: int = 240) -> dict:
+    """Unload llama-swap's idle model and wait until the host is really idle: no llama-server left and the 1-minute
+    load average back under the busy bar (it lags a benchmark by a minute or two). Returns the last busy() report."""
+    import time as _t
+    h.agent("unload", timeout=120)
+    t0 = _t.time()
+    while True:
+        b = h.agent("busy", timeout=60)
+        if not b.get("busy") or _t.time() - t0 > wait_s:
+            return b
+        _t.sleep(10)

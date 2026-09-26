@@ -113,7 +113,7 @@ def cmd_fit(a: argparse.Namespace) -> None:
 
 def cmd_install(a: argparse.Namespace) -> None:
     from . import install
-    raise SystemExit(install.run(a.recipe, a.src, a.host or a.src, dry_run=not a.apply, force=a.force))
+    raise SystemExit(install.run(a.recipe, a.src, a.host or a.src, dry_run=not a.apply, force=a.force, unload=a.unload))
 
 
 def cmd_tune(a: argparse.Namespace) -> None:
@@ -508,6 +508,7 @@ def main(argv: list[str] | None = None) -> None:
     ip.add_argument("--from", dest="src", default="box", help="host whose recipe to install (default box)")
     ip.add_argument("--apply", action="store_true", help="do it (default: show the plan and every command, write nothing)")
     ip.add_argument("--force", action="store_true", help="replace a different existing launcher (kept as .bak); act while the host is busy")
+    ip.add_argument("--unload", action="store_true", help="with --apply: unload llama-swap's idle model and wait for the host to go idle first")
     ip.set_defaults(fn=cmd_install)
     tp = sub.add_parser("tune", help="measure speed knobs (speculative decoding, VRAM margin, prompt batch) on the idle box; keep what wins")
     tp.add_argument("recipes", nargs="+")
