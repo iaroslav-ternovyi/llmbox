@@ -833,12 +833,15 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
     table = eci.load()
     ref_cap = next((r["capability"] / (r["vs_ref"] / 100) for r in rs if r.get("vs_ref")), None)
     by_base: dict = {}
-    for r in rs:   # anchors: measured recipes whose declared base chain reaches a model Epoch has scored
+    chains: dict = {}
+    for r in rs:
         try:
-            chain = C.base_chain(rc.load(host, r["id"])["model"].get("hf_repo") or "")
+            repo = rc.load(host, r["id"])["model"].get("hf_repo") or ""
         except (OSError, ValueError):
             continue
-        hit = next((eci.match(x, table) for x in chain if eci.match(x, table)), None)
+        chains[r["id"]] = C.base_chain(repo)
+        # an anchor must BE the scored model (a quantization of it): a fine-tune of a base is a different model
+        hit = eci.match(repo, table) if not eci.is_remix(repo) else None
         if hit:
             by_base.setdefault(hit[0], (hit[1]["eci"], []))[1].append((r["id"], r["capability"]))
     anchors = ([(f"{eci.FRONTIER_PROXY} (stands in for the reference)", table[eci.FRONTIER_PROXY]["eci"], ref_cap)]
@@ -850,9 +853,12 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
         if c["repo"] in in_campaign:
             continue
         sh = E.ModelShape(**c["shape"])
-        rel = C.relatives(sh, measured)
+        own = C.base_chain(c["repo"])
+        roots = set(own[:2]) | {re.sub(r"-gguf$", "", c["repo"], flags=re.I)}   # the repo and the model it packages
+        # measured fine-tunes of this model (declared on Hugging Face): context, not a prediction - they are other models
+        rel = [(rid, (r.get("vs_ref") or 0)) for r in rs for rid in [r["id"]] if rid in chains and roots & set(chains[rid][1:])]
         guess = None
-        hit = eci.match(c["repo"], table) if pred and not rel else None
+        hit = eci.match(c["repo"], table) if pred else None
         if hit:
             mid, lo, hi = pred(hit[1]["eci"], hit[1]["lo"], hit[1]["hi"])
             guess = {"mid": round(mid), "lo": round(lo), "hi": round(hi), "name": hit[0], "eci": hit[1]["eci"], "remix": eci.is_remix(c["repo"])}
@@ -878,9 +884,14 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
             "<a href='https://epoch.ai/benchmarks'>Epoch Capabilities Index</a> (one number fitted over many public benchmarks), put on our scale by a "
             "straight line through models that have both: " + "; ".join(f"{esc(n)}: ECI {e:.0f} = {c / ref_cap * 100:.0f}%" for n, e, c in anchors)
             + ". Two or three anchors make it rough, hence the wide range; every model measured here adds one. A remix (abliterated, merged, renamed) "
-            "gets its base model's range. ECI data: Epoch AI, 'Capabilities &amp; benchmarking', epoch.ai/benchmarks, CC BY 4.0.</p></section>") if pred else ""
+            "gets its base model's range. ECI data: Epoch AI, 'Capabilities &amp; benchmarking', epoch.ai/benchmarks, CC BY 4.0.</p></section>") if pred else (
+        "<section class='panel pad'><div class='lbl'>Where the expected score will come from</div><p class='q' style='max-width:900px;line-height:1.7'>"
+        "From the <a href='https://epoch.ai/benchmarks'>Epoch Capabilities Index</a>, put on our scale by models measured here that are themselves in the "
+        "index. A fine-tune does not count: it is a different model. The frontier reference is the only such model so far; the first base models are in "
+        "the queue, and the predictions appear when they finish. Fine-tunes of a model that were measured here are listed with it, as context. "
+        "ECI data: Epoch AI, 'Capabilities &amp; benchmarking', epoch.ai/benchmarks, CC BY 4.0.</p></section>")
     body += note
-    js = PLAN_JS + "\nconst DATA = " + json.dumps(dict(ref=data["ref"], gpus=data["gpus"], ramKinds=data["ramKinds"], rows=rows)) + ";\n" + _NEW_JS
+    js = PLAN_JS + "\nconst DATA = " + json.dumps(dict(ref=data["ref"], gpus=data["gpus"], ramKinds=data["ramKinds"], rows=rows, eciReady=bool(pred))) + ";\n" + _NEW_JS
     return _page("llmbox · not tested yet", "NEW", body, _NEW_CSS, js)
 
 
@@ -900,14 +911,13 @@ $("#boxname").textContent = box.name === "the reference box" ? `the reference bo
 const fmtDl = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : n;
 const cap = v => v > 200 ? "200+" : "~" + Math.round(v);   // above ~200 the formula ignores per-token overheads
 const rows = DATA.rows.map(r => { const f = forBox(r.sh, box);
-  const exp = r.rel.length ? { mid: r.rel.reduce((s, x) => s + x[1], 0) / r.rel.length, lo: Math.min(...r.rel.map(x => x[1])), hi: Math.max(...r.rel.map(x => x[1])), src: "rel" }
-            : r.guess ? { mid: r.guess.mid, lo: r.guess.lo, hi: r.guess.hi, src: "eci" } : null;
+  const exp = r.guess ? { mid: r.guess.mid, lo: r.guess.lo, hi: r.guess.hi, src: "eci" } : null;
   return Object.assign({}, r, { f, fits: f.fits, exp, speed: f.fits ? f.t2 : 0 }); });
 const tile = v => `<span class="tile pred ${v >= 50 ? "hi" : v >= 25 ? "mid" : "lo"}">${cap(v)}</span>`;
 function expCell(r) {
-  if (!r.exp) return `<span class="q">—</span><span class="rel">no measured relative, no public index</span>`;
-  if (r.exp.src === "rel") return `${Math.round(r.exp.lo)}–${Math.round(r.exp.hi)}%<span class="rel" title="${r.rel.map(x => x[0] + " " + Math.round(x[1]) + "%").join(", ")}">${r.rel.length} relative${r.rel.length > 1 ? "s" : ""} measured</span>`;
-  return `<span class="guess">~${r.exp.mid}%</span><span class="rel" title="Epoch Capabilities Index of ${r.guess.name}: ${r.guess.eci.toFixed(1)}">${r.exp.lo}–${r.exp.hi} · from ECI${r.guess.remix ? " of its base" : ""}</span>`;
+  const ft = r.rel.length ? `<span class="rel">fine-tunes measured: ${r.rel.map(x => x[0] + " " + Math.round(x[1]) + "%").join(", ")}</span>` : "";
+  if (!r.exp) return `<span class="q">—</span>` + (ft || `<span class="rel">${DATA.eciReady ? "not in the public index" : "prediction after the first base models are measured"}</span>`);
+  return `<span class="guess">~${r.exp.mid}%</span><span class="rel" title="Epoch Capabilities Index of ${r.guess.name}: ${r.guess.eci.toFixed(1)}">${r.exp.lo}–${r.exp.hi} · from ECI${r.guess.remix ? " of its base" : ""}</span>` + ft;
 }
 let sortKey = "default", sortDir = -1;
 const keys = { exp: r => r.exp ? r.exp.mid : -1, speed: r => r.speed, size: r => r.total, dl: r => r.dl,
