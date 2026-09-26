@@ -290,6 +290,35 @@ def cmd_recipe(a) -> None:
             raise SystemExit(1)
 
 
+def cmd_traces(a) -> None:
+    """Budget / loop audit of a run: per item the longest reply, whether the reasoning budget cut it, loop detection."""
+    import glob
+    import gzip
+    from . import loopdetect
+    from .bench import TRACES
+    run = a.run if os.path.isdir(a.run) else os.path.join(TRACES, a.run)
+    rows = {}
+    jsonl = os.path.join(os.path.expanduser("~/.llmbox/queue"), os.path.basename(run) + ".jsonl")
+    if os.path.exists(jsonl):
+        for line in open(jsonl):
+            r = json.loads(line)
+            rows[r["id"]] = r
+    print(f"{'item':30s} {'score':>5s} {'max reply':>9s} {'cut':>4s} {'loop':>5s}  note")
+    for f in sorted(glob.glob(os.path.join(run, "*.json.gz"))):
+        t = json.load(gzip.open(f, "rt"))
+        r = rows.get(t["id"], {})
+        mx = max([x or 0 for x in t.get("reply_tokens") or []] or [0])
+        cut = sum("I have reasoned enough" in th for th in t["thinking"])
+        scans = [loopdetect.scan(th) for th in t["thinking"]]
+        fired = [s for s in scans if s["fired_at"]]
+        peak = max([s["peak"] for s in scans] or [0])
+        note = "LOOP" if fired else ("near budget" if mx >= a.near else "")
+        if a.all or cut or fired or mx >= a.near:
+            print(f"{t['id']:30s} {r.get('score', float('nan')):5.2f} {mx:9d} {cut:4d} {peak:5.2f}  {note}")
+            if fired and a.excerpts:
+                print("      ..." + fired[0]["excerpt"][-300:].replace("\n", " / "))
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="llmbox", description="Get the most quality x speed out of local LLMs on your hardware.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -386,6 +415,13 @@ def main(argv: list[str] | None = None) -> None:
     rc_.add_argument("ids", nargs="*")
     rc_.add_argument("--host", default="box")
     rc_.set_defaults(fn=cmd_recipe)
+
+    tr = sub.add_parser("traces", help="budget / loop audit of a run's saved thinking (~/.llmbox/traces/<run>)")
+    tr.add_argument("run", help="run name (e.g. job-8) or a traces directory")
+    tr.add_argument("--near", type=int, default=20000, help="flag replies at least this long (tokens)")
+    tr.add_argument("--all", action="store_true", help="list every item")
+    tr.add_argument("--excerpts", action="store_true", help="print the text before each detected loop")
+    tr.set_defaults(fn=cmd_traces)
 
     rp = sub.add_parser("report", help="leaderboard of saved suite results (terminal + optional static HTML)")
     rp.add_argument("--host")
