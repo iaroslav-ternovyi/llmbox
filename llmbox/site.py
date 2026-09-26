@@ -288,6 +288,12 @@ _HOME_CSS = """
 .prog{width:120px;height:4px;background:var(--line);display:inline-block}.prog i{display:block;height:100%;background:var(--amber)}
 .below{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:22px}
 .chart{padding:18px 16px 10px}.scatter{width:100%;height:auto;display:block}
+.sc2 .ci{stroke-opacity:.35}#scatter.hov .pt{opacity:.25}#scatter.hov .pt.on{opacity:1}#scatter .pt.on .ci{stroke-opacity:1}
+.lgd2{list-style:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 18px;margin:8px 8px 0;font-size:13px}
+.lgd2 li{display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:3px 4px;cursor:default}
+.lgd2 li.on{background:rgba(255,176,0,.08)}.lgd2 b{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--amber);color:var(--bg);font-size:11px}
+.lgd2 .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lgd2 .lv{color:var(--amber);font-size:12px}
+@media (max-width:900px){.lgd2{grid-template-columns:1fr}}
 .legend{display:flex;gap:10px;align-items:flex-start;font-size:12px;color:var(--muted);margin:6px 8px 4px;line-height:1.5}.legend svg{flex:none;margin-top:2px}
 .feed ul{list-style:none;padding:14px 18px}.feed li{font-size:13px;padding:8px 0;border-bottom:1px solid var(--line2)}.feed li:last-child{border-bottom:0}
 .feed .fv{color:var(--soft);margin-left:6px}.feed .when{display:block;font-size:11px;color:var(--faint)}
@@ -306,29 +312,38 @@ function sameClass(hw) { const r = DATA.ref; return hw.gpu === r.gpu && Math.abs
 function tile(v, small, pred) { const c = v >= 85 ? "hi" : v >= 50 ? "mid" : "lo";
   return `<span class="tile ${c}${pred ? " pred" : ""}">${pred ? "~" : ""}${fmt(v)}<small>${small}</small></span>`; }
 function weighted(b, w) { let s = 0, n = 0; for (const k in w) { s += (b[k] || 0) * w[k]; n += w[k]; } return n ? s / n : 0; }
-function scatter(pts) {                     // up = smarter, right = faster; the bar is the score's 95% range
-  const W = 640, H = 310, L = 54, B = 266, T = 30, R = 610;
-  const ok = pts.filter(p => p.t2 && p.vs != null);
-  const lows = ok.map(p => p.ci[0] * p.vs / p.cap);
-  const ymin = Math.max(0, Math.floor((Math.min(60, ...lows) - 5) / 10) * 10), xmax = Math.ceil(Math.max(50, ...ok.map(p => p.t2)) * 1.6 / 10) * 10;   // room for labels on the right
-  const X = v => L + v / xmax * (R - L), Y = v => B - (v - ymin) / (100 - ymin) * (B - T);
+function scatter(pts) {   // up = smarter, right = faster. Numbered dots + a list: names never drift away from their dot
+  const W = 640, H = 300, L = 54, B = 262, T = 24, R = 618;
+  const ok = pts.filter(p => p.t2 && p.vs != null).sort((a, b) => b.vs - a.vs);
+  if (!ok.length) return "";
+  const rng = p => { const k = p.vs / p.cap; return [p.ci[0] * k, Math.min(100, p.ci[1] * k)]; };
+  const ymin = Math.max(0, Math.floor((Math.min(...ok.map(p => rng(p)[0])) - 3) / 10) * 10);
+  const xs = ok.map(p => p.t2), span = Math.max(10, Math.max(...xs) - Math.min(...xs));
+  const step = span > 150 ? 50 : span > 60 ? 20 : span > 25 ? 10 : 5;   // zoom the speed axis onto the models, not onto 0
+  const xmin = Math.max(0, Math.floor((Math.min(...xs) - span * 0.25) / step) * step), xmax = Math.ceil((Math.max(...xs) + span * 0.25) / step) * step;
+  const X = v => L + (v - xmin) / (xmax - xmin) * (R - L), Y = v => B - (v - ymin) / (100 - ymin) * (B - T);
   let g = "";
   for (let v = ymin; v <= 100; v += 10) g += `<line x1="${L}" y1="${Y(v)}" x2="${R}" y2="${Y(v)}" stroke="#1f201b"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v}%</text>`;
-  const step = xmax > 150 ? 50 : xmax > 60 ? 20 : 10;
-  for (let v = 0; v <= xmax; v += step) g += `<text x="${X(v)}" y="${B + 18}" text-anchor="middle">${v}</text>`;
+  for (let v = xmin; v <= xmax; v += step) g += `<line x1="${X(v)}" y1="${T}" x2="${X(v)}" y2="${B}" stroke="#18190f"/><text x="${X(v)}" y="${B + 18}" text-anchor="middle">${v}</text>`;
   g += `<line x1="${L}" y1="${Y(100)}" x2="${R}" y2="${Y(100)}" stroke="#8b877b" stroke-dasharray="5 4"/><text x="${R}" y="${Y(100) - 6}" text-anchor="end" fill="#8b877b">frontier model = 100%</text>`;
-  const used = [];
-  for (const p of ok.sort((a, b) => b.vs - a.vs)) {
-    const k = p.vs / p.cap, lo = p.ci[0] * k, hi = Math.min(100, p.ci[1] * k), x = X(p.t2), y = Y(p.vs);
-    let ly = y + 4; while (used.some(u => Math.abs(u - ly) < 16)) ly += 16; used.push(ly);
-    const right = x < R - 215;
-    g += `<g stroke="#FFB000" stroke-opacity=".45" stroke-width="1.5"><line x1="${x}" y1="${Y(hi)}" x2="${x}" y2="${Y(lo)}"/>` +   // error bar with end caps
+  ok.forEach((p, i) => {
+    const [lo, hi] = rng(p), x = X(p.t2), y = Y(p.vs);
+    g += `<g class="pt" data-id="${p.id}"><g class="ci" stroke="#FFB000" stroke-width="1.5"><line x1="${x}" y1="${Y(hi)}" x2="${x}" y2="${Y(lo)}"/>` +
          `<line x1="${x - 5}" y1="${Y(hi)}" x2="${x + 5}" y2="${Y(hi)}"/><line x1="${x - 5}" y1="${Y(lo)}" x2="${x + 5}" y2="${Y(lo)}"/></g>` +
-         `<circle cx="${x}" cy="${y}" r="6" fill="${p.pred ? "#0E0F0C" : "#FFB000"}" stroke="#FFB000" stroke-width="2" filter="url(#g)"/>` +
-         `<text x="${right ? x + 12 : x - 12}" y="${ly}" text-anchor="${right ? "start" : "end"}" fill="#E8E4D8" font-size="13" stroke="#121310" stroke-width="5" paint-order="stroke">${p.id} <tspan fill="#FFB000">${p.vs.toFixed(0)}% · ${Math.round(p.t2)} tok/s</tspan></text>`;
-  }
-  return `<svg viewBox="0 0 ${W} ${H}" class="scatter" font-family="IBM Plex Mono" font-size="11" fill="#6c695f" role="img" aria-label="score against speed">${g}` +
-         `<text x="${R}" y="${H - 4}" text-anchor="end" fill="#8b877b">faster on your box (tok/s) →</text><text x="${L}" y="12" fill="#8b877b">↑ smarter</text></svg>`;
+         `<circle cx="${x}" cy="${y}" r="10" fill="${p.pred ? "#0E0F0C" : "#FFB000"}" stroke="#FFB000" stroke-width="2"/>` +
+         `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="12" font-weight="600" fill="${p.pred ? "#FFB000" : "#0E0F0C"}">${i + 1}</text></g>`;
+  });
+  const legend = ok.map((p, i) => `<li class="pt" data-id="${p.id}"><b>${i + 1}</b><span class="nm">${p.id}</span><span class="lv">${p.vs.toFixed(0)}%</span><span class="lv">${p.pred ? "~" : ""}${Math.round(p.t2)} tok/s</span></li>`).join("");
+  return `<div class="sc2"><svg viewBox="0 0 ${W} ${H}" class="scatter" font-family="IBM Plex Mono" font-size="11" fill="#6c695f" role="img" aria-label="score against speed">${g}` +
+         `<text x="${R}" y="${H - 2}" text-anchor="end" fill="#8b877b">faster on your box (tok/s) →</text><text x="${L}" y="12" fill="#8b877b">↑ smarter</text></svg>` +
+         `<ol class="lgd2">${legend}</ol></div>`;
+}
+function hoverScatter() {   // point at a dot or a name: that model and its range light up, the rest step back
+  const box = document.querySelector("#scatter");
+  box.querySelectorAll(".pt").forEach(el => {
+    el.addEventListener("mouseenter", () => { box.classList.add("hov"); box.querySelectorAll(`.pt[data-id="${el.dataset.id}"]`).forEach(x => x.classList.add("on")); });
+    el.addEventListener("mouseleave", () => { box.classList.remove("hov"); box.querySelectorAll(".pt.on").forEach(x => x.classList.remove("on")); });
+  });
 }
 let hwNow = null, preset = 0, sortBy = "score";
 document.querySelectorAll(".rank th[data-sort]").forEach(th => th.addEventListener("click", () => { sortBy = th.dataset.sort;
@@ -363,6 +378,7 @@ function render() {
   if (fastest && $("#fastest")) { $("#fastest .pk").textContent = fastest.id; $("#fastest .pk").href = `recipe-${fastest.id}.html`;
     $("#fastest .pv").textContent = `${fastest.pred ? "~" : ""}${fmt(fastest.t2)} tok/s${fastest.pred ? " predicted" : ""}`; }
   $("#scatter").innerHTML = scatter(pts);
+  hoverScatter();
 }
 function readBox() {
   const g = DATA.gpus.find(x => x[0] === $("#gpu").value);
