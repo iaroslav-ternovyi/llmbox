@@ -216,3 +216,103 @@ def load(content_hash: str) -> Bank | None:
         return None
     d = json.load(open(p))
     return Bank(a=d["a"], b=d["b"], seconds=d["seconds"], block=d["block"], theta=d["theta"], weights=d["weights"])
+
+
+# ---- block offsets: one capability plus a shrunk per-block deviation ---------------------------------------------------
+#
+# A model can be much better at one kind of work than its overall level (Nex: agentic 100, writing 59). With one theta,
+# the few agentic tasks of a short run would be read through the other blocks. So each block b gets eta_b = theta + d_b,
+# d_b ~ N(0, tau^2): with no tasks in a block its estimate is theta (wide); every task there pulls it toward the data.
+# The next task is the one that shrinks the 95% interval of the weighted capability the most per expected second.
+
+TAU = 1.0   # the real deviations are large (Nex: agentic 100, writing 59)
+
+
+def _grid_post(bank: Bank, obs: list[tuple[str, float]], mu: float, sd: float) -> list[float]:
+    logw = []
+    for t in GRID:
+        lw = -0.5 * ((t - mu) / sd) ** 2
+        for f, x in obs:
+            p = bank.p(f, t)
+            lw += x * math.log(max(p, 1e-12)) + (1 - x) * math.log(max(1 - p, 1e-12))
+        logw.append(lw)
+    mx = max(logw)
+    w = [math.exp(v - mx) for v in logw]
+    s = sum(w)
+    return [v / s for v in w]
+
+
+def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple = PRIOR, tau: float = TAU, draws: int = 60) -> dict:
+    """Posterior of the weighted capability under theta + per-block offsets, by drawing theta from its posterior and,
+    for each draw, eta_b = theta + d_b from its block posterior (prior N(theta, tau^2), the block's own answers).
+    Blocks share theta, so their errors are correlated exactly as much as the data say. Returns per block the
+    expected score (mean, var, eta, eta_var) and the capability with its 95% interval."""
+    import random as _r
+    rnd = _r.Random(len(obs) * 7919 + 17)
+    th, sdth, wth = posterior(bank, obs, prior)
+    cdf, acc = [], 0.0
+    for v in wth:
+        acc += v
+        cdf.append(acc)
+    thetas = [GRID[min(len(GRID) - 1, next(i for i, c in enumerate(cdf) if c >= (k + 0.5) / draws))] for k in range(draws)]
+    coarse = [(-4.0 + 0.1 * i) for i in range(101)]
+    fams = {blk: [f for f in bank.a if bank.block[f] == blk] for blk in bank.weights}
+    mine = {blk: [(f, x) for f, x in obs if bank.block[f] == blk] for blk in bank.weights}
+    wsum = sum(w for blk, w in bank.weights.items() if fams[blk])
+    caps, per = [], {blk: [] for blk in bank.weights if fams[blk]}
+    etas = {blk: [] for blk in per}
+    for t in thetas:
+        c = 0.0
+        for blk in per:
+            lw = []
+            for e in coarse:
+                v = -0.5 * ((e - t) / tau) ** 2
+                for f, x in mine[blk]:
+                    p = bank.p(f, e)
+                    v += x * math.log(max(p, 1e-12)) + (1 - x) * math.log(max(1 - p, 1e-12))
+                lw.append(v)
+            mx = max(lw)
+            ww = [math.exp(v - mx) for v in lw]
+            u, acc = rnd.random() * sum(ww), 0.0
+            e = coarse[-1]
+            for ei, wi in zip(coarse, ww):
+                acc += wi
+                if acc >= u:
+                    e = ei
+                    break
+            sc = sum(bank.p(f, e) for f in fams[blk]) / len(fams[blk])
+            per[blk].append(sc)
+            etas[blk].append(e)
+            c += bank.weights[blk] * sc
+        caps.append(100 * c / wsum)
+    mean = lambda xs: sum(xs) / len(xs)
+    var = lambda xs: sum((x - mean(xs)) ** 2 for x in xs) / max(1, len(xs) - 1)
+    out = {blk: {"score": mean(v), "var": var(v), "eta": mean(etas[blk]), "eta_var": max(var(etas[blk]), 1e-4), "n": len(mine[blk])}
+           for blk, v in per.items()}
+    cs = sorted(caps)
+    return {"theta": th, "theta_sd": sdth, "blocks": out, "capability": mean(caps),
+            "lo": cs[max(0, int(0.025 * len(cs)))], "hi": cs[min(len(cs) - 1, int(0.975 * len(cs)))]}
+
+
+def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0, max_per_family: int = 3) -> str | None:
+    """The family whose answer would shrink the capability's variance the most per expected second."""
+    best, best_v = None, -1.0
+    wsum = sum(bank.weights.values())
+    for f in bank.a:
+        if used.get(f, 0) >= max_per_family:
+            continue
+        blk = bank.block[f]
+        b = est["blocks"].get(blk)
+        if not b:
+            continue
+        info = bank.info(f, b["eta"])
+        prec = 1 / max(b["eta_var"], 1e-6)
+        d_eta_var = 1 / prec - 1 / (prec + info)
+        fams = [g for g in bank.a if bank.block[g] == blk]
+        # slope of the block score in eta, at the current estimate
+        slope = sum(bank.a[g] * bank.p(g, b["eta"]) * (1 - bank.p(g, b["eta"])) for g in fams) / len(fams)
+        gain = (bank.weights[blk] / wsum) ** 2 * slope ** 2 * d_eta_var
+        v = gain / (bank.seconds[f] * slowness)
+        if v > best_v:
+            best, best_v = f, v
+    return best

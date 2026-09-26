@@ -325,14 +325,18 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
     out = open(jsonl_path, "a") if jsonl_path else None
     trace_dir = os.path.join(TRACES, os.path.splitext(os.path.basename(jsonl_path))[0]) if jsonl_path else None
     t0, slowness, n = time.time(), 1.0, 0
-    th, sd, w = irt.posterior(bank, obs, prior)
-    cap, lo, hi = irt.capability_interval(bank, w)
+    est = irt.block_estimate(bank, obs, prior)
+    cap, lo, hi = est["capability"], est["lo"], est["hi"]
     while True:
         spent = time.time() - t0
         if spent >= budget_min * 60 or (obs and (hi - lo) / 2 <= target):
             break
-        full = {f for f, k in per_fam.items() if k >= max_per_family}
-        fam = irt.next_family(bank, th, full, slowness, min_per_block, counts)
+        short = [b for b in bank.weights if counts.get(b, 0) < min_per_block]
+        if short:   # every block gets its minimum first, cheapest informative family of that block
+            full = {f for f in bank.a if bank.block[f] not in short or per_fam.get(f, 0) >= max_per_family}
+            fam = irt.next_family(bank, est["theta"], full, slowness)
+        else:
+            fam = irt.next_family_blocks(bank, est, per_fam, slowness, max_per_family)
         if fam is None:
             break
         blk, kind, lvl = fam.split(".")
@@ -350,14 +354,16 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
             obs.append((fam, max(0.0, min(1.0, float(row["score"])))))
         ratios = [r["seconds"] / bank.seconds[r["family"]] for r in rows if bank.seconds.get(r["family"])]
         slowness = statistics.median(ratios) if ratios else 1.0
-        th, sd, w = irt.posterior(bank, obs, prior)
-        cap, lo, hi = irt.capability_interval(bank, w)
+        est = irt.block_estimate(bank, obs, prior)
+        cap, lo, hi = est["capability"], est["lo"], est["hi"]
         progress(f"  [{n:3d}] {row['score']:.2f} {row['seconds']:6.1f}s  {fam:26s} -> {cap:5.1f} ({lo:.0f}-{hi:.0f})  "
                  f"{(time.time() - t0) / 60:5.1f} min")
     if out:
         out.close()
     s = summarize(rows, time.time() - t0) if rows else {}
     s.update({"capability": round(cap, 1), "capability_ci95": [round(lo, 1), round(hi, 1)],
-              "irt": {"theta": round(th, 3), "sd": round(sd, 3), "prior": list(prior), "items": len(rows), "families": per_fam}})
+              "blocks": {b: round(100 * v["score"], 1) for b, v in est["blocks"].items()},
+              "irt": {"theta": round(est["theta"], 3), "sd": round(est["theta_sd"], 3), "prior": list(prior), "items": len(rows),
+                      "families": per_fam, "block_n": {b: v["n"] for b, v in est["blocks"].items()}}})
     return {"suite": {"version": suite.VERSION, "tier": "adaptive", "seed0": seed0, "content_hash": suite.content_hash(),
                       "weights": suite.WEIGHTS, "budget_min": budget_min, "target": target}, "summary": s, "rows": rows}
