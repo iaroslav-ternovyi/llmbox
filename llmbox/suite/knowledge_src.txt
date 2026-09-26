@@ -1,0 +1,779 @@
+# Source questions of the knowledge block (llmbox/suite/knowledge.py). The answers are NOT written here: `python3 -m
+# llmbox.suite.knowledge build` runs every question on the real thing and writes knowledge_bank.json.
+#   python  CPython 3.12 (this Mac) and 3.14 (the box); kept only when both agree
+#   shell   bash 5.3 with GNU coreutils/grep/sed/findutils and gawk on the box, locale C.UTF-8, empty directory
+#   jq      jq 1.7.1 (asked as a shell question)
+# "fake" sections are things that do not exist (a stdlib function, an option, a jq builtin); the build checks that
+# they really fail. One question per line; in python, ⏎ is a line break. Levels: 1 everyday ... 5 obscure or new.
+
+## python 1
+"a,b,,c".split(",")
+" a  b ".split()
+"abc"[::-1]
+list(range(2, 10, 3))
+7 // 2
+-7 // 2
+10 / 4
+2 ** -1
+int("3.5")
+bool("False")
+"Hello".startswith("he")
+"x".join(["a", "b", "c"])
+sorted([3, 1, 2], reverse=True)
+0.1 + 0.2 == 0.3
+round(2.5)
+round(3.5)
+len({1, 1, 2})
+{"a": 1}.get("b", 0)
+{"a": 1}["b"]
+"abc".find("z")
+"abc".index("z")
+list(zip([1, 2, 3], "ab"))
+os.path.basename("/tmp/x/file.txt")
+json.dumps({"a": None})
+"3" + 4
+"hello"[10]
+hex(255)
+bin(5)
+int("101", 2)
+1 if [] else 2
+list(reversed(range(3)))
+dict(zip("ab", [1, 2]))
+"a" in {"a": 1}
+math.floor(-2.5)
+b"hi".decode()
+string.ascii_lowercase[:5]
+"abc" * 2
+divmod(17, 5)
+min("banana")
+"hello world".title()
+
+## python fake 1
+"abc".contains("b")
+"abc".reverse()
+[3, 1, 2].sorted()
+[1, 2].push(3)
+{"a": 1}.has_key("a")
+[1, 2, 3].length()
+"a b".words()
+"abc".substring(1, 2)
+"Hello".lowercase()
+json.parse("[1]")
+json.stringify([1])
+os.exists("/tmp")
+"abc".charAt(0)
+
+## python 2
+os.path.join("a", "/b")
+os.path.splitext("archive.tar.gz")
+os.path.dirname("/a/b/")
+os.path.normpath("a/./b/../c")
+max([], default=0)
+"abc".removeprefix("a")
+collections.Counter("hello").most_common(1)
+collections.defaultdict(int)["x"]
+dict.fromkeys("ab", 0)
+list(itertools.accumulate([1, 2, 3]))
+list(itertools.combinations("abc", 2))
+re.sub(r"\d+", "#", "a1b22c")
+re.findall(r"(\w)=(\d)", "a=1 b=2")
+re.split(r"[,;]", "a,b;c")
+json.dumps({"b": 1, "a": 2}, sort_keys=True)
+json.dumps((1, 2))
+pathlib.Path("/a/b/c.tar.gz").suffixes
+str(pathlib.Path("/a") / "b" / "c")
+shlex.split("a 'b c' d")
+urllib.parse.urlparse("https://a.com:8080/p?q=1").port
+urllib.parse.unquote("%41%20")
+functools.reduce(lambda a, b: a * b, [1, 2, 3, 4])
+statistics.median([1, 3, 2, 4])
+statistics.mean([1, 2])
+math.ceil(-2.5)
+int(-2.7)
+float("nan") == float("nan")
+math.gcd(12, 18)
+repr(0.1 + 0.2)
+[1, 2, 3][5:]
+"abcdef"[-3:-1]
+{**{"a": 1}, "a": 2}
+list(map(int, "123"))
+sorted(["b", "a", "C"])
+any([]), all([])
+True + True
+"{0}{1}{0}".format("a", "b")
+"{:,}".format(1234567)
+"1,2,3".rsplit(",", 1)
+"a\nb\r\nc".splitlines()
+"a\n".split("\n")
+"abcabc".replace("a", "", 1)
+[3, 1, 2].sort()
+bytes([72, 105])
+b"Hi".hex()
+"é".encode("ascii")
+math.pow(2, 3)
+math.log(8, 2)
+float("1e3")
+sum(x for x in range(4) if x % 2)
+{k: v for k, v in [("a", 1), ("a", 2)]}
+str(True) + str(None)
+"%x" % 255
+f"{7:b}"
+ipaddress.ip_address("192.168.1.300")
+datetime.timedelta(days=1).total_seconds()
+time.gmtime(0).tm_year
+oct(8)
+chr(65) + str(ord("a"))
+sorted({3: "a", 1: "b"})
+list({3: "a", 1: "b"}.items())
+{1, 2} - {2}
+[] or "x"
+str([1, "a"])
+x = [1, 2]⏎y = x[:]⏎y.append(3)⏎x
+"Hello".lower().count("l")
+"a" "b"
+
+## python fake 2
+sorted([3, 1, 2], descending=True)
+int("ff", hex=True)
+"abc".strip(chars="a")
+round(2.567, digits=2)
+max([1, 2], reverse=True)
+list.flatten([[1], [2]])
+os.path.extension("a.txt")
+os.path.filename("/a/b.txt")
+math.sign(-3)
+re.contains(r"a", "abc")
+re.match_all(r"a", "aa")
+time.now()
+dict.merge({"a": 1}, {"b": 2})
+str.isblank("  ")
+"a,b".split(",", maxsplits=1)
+
+## python 3
+os.path.splitext(".bashrc")
+"www.example.com".strip("w.moc")
+"a\tb".expandtabs(4)
+list(itertools.islice("abcdef", 2, 4))
+len(list(itertools.permutations(range(4), 2)))
+list(itertools.zip_longest("ab", "x", fillvalue="-"))
+list(itertools.takewhile(lambda x: x < 3, [1, 2, 3, 1]))
+list(itertools.repeat("x", 2))
+re.escape("a.b")
+re.search(r"^b", "a\nb", re.M) is not None
+json.dumps([1, 2], separators=(",", ":"))
+json.dumps({1: "a"})
+json.loads("'a'")
+str(datetime.timedelta(hours=25))
+datetime.datetime(2024, 1, 1, 12).strftime("%I %p")
+datetime.datetime.fromtimestamp(0, datetime.timezone.utc).isoformat()
+datetime.date.fromisoformat("2024-02-30")
+datetime.datetime.strptime("2024-13-01", "%Y-%m-%d")
+calendar.isleap(1900)
+pathlib.Path("/a/b/c.tar.gz").stem
+str(pathlib.PurePosixPath("a/b").with_suffix(".txt"))
+pathlib.PurePosixPath("/a/b").parent.name
+base64.b64encode(b"hi")
+urllib.parse.quote("a b/c")
+urllib.parse.urljoin("http://x.com/a/b", "c")
+urllib.parse.urljoin("http://x.com/a/b", "/c")
+urllib.parse.urlencode({"a": "x y", "b": 1})
+urllib.parse.urlsplit("http://u:p@h:1/p").username
+html.unescape("&amp;lt;")
+ipaddress.ip_network("10.0.0.0/30").num_addresses
+len(list(ipaddress.ip_network("10.0.0.0/30").hosts()))
+ipaddress.ip_address("10.0.0.1").is_private
+ipaddress.ip_address("::1").is_loopback
+functools.reduce(lambda a, b: a + b, [])
+functools.partial(int, base=2)("101")
+bisect.bisect_left([1, 2, 2, 3], 2)
+heapq.nsmallest(2, [5, 1, 4, 2])
+math.isclose(0.1 + 0.2, 0.3)
+round(-2.5)
+round(2.675, 2)
+math.lcm(4, 6)
+math.comb(5, 2)
+math.prod([2, 3, 4])
+sum([0.1] * 10)
+int("0x1f", 16)
+int("  42\n")
+len("é".encode())
+b"abc"[0]
+list(b"hi")
+bytes.fromhex("48 69")
+"é".encode("ascii", "ignore")
+str(b"hi")
+f"{'abc':^7}|"
+f"{0.5:.0%}"
+f"{12345.678:,.1f}"
+f"{255:#x}"
+"%.2e" % 12345
+"%-5s|" % "ab"
+"%c" % 65
+"%r" % "a"
+"%(a)s" % {"a": 1}
+"{a}".format_map({"a": 1})
+[1, 2, 3][::-2]
+"hello   world".title()
+textwrap.dedent("  a\n    b")
+textwrap.fill("a b c d", width=3)
+string.Template("$a-$b").substitute(a=1, b=2)
+"".split(",")
+"".split()
+"abc".partition("b")
+"a=b=c".partition("=")
+"abc".zfill(5)
+"abc".translate(str.maketrans("ab", "xy"))
+list(filter(None, [0, 1, "", "a", None]))
+isinstance(True, int)
+type(None).__name__
+(1, 2) < (1, 2, 0)
+[] is []
+{1, 2} ^ {2, 3}
+10 // 4.0
+2 ** 3 ** 2
+-2 ** 2
+1 < 2 < 3 > 2
+0 and 1 / 0
+None or 0
+[*range(3), *"ab"]
+{"a": 1} | {"a": 2, "b": 3}
+(x := 5) + x
+divmod(-7, 2)
+pow(2, 3, 5)
+format(5, "08b")
+issubclass(bool, int)
+(255).bit_length()
+int.from_bytes(b"\x01\x00", "little")
+(1024).to_bytes(2, "big")
+struct.pack(">H", 1)
+len(hashlib.sha1(b"x").hexdigest())
+hashlib.sha256().digest_size
+len(secrets.token_hex(4))
+next(csv.reader(['a,"b,c",d']))
+collections.Counter("banana")["z"]
+d = collections.deque([1, 2, 3])⏎d.rotate(1)⏎list(d)
+list(collections.deque([1, 2, 3], maxlen=2))
+decimal.Decimal("0.1") + decimal.Decimal("0.2")
+str(decimal.Decimal("1.30"))
+fractions.Fraction(1, 3) + fractions.Fraction(1, 6)
+logging.getLevelName(30)
+logging.WARNING
+sys.getrecursionlimit()
+os.path.isabs("~/x")
+os.path.relpath("/a/b/c", "/a/d")
+fnmatch.fnmatchcase("a.py", "*.p?")
+re.sub(r"(a)(b)", r"\2\1", "abab")
+x = [[0] * 2] * 2⏎x[0][0] = 1⏎x
+x = [1, 2, 3]⏎y = x⏎y += [4]⏎x
+a = [[1]]⏎b = copy.copy(a)⏎b[0].append(2)⏎a
+(lambda *a, **k: (a, k))(1, b=2)
+def f(*, a):⏎    return a⏎f(1)
+def f(x, acc=[]):⏎    acc.append(x)⏎    return acc⏎f(1)⏎f(2)
+match [1, 2, 3]:⏎    case [1, *rest]:⏎        r = rest⏎r
+p = argparse.ArgumentParser()⏎p.add_argument("--dry-run", action="store_true")⏎vars(p.parse_args([]))
+p = argparse.ArgumentParser()⏎p.add_argument("--x", nargs="+")⏎p.parse_args(["--x", "1", "2"]).x
+@dataclasses.dataclass⏎class P:⏎    x: int⏎    y: int = 0⏎P(1)
+"naïve".encode("ascii", "replace")
+
+## python fake 3
+datetime.timedelta(months=1)
+datetime.timedelta(years=1)
+json.dumps({"a": 1}, pretty=True)
+json.dumps({"a": 1}, sort=True)
+re.sub(r"a", "b", "aaa", limit=1)
+re.findall(r"a", "A", ignorecase=True)
+math.clamp(5, 0, 3)
+math.round(2.5)
+statistics.average([1, 2])
+os.path.stem("a/b.txt")
+pathlib.Path("a.txt").extension
+pathlib.Path("a/b.txt").basename
+collections.Counter("aab").least_common(1)
+random.choice_many([1, 2], 2)
+os.listfiles(".")
+shutil.copy_tree("a", "b")
+sorted([2, 1], stable=True)
+
+## python 4
+str(datetime.timedelta(seconds=-1))
+datetime.timedelta(days=1, hours=1).seconds
+datetime.date(2024, 1, 31).replace(month=2)
+str(datetime.datetime.fromisoformat("2024-01-01T10:00:00Z").tzinfo)
+str(zoneinfo.ZoneInfo("Europe/Madrid").utcoffset(datetime.datetime(2026, 7, 1)))
+calendar.monthrange(2024, 2)
+textwrap.shorten("The quick brown fox jumps", width=15)
+string.capwords("hello   world")
+"they're bill's".title()
+"a".center(4, "*")
+"-5".zfill(3)
+"Tab\there".expandtabs()
+"a-b_c".translate(str.maketrans("", "", "-_"))
+"ß".upper()
+"straße".casefold()
+len("👍🏽")
+"%s" % (1, 2)
+"%s" % [1, 2]
+"%05.1f" % 3.14159
+f"{42:08.3f}"
+f"{1e6:g}"
+f"{1234:_}"
+f"{2+2=}"
+"{!r}".format("a")
+"{:.3}".format(3.14159)
+"{:.3}".format("abcdef")
+"{x[0]}".format(x=[5])
+str(1e16)
+repr("a'b")
+os.path.commonprefix(["/usr/lib", "/usr/local"])
+os.path.commonpath(["/usr/lib", "/usr/local"])
+os.path.split("/a/b/")
+fnmatch.fnmatch("file.TXT", "*.txt")
+str(pathlib.PurePosixPath("a.txt").with_stem("b"))
+pathlib.PurePosixPath("a/b").is_relative_to("a")
+shlex.join(["a", "b c"])
+shlex.quote("it's")
+urllib.parse.quote_plus("a b/c")
+urllib.parse.parse_qs("a=1&a=2&b=")
+urllib.parse.urljoin("http://x.com/a/", "../c")
+urllib.parse.urlparse("example.com/path").netloc
+html.escape("<a href='x'>")
+email.utils.parseaddr("Bob <bob@x.com>")
+ipaddress.ip_network("10.0.0.1/24")
+str(ipaddress.ip_network("10.0.0.1/24", strict=False).network_address)
+str(ipaddress.ip_address("10.0.0.1") + 256)
+ipaddress.ip_address("10.0.0.1").is_global
+bisect.bisect([1, 2, 2, 3], 2)
+statistics.mode([1, 1, 2, 2])
+math.isqrt(17)
+math.dist((0, 0), (3, 4))
+math.fsum([0.1] * 10)
+int("0x1f", 0)
+int("1_000")
+round(1234.5678, -2)
+float("inf") - float("inf")
+0.0 == -0.0
+str(-0.0)
+complex(1, 2) * 1j
+(5).bit_count()
+len(set([1, 1.0, True]))
+{1: "a", True: "b"}
+d = {}⏎d[1] = "a"⏎d[1.0] = "b"⏎d
+frozenset() == set()
+sorted("bca", key=lambda c: 0)
+[k for k, _ in itertools.groupby("aabbaa")]
+list(itertools.pairwise("abc"))
+list(itertools.batched("abcde", 2))
+list(itertools.compress("abc", [1, 0, 1]))
+list(itertools.dropwhile(lambda x: x < 3, [1, 2, 3, 1]))
+list(itertools.starmap(pow, [(2, 3)]))
+list(itertools.filterfalse(str.isdigit, "a1b"))
+operator.itemgetter(1, 0)(["a", "b"])
+collections.namedtuple("P", "x y")(1, 2)._asdict()
+collections.ChainMap({"a": 1}, {"a": 2, "b": 3})["a"]
+collections.OrderedDict(a=1) == {"a": 1}
+enum.Enum("C", "RED GREEN").GREEN.value
+json.loads('{"a": 1, "a": 2}')
+re.findall(r"a(b)?", "a ab")
+re.fullmatch(r"\d+", "123\n") is None
+re.split(r"(,)", "a,b")
+round(decimal.Decimal("2.5"))
+decimal.Decimal(0.1) == decimal.Decimal("0.1")
+str(uuid.UUID(int=1))
+struct.calcsize("<iq")
+zlib.crc32(b"")
+base64.b64decode("aGk")
+string.Template("$a").safe_substitute()
+string.Template("${a}b").substitute(a="x")
+logging.getLogger().level
+tomllib.loads("a = 1")
+next(csv.reader(["a, b"]))
+x = 5⏎def f():⏎    x += 1⏎    return x⏎f()
+[lambda: i for i in range(3)][0]()
+def f(a, /, b):⏎    return a + b⏎f(a=1, b=2)
+def g():⏎    yield 1⏎    return 2⏎list(g())
+x = 1⏎with contextlib.suppress(KeyError):⏎    x = {}["k"]⏎x
+@dataclasses.dataclass(frozen=True)⏎class P:⏎    x: int⏎p = P(1)⏎p.x = 2⏎p.x
+bytearray(b"a") + b"b"
+"é" == "é"
+
+## python fake 4
+itertools.chunked("abcde", 2)
+itertools.flatten([[1], [2]])
+itertools.window("abc", 2)
+functools.compose(str, abs)(-3)
+functools.memoize(len)
+collections.SortedDict()
+collections.Counter("aab").top(1)
+statistics.percentile([1, 2, 3], 50)
+math.median([1, 2, 3])
+shlex.escape("a b")
+pathlib.Path("/a/b").parent_dir
+datetime.datetime(2024, 1, 1).add(days=1)
+datetime.date(2024, 1, 1).isoformat(sep="T")
+textwrap.truncate("abc def", width=3)
+string.Template("$a").render(a=1)
+urllib.parse.urlbuild({"scheme": "https"})
+ipaddress.ip_network("10.0.0.0/24").size
+
+## python 5
+int("9" * 5000)
+int("١٢")
+"½".isdigit()
+"½".isnumeric()
+"²".isdecimal()
+"abc".encode("utf-16")
+re.sub("a*", "-", "baac")
+re.match(r"\d+$", "123\n") is None
+json.loads("NaN")
+json.dumps(float("inf"))
+json.loads("1e400")
+heapq.heappop([3, 1, 2])
+statistics.quantiles([1, 2, 3, 4], n=4)
+math.cbrt(27)
+math.exp2(3)
+math.sumprod([1, 2], [3, 4])
+pow(3, -1, 7)
+math.fmod(-7, 2)
+float("1_000.5")
+str(1e15)
+format(0.1, ".20f")
+f"{'x' * 3=}"
+f"{'a'!r:>5}"
+"{0.real}".format(3)
+hashlib.sha256(b"").hexdigest()[:8]
+hashlib.md5(b"").hexdigest()[:8]
+len(secrets.token_urlsafe(16))
+struct.calcsize("iq")
+urllib.parse.urlparse("//example.com/path").netloc
+len(list(ipaddress.ip_network("10.0.0.0/31").hosts()))
+len(list(ipaddress.ip_network("10.0.0.1/32").hosts()))
+ipaddress.ip_address("100.64.0.1").is_private
+glob.escape("a[b]")
+subprocess.list2cmdline(["a b", "c"])
+logging.getLogger("a.b").parent.name
+tomllib.loads("a = 1\na = 2")
+list(graphlib.TopologicalSorter({"b": {"a"}}).static_order())
+unicodedata.normalize("NFC", "é") == "é"
+unicodedata.name("€")
+p = argparse.ArgumentParser()⏎p.add_argument("-n", type=int, default="5")⏎p.parse_args([]).n
+t = (1, [2])⏎t[1] += [3]
+def g():⏎    try:⏎        return 1⏎    finally:⏎        return 2⏎g()
+hash(-1) == hash(-2)
+contextlib.nullcontext(5).__enter__()
+callable(contextlib.chdir)
+typing.get_origin(list[int]) is list
+sys.float_info.dig
+sys.maxunicode
+datetime.date(2024, 12, 30).isocalendar().week
+str(datetime.timedelta(microseconds=1))
+b"hi".hex(":")
+math.nextafter(1.0, 2.0) - 1.0 == sys.float_info.epsilon
+
+## python fake 5
+tomllib.dumps({"a": 1})
+itertools.unique("aab")
+functools.pipe(abs, str)(-1)
+math.lerp(0, 10, 0.5)
+math.mean([1, 2])
+pathlib.Path("a.tar.gz").without_suffixes()
+collections.DefaultList()
+operator.compose(abs, str)
+statistics.iqr([1, 2, 3, 4])
+heapq.heappeek([1, 2])
+bisect.bisect_between([1, 2, 3], 1, 3)
+contextlib.timeout(5)
+secrets.token_base32(8)
+hashlib.sha256(b"").hexdigest(length=8)
+enum.Enum("C", "A B").A.ordinal
+zoneinfo.ZoneInfo("UTC").offset()
+json.loads("[1]", strict_mode=True)
+graphlib.TopologicalSorter().reverse_order()
+
+## shell 1
+echo "a b  c" | wc -w
+printf 'x\ny\n' | wc -l
+echo hello | tr a-z A-Z
+echo "a:b:c" | cut -d: -f2
+printf '3\n1\n2\n' | sort | head -1
+printf '10\n9\n' | sort -n | head -1
+echo $((7 / 2))
+dirname /tmp/dir/file.txt
+echo {1..5}
+x=5; echo "$x" '$x'
+echo "abc" | rev
+seq 3 | tac | head -1
+printf 'b\na\nb\n' | sort -u | wc -l
+echo "one two" | awk '{print $2}'
+echo "hello world" | sed 's/o/0/'
+echo "hello world" | sed 's/o/0/g'
+echo "abc" | grep -c b
+false; echo $?
+[ 10 -gt 9 ] && echo yes || echo no
+echo "3 4" | awk '{print $1 * $2}'
+printf 'b\na\n' | sort -r | head -1
+echo -n a; echo b
+[[ "file.txt" == *.txt ]] && echo yes || echo no
+s=hello; echo ${#s}
+seq 3 | xargs echo
+echo -n "hi" | wc -c
+
+## shell fake 1
+printf 'b\na\n' | sort --natural
+echo abc | tr --uppercase
+echo "a b" | wc --words-only
+seq 3 | total
+echo abc | upper
+echo abc | strrev
+echo abc | sed --global 's/a/b/'
+seq 3 | tail --reverse
+
+## shell 2
+printf '10\n9\n' | sort | head -1
+echo $((2 ** 10))
+basename /tmp/dir/file.txt .txt
+echo {a,b}{1,2}
+echo "a,b,c" | tr , '\n' | wc -l
+printf 'a\nb\na\n' | uniq | wc -l
+unset v; echo ${v:-def}
+f() { return 3; }; f; echo $?
+printf '%x\n' 255
+echo -e 'a\tb' | cut -f2
+printf '1\n2\n3\n' | awk '{s+=$1} END {print s}'
+awk 'BEGIN {print 7 / 2}'
+printf 'a\nb\nc\n' | sed -n '2p'
+printf 'a\nb\nc\n' | sed '1d' | head -1
+printf 'a\nb\n' | grep -v a
+printf 'foo\nFOO\n' | grep -ci foo
+echo "ab" | grep -E 'a|z' | wc -l
+echo "abcdef" | cut -c2-4
+echo "hello" | tr -d l
+echo "Hello" | tr '[:upper:]' '[:lower:]'
+seq 10 | sed -n '3,5p' | wc -l
+expr 7 / 2
+cat <<< "hi"
+case "abc" in a*) echo A;; *) echo B;; esac
+i=0; while ((i < 3)); do ((i++)); done; echo $i
+echo $(( 5 > 3 ))
+date -u -d @0 +%Y
+seq 5 | sort -rn | head -2 | tail -1
+echo "hi" | wc -c
+
+## shell fake 2
+echo abc | grep --json b
+printf 'b\na\na\n' | sort --ignore-duplicates
+echo abc | grep --pcre 'a'
+seq 3 | head --skip 1
+seq 3 | uniq --count-all
+echo abc | sed --replace 's/a/b/'
+
+## shell 3
+seq 3 | paste -sd+
+nonexistent_cmd_xyz 2>/dev/null; echo $?
+s=hello.tar.gz; echo ${s%.*}
+s=hello.tar.gz; echo ${s%%.*}
+s=/a/b/c; echo ${s##*/}
+s=abc; echo ${s^^}
+s=hello; echo ${s:1:3}
+s=hello; echo ${s/l/L}
+s=hello; echo ${s//l/L}
+a=(x y z); echo ${#a[@]}
+echo $((1 << 4))
+x=1; (x=2); echo $x
+x=1; { x=2; }; echo $x
+echo a | { read v; echo "[$v]"; }
+set -- a "b c" d; echo $#
+f() { echo $#; }; f "a b" c
+false | true; echo $?
+echo $(echo a; echo b)
+printf '%s-' a b c; echo
+echo 'a  b' | awk '{print $2}'
+echo 'a,b,,d' | awk -F, '{print NF}'
+printf 'a 1\nb 2\na 3\n' | awk '{s[$1]+=$2} END {print s["a"]}'
+echo "abc" | awk '{print length}'
+echo "abc" | awk '{print substr($0, 2)}'
+awk 'BEGIN {print toupper("ab")}'
+echo "abc" | sed 's/\(a\)\(b\)/\2\1/'
+echo "abc" | sed -E 's/(a)(b)/\2\1/'
+printf 'a\nb\nc\n' | sed -n '$p'
+echo "path/to/file" | sed 's|/|:|g'
+echo "a.b.c" | sed 's/./X/'
+echo "aXbXc" | grep -o X | wc -l
+echo "abc" | grep -q z; echo $?
+printf 'foo\nfoobar\n' | grep -cw foo
+echo "a.c abc" | grep -o 'a.c' | wc -l
+echo "a.c abc" | grep -oF 'a.c' | wc -l
+echo "x1y22" | grep -oE '[0-9]+' | tail -1
+printf 'a 2\nb 10\n' | sort -k2 -n | tail -1
+printf 'b,2\na,10\n' | sort -t, -k2n | head -1
+printf 'a\na\nb\n' | uniq -c | head -1
+printf 'a\nb\na\n' | sort | uniq -d
+echo "a b c" | cut -d' ' -f2-
+echo "aabbcc" | tr -s abc
+seq 1 3 10 | tail -1
+seq -s, 3
+seq 5 | tail -n +4 | head -1
+seq 10 | awk 'NR%3==0' | tr '\n' ' '; echo
+echo "a b" | xargs -n1 | wc -l
+echo 'x' | xargs -I{} echo {}{}
+date -u -d @86400 +%F
+expr 5 \* 3
+type -t cd
+type -t ls
+let "x = 3 + 4"; echo $x
+echo 'it'\''s'
+echo "a\tb"
+for i in 1 2 3; do :; done; echo $i
+echo $(( 3 > 2 && 2 > 3 ))
+printf 'B\na\n' | sort | head -1
+echo "aaa" | awk '{gsub(/a/, "b"); print}'
+echo "a b c" | xargs -n1 echo | tail -1
+echo | awk '{print NF}'
+
+## shell fake 3
+date --epoch
+seq --reverse 3
+echo abc | tr --squeeze-all a
+echo "a b" | xargs --parallel 2 echo
+echo x | tee --quiet /dev/null
+numfmt --to=human 2048
+
+## shell 4
+ls /nonexistent 2>/dev/null; echo $?
+v=""; echo "[${v-def}]"
+a=(x y z); echo ${a[-1]}
+a=(x y z); echo ${a[@]:1}
+echo $((-7 / 2)) $((-7 % 2))
+echo $(( 0x10 + 010 ))
+[[ "abc" =~ ^a(b) ]] && echo ${BASH_REMATCH[1]}
+[[ 10 > 9 ]] && echo yes || echo no
+v=0; echo 1 | while read l; do v=1; done; echo $v
+set -o pipefail; false | true; echo $?
+printf '%05.1f\n' 3.14159
+echo 'a  b' | cut -d' ' -f3
+awk 'BEGIN {print int(-3.7)}'
+awk 'BEGIN {print 1e3}'
+awk 'BEGIN {print 0.1 + 0.2}'
+echo "a-b-c" | sed 's/-/+/2'
+echo "aaa" | sed 's/a*/x/g'
+echo "Hello" | sed 's/hello/X/I'
+echo "abc" | sed 'y/abc/xyz/'
+echo "a+b" | grep -c 'a+b'
+echo "aab" | grep -o 'a\+'
+echo "key=val" | grep -oP '(?<=key=)\w+'
+printf '1.10\n1.9\n' | sort -V | tail -1
+printf '1K\n2M\n3\n' | sort -h | tail -1
+seq 5 | head -n -2 | tail -1
+echo "a b c" | xargs -n2 echo | head -1
+date -u -d '2024-02-28 +1 day' +%F
+numfmt --to=iec 2048
+numfmt --from=iec 1K
+expr length hello
+echo *.nonexistent
+type -t if
+declare -i n=5; n+=2; echo $n
+n=5; n+=2; echo $n
+echo $'a\x41'
+IFS=,; read -r x y <<< "1,2"; echo $y
+read -r a b <<< "1 2 3"; echo $b
+echo {01..03}
+echo {a..e..2}
+((0)); echo $?
+sh -c 'kill -9 $$'; echo $?
+timeout 1 sleep 5; echo $?
+echo "hello" | tr -c 'l\n' x
+printf 'a\nb' | wc -l
+printf 'x\n' | nl
+echo "hello world" | fold -w5 | head -1
+
+## shell fake 4
+echo "a,b" | awk --csv-header '{print $1}'
+echo abc | grep --only-count b
+printf 'b\na\n' | sort --by-length
+seq 5 | head --tail 2
+echo abc | sed --in-place-backup 's/a/b/'
+echo abc | cut --field 1 --delimiter-regex b
+
+## shell 5
+printf '%d\n' 010
+printf '%d\n' "'A"
+echo "hello" | sed 's/l*/X/g'
+printf 'a\nb\n' | sed 'N;s/\n/,/'
+awk 'BEGIN {x["a"]; print length(x)}'
+date -u -d '2024-01-31 +1 month' +%F
+echo ~nonexistentuser
+shopt -s nullglob; echo x *.nonexistent
+x=0; ((x++)); echo $?
+bash -c 'exit 256'; echo $?
+bash -c 'exit -1'; echo $?
+echo hi | sum
+seq 3 | sed -n '0~2p'
+seq 6 | sed -n '2~3p' | tr '\n' ' '; echo
+awk 'BEGIN {print substr("hello", 0, 2)}'
+awk 'BEGIN {print "10" < "9"}'
+echo "10 9" | awk '{print ($1 < $2)}'
+awk 'BEGIN {printf "%d\n", "3abc"}'
+echo "a b c" | awk '{NF=2; print}'
+printf 'a\0b' | tr '\0' '\n' | wc -l
+echo abc | cut --delim=b -f1
+printf 'a\tb\n' | expand -t4 | cat -A
+
+## jq 2
+echo '{"a":[1,2]}' | jq '.a | length'
+echo '[3,1,2]' | jq -c 'sort'
+echo '{"a":1,"b":2}' | jq -c 'keys'
+echo '"x"' | jq -r .
+echo '{"a":1}' | jq 'has("a")'
+echo '{"a":"x"}' | jq '.a'
+
+## jq 3
+echo '{"a":1}' | jq -r '.b'
+echo '[1,2,3]' | jq 'map(. * 2) | add'
+echo '[{"n":1},{"n":2}]' | jq '[.[] | select(.n > 1)] | length'
+echo '"abc"' | jq 'length'
+echo '[1,2]' | jq -c '.[1:]'
+echo '{"a":1,"b":2}' | jq -c 'to_entries[0]'
+echo '[1,2,2]' | jq -c 'unique'
+echo '"a,b"' | jq -c 'split(",")'
+echo '[1,2,3]' | jq -c '[.[] | select(. != 2)]'
+echo '[1,2]' | jq -c 'map(tostring)'
+echo '"12"' | jq 'tonumber + 1'
+echo '"abc"' | jq -r 'ascii_upcase'
+echo '{"a":1}' | jq -c 'del(.a)'
+echo '{"a":1}' | jq -c '. + {"b":2}'
+echo '{"a":[{"b":1},{"b":2}]}' | jq -c '[.a[].b]'
+
+## jq fake 3
+echo '[1,2]' | jq 'sum'
+echo '[1,1]' | jq -c 'distinct'
+echo '"a"' | jq 'capitalize'
+
+## jq 4
+echo '{"a":null}' | jq '.a // "d"'
+echo '1' | jq '. as $x | $x + 1'
+echo '[1,[2,[3]]]' | jq -c 'flatten'
+echo '{"a":"x"}' | jq -r '"v=\(.a)"'
+echo '{}' | jq '.a.b'
+echo '[{"k":"a","v":1}]' | jq -c 'from_entries'
+echo '{"a":1}' | jq -c 'with_entries(.value += 1)'
+echo '[3,1,2]' | jq -c 'sort_by(-.)'
+echo '[1,2,3]' | jq -c '[first, last]'
+echo '{"b":1,"a":2}' | jq -S -c .
+echo '[1,2,3]' | jq -c '[limit(2; .[])]'
+echo '[{"a":1},{"a":1},{"a":2}]' | jq -c 'group_by(.a) | map(length)'
+echo '[1,2,3]' | jq 'reduce .[] as $x (0; . + $x)'
+
+## jq fake 4
+echo '{"a":1}' | jq -c 'reverse_keys'
+echo '[1,2]' | jq 'length_of'
+echo '"abc"' | jq 'upper'
+echo '[1,2]' | jq 'sum_by(.)'
+
+## jq 5
+echo '{"a":false}' | jq '.a // "d"'
+echo '{"a":{"b":1}}' | jq -c '[paths]'
+echo 'null' | jq 'length'
+echo '" a "' | jq -c 'trim'
+echo '[1,2,3]' | jq 'index(2)'
+echo '"2024-01-02T03:04:05Z"' | jq 'fromdate'
+echo '1704164645' | jq -r 'todate'
+echo '[]' | jq 'add'

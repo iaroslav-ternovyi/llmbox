@@ -43,19 +43,20 @@ for level in range(1, 6):
         it = T.chmod_seq(seed, level)
         if "g=u" not in it.meta["steps"]:
             cases_.append(it)
-script = ["set -e", "D=$(mktemp -d)"]
+script = ["set -e", "D=$(mktemp -d)", "C=$(command -v gnuchmod || echo chmod)"]   # Ubuntu 25.10+: chmod is uutils, GNU is gnuchmod
 for i, it in enumerate(cases_):
     mk = f"mkdir $D/{i}" if it.meta["is_dir"] else f"touch $D/{i}"
-    script.append(f"{mk}; chmod {it.meta['start']} $D/{i}; " + "; ".join(f"chmod {shlex.quote(s)} $D/{i}" for s in it.meta["steps"])
+    script.append(f"{mk}; $C {it.meta['start']} $D/{i}; " + "; ".join(f"$C {shlex.quote(s)} $D/{i}" for s in it.meta["steps"])
                   + f"; echo {i} $(stat -c %a $D/{i})")
-script.append("rm -rf $D")
+script.append("rm -rf $D; echo chmod-binary $C")
 try:
     out = subprocess.run(["ssh", "-o", "ConnectTimeout=10", "user@gpu-box", "bash -s"], input="\n".join(script),
                          capture_output=True, text=True, timeout=120).stdout
     where = "GNU chmod on the Linux box"
 except Exception:
     out, where = "", "no host"
-real = {int(a): int(b, 8) for a, b in (l.split() for l in out.splitlines() if l.strip())}
+real = {int(a): int(b, 8) for a, b in (l.split() for l in out.splitlines() if l.strip() and not l.startswith("chmod-binary"))}
+where += "".join(f" ({l.split()[1]})" for l in out.splitlines() if l.startswith("chmod-binary"))
 for i, it in enumerate(cases_):
     if i in real:
         check(f"chmod {it.id} vs GNU", real[i] == int(it.meta["expected"], 8), f"{it.meta['steps']} start {it.meta['start']} dir={it.meta['is_dir']}: ours {it.meta['expected']} real {real[i]:04o}")

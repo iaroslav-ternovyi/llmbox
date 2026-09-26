@@ -21,7 +21,8 @@ from .hosts import HOME
 
 ASSETS = os.path.join(os.path.dirname(__file__), "site_assets")
 BLOCKS = ["agentic", "code", "tools", "longctx", "writing", "reasoning"]
-LABEL = {"agentic": "AGENTIC", "code": "CODE", "tools": "TOOLS", "longctx": "LONG DOCS", "writing": "WRITING", "reasoning": "REASONING"}
+LABEL = {"agentic": "AGENTIC", "code": "CODE", "tools": "TOOLS", "techhelp": "TECH HELP", "knowledge": "KNOWLEDGE", "longctx": "LONG DOCS",
+         "writing": "WRITING", "reasoning": "REASONING"}
 # hover text for each score: what it measures, its weight, example tasks (the suite's real task kinds)
 TIPS = {
     "agentic": ("Agentic coding · 25% of the total", "Multi-turn work in a real repository: read, edit, run tests, keep up when the request changes mid-session.",
