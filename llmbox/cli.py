@@ -147,6 +147,36 @@ def cmd_probe(a: argparse.Namespace) -> None:
     print(f"  saved {results.save(a.host, rec)}")
 
 
+def cmd_irt(a: argparse.Namespace) -> None:
+    """Calibrate the task families on every full run, report them, or replay adaptive runs on recorded answers."""
+    from . import irt, suite
+    ch = a.content_hash or suite.content_hash()
+    resp = irt.responses(ch)
+    models = sorted({r.model for r in resp})
+    if not resp:
+        raise SystemExit(f"no full runs of suite content {ch}; pass --content-hash")
+    if a.action == "calibrate":
+        bank = irt.calibrate(resp, suite.WEIGHTS)
+        print(f"calibrated {len(bank.a)} families on {len(models)} models ({len(resp)} answers) -> {irt.save(bank, ch, len(models))}")
+        for m, t in sorted(bank.theta.items(), key=lambda x: -x[1]):
+            print(f"  {m:22s} theta {t:5.2f}  capability {bank.capability(t):5.1f}")
+    elif a.action == "report":
+        bank = irt.load(ch) or irt.calibrate(resp, suite.WEIGHTS)
+        print(f"{'family':28s} {'a':>5s} {'b':>6s} {'sec':>6s} {'info/min at 0.5':>16s}")
+        for f in sorted(bank.a, key=lambda f: -bank.info(f, 0.5) / bank.seconds[f]):
+            print(f"{f:28s} {bank.a[f]:5.2f} {bank.b[f]:6.2f} {bank.seconds[f]:6.0f} {60 * bank.info(f, 0.5) / bank.seconds[f]:16.3f}")
+    elif a.action == "simulate":   # leave-one-model-out replay: calibrate without the model, test it adaptively on its answers
+        for m in [x for x in models if not x.startswith("claude")]:
+            bank = irt.calibrate([r for r in resp if r.model != m], suite.WEIGHTS)
+            mine = {r.family: r for r in resp if r.model == m}
+            _t, _s, w = irt.posterior(bank, [(f, r.score) for f, r in mine.items()])
+            full = irt.capability_interval(bank, w)
+            traj = irt.simulate(bank, {f: r.score for f, r in mine.items()}, {f: r.seconds for f, r in mine.items()}, budget_s=a.budget * 60)
+            last = traj[-1] if traj else {}
+            print(f"{m:22s} all {len(mine)} tasks: {full[0]:5.1f} ({full[1]:.0f}-{full[2]:.0f})   adaptive {last.get('minutes')} min, "
+                  f"{last.get('n')} tasks: {last.get('cap')} ({last.get('lo')}-{last.get('hi')})")
+
+
 def cmd_loops(a: argparse.Namespace) -> None:
     import os
     from . import loops
@@ -205,8 +235,17 @@ def cmd_bench(a: argparse.Namespace) -> None:
         st = (cap.get("start") or {})
         print(f"  settings captured: build {((st.get('props') or {}).get('build_info'))}, {len(st.get('argv') or [])} argv items, "
               f"telemetry {'on' if (cap.get('telemetry') or {}).get('pid') else 'off'}" + (f"  ({'; '.join(cap['errors'])})" if cap.get("errors") else ""), flush=True)
-    res = bench.run(a.endpoint, a.model, tier=a.tier, seed0=a.seed, blocks=a.block, jsonl_path=jl,
-                    progress=lambda m: print(m, flush=True), resume=a.resume, rerun=a.rerun, parallel=a.parallel)
+    if a.adaptive:
+        from . import irt, suite as _suite
+        bank = irt.load(_suite.content_hash()) or irt.load(a.bank or "")
+        if not bank:
+            raise SystemExit("no calibrated task bank for this suite: run `llmbox irt calibrate` (or pass --bank <content hash>)")
+        mu, sd = (float(x) for x in a.prior.split(",")) if a.prior else irt.PRIOR
+        res = bench.run_adaptive(a.endpoint, a.model, bank, budget_min=a.budget, target=a.target, prior=(mu, sd),
+                                 api_key=None, progress=lambda m: print(m, flush=True), jsonl_path=jl)
+    else:
+        res = bench.run(a.endpoint, a.model, tier=a.tier, seed0=a.seed, blocks=a.block, jsonl_path=jl,
+                        progress=lambda m: print(m, flush=True), resume=a.resume, rerun=a.rerun, parallel=a.parallel)
     info = None
     if cap is not None:
         from . import recipe as rc
@@ -521,6 +560,11 @@ def main(argv: list[str] | None = None) -> None:
     pp.add_argument("--recipe", help="recipe id (default: the model id)")
     pp.add_argument("--endpoint", default="http://192.0.2.10:8080")
     pp.set_defaults(fn=cmd_probe)
+    ir = sub.add_parser("irt", help="task-family calibration (IRT) for adaptive runs: calibrate / report / simulate")
+    ir.add_argument("action", choices=["calibrate", "report", "simulate"])
+    ir.add_argument("--content-hash", help="suite content hash (default: this suite)")
+    ir.add_argument("--budget", type=float, default=45, help="simulate: minutes")
+    ir.set_defaults(fn=cmd_irt)
     lp = sub.add_parser("loops", help="fast reasoning-loop test: replay contexts where models looped before")
     lp.add_argument("action", choices=["extract", "replay"])
     lp.add_argument("--transcripts", default="~/agent-bench-runs/claude-config/projects")
@@ -559,6 +603,11 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--parallel", type=int, default=1, help="concurrent items (the served entry needs that many slots, unified KV)")
     b.add_argument("--speed-model", help="single-slot model id for the 1-stream speed probe (default: --recipe or model)")
     b.add_argument("--speed-probe", action="store_true", help="also run the 1-stream speed-by-depth probe after the run")
+    b.add_argument("--adaptive", action="store_true", help="adaptive run (llmbox irt): stop at +-target points or the time budget")
+    b.add_argument("--budget", type=float, default=45, help="adaptive: minutes (default 45)")
+    b.add_argument("--target", type=float, default=5, help="adaptive: stop when the 95%% interval is within +-this many points (default 5)")
+    b.add_argument("--prior", help="adaptive: 'theta,sd' to start from (default 0,1.5); e.g. the base model's theta")
+    b.add_argument("--bank", help="adaptive: content hash of the calibrated bank to use (default: this suite's)")
     b.set_defaults(fn=cmd_bench)
 
     qp = sub.add_parser("queue", help="persistent benchmark job queue with GPU health gating and auto-resume")
