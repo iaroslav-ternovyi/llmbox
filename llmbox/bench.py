@@ -3,6 +3,7 @@ capability (0-100 ± 95% CI), speed (tok/s + typical agent step), and solved tas
 from __future__ import annotations
 
 import json
+import os
 import random
 import statistics
 import threading
@@ -179,6 +180,9 @@ def run(base_url: str, model: str, tier: str = "quick", seed0: int = 0, blocks: 
             elif getattr(it, "tool_impl", None) and hasattr(it.tool_impl, "__self__") and hasattr(it.tool_impl.__self__, "cleanup"):
                 it.tool_impl.__self__.cleanup()   # unused agentic workspace
             rows.append(row)
+            if out and os.path.abspath(resume) != os.path.abspath(jsonl_path or ""):   # carry reused rows into this run's own jsonl
+                out.write(json.dumps(row, ensure_ascii=False) + "\n")
+                out.flush()
             progress(f"  [{i:3d}/{len(items)}] {row['score']:4.2f}  (reused{', regraded from ' + str(row['regraded_from']) if 'regraded_from' in row else ''})  {it.id}")
             continue
         row = run_item(base_url, model, it, api_key)

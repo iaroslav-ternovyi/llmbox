@@ -15,7 +15,7 @@ from __future__ import annotations
 from . import agentic, code, longctx, reasoning, sessions, tools, writing
 from .common import Item
 
-VERSION = "0.8"
+VERSION = "0.9"
 # coding = long agentic tasks (25) + single-file functions (10); then agents/tools, documents, writing, reasoning
 WEIGHTS = {"agentic": 0.25, "code": 0.10, "tools": 0.20, "longctx": 0.15, "writing": 0.15, "reasoning": 0.15}
 MODULES = {"agentic": agentic, "code": code, "tools": tools, "longctx": longctx, "writing": writing, "reasoning": reasoning}
@@ -46,6 +46,9 @@ QUICK_ITEMS = [
     ("longctx", "lookup", 5), ("longctx", "multihop", 5), ("longctx", "latest", 5), ("longctx", "count", 5),
     ("writing", "constrained", 5), ("writing", "rewrite", 5), ("writing", "proofread", 5), ("writing", "minutes", 5), ("writing", "i18n", 5),
     ("reasoning", "arith", 5), ("reasoning", "code_trace", 5), ("reasoning", "arith", 3), ("reasoning", "schedule", 5),
+    # v0.9 expert layer (level 6, strict), calibrated on Opus 5.5 2026-09-26: outreach 2/3 (the only reliable frontier
+    # headroom - judgment on messy data), audit 3/3, cron 3/3, bulk_discount 3/3, dedupe 3/3 (hard for local models)
+    ("tools", "outreach", 6), ("tools", "bulk_discount", 6), ("tools", "dedupe", 6), ("longctx", "audit", 6), ("code", "cron", 6),
 ]
 
 
