@@ -31,7 +31,7 @@ def variants(r: dict, shape) -> list[tuple[str, list[str], bool]]:
     out = [("baseline", [], True)]
     sp, pl = r["speculative"], r["placement"]
     if sp["type"]:
-        out.append(("speculative off", ['speculative.type=""'], True))
+        out.append(("speculative off", ['speculative.type="none"'], True))
         for n in (1, 3):
             if n != sp["draft_max"]:
                 out.append((f"draft {n}", [f"speculative.draft_max={n}"], True))
@@ -132,3 +132,87 @@ def run(host: str, rid: str, out=print, measure=None) -> dict:
             out(f"daily profile ({' '.join(res['fast_profile']['overrides'])}): {daily['decode'] or 0:.0f} tok/s, step {daily['step_s']:.2f} s "
                 f"({res['fast_profile']['gain'] * 100:+.0f}%); documents over ~110k tokens no longer fit")
     return res
+
+
+# ---- apply: put the measured winners into the recipe and the llama-swap entry ---------------------------------------
+
+FLAG = {"speculative.type": "--spec-type", "speculative.draft_max": "--spec-draft-n-max", "placement.fit_target_mib": "--fit-target",
+        "placement.ubatch": "-ub", "placement.batch": "-b", "placement.ctx": "-c"}
+
+
+def flags_of(overrides: list[str]) -> list[str]:
+    out = []
+    for o in overrides:
+        k, v = o.split("=", 1)
+        out += [FLAG[k], json.loads(v) if v.startswith('"') else v]
+    return [str(x) for x in out]
+
+
+def new_cmd_line(line: str, add: list[str], drop: list[str]) -> str:
+    """`    cmd: <launcher> ${PORT} [extra]` with the flags of a previous tune removed and the new ones appended
+    (llama.cpp takes the last value of a repeated flag, so appended flags win over the launcher's)."""
+    head, _, rest = line.partition("cmd:")
+    toks = rest.split()
+    for i in range(0, len(drop) - 1, 2):   # drop flag/value pairs applied before
+        for j in range(len(toks) - 1):
+            if toks[j] == drop[i] and toks[j + 1] == drop[i + 1]:
+                del toks[j:j + 2]
+                break
+    return f"{head}cmd: {' '.join(toks + add)}"
+
+
+def apply(host: str, rid: str, out=print, overrides: list[str] | None = None) -> bool:
+    """Write the tuned overrides into the recipe file and the host's llama-swap entry, then verify with recipe check.
+    The host must be idle (a config change makes llama-swap reload). Backups: config.yaml.bak-<ts>, <id>.toml.bak-<ts>."""
+    import shlex
+    import tomllib
+    from . import hosts, speed
+    path = os.path.join(HOME, "tuned", host, f"{rid}.json")
+    res = json.load(open(path)) if os.path.exists(path) else {}
+    ov = overrides if overrides is not None else res.get("chosen") or []
+    if not ov:
+        out(f"{rid}: nothing to apply")
+        return True
+    prof = hosts.load(host)
+    h = hosts.host_of(prof)
+    if h.agent("busy", timeout=60).get("busy"):
+        out(f"{rid}: host busy - not touching the llama-swap config")
+        return False
+    add, drop = flags_of(ov), res.get("applied_flags") or []
+    cfg = (prof["hw"].get("llama_swap") or {}).get("config") or os.path.expanduser(rc.LLAMA_SWAP_CONFIG)
+    text = h.run(f"cat {shlex.quote(cfg)}", timeout=30).stdout
+    lines = text.split("\n")
+    try:
+        i = lines.index(f"  {rid}:")
+        j = next(k for k in range(i + 1, len(lines)) if lines[k].strip().startswith("cmd:"))
+    except (ValueError, StopIteration):
+        out(f"{rid}: no llama-swap entry")
+        return False
+    lines[j] = new_cmd_line(lines[j], add, drop)
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    new = "\n".join(lines)
+    r = h.run(f"cp {shlex.quote(cfg)} {shlex.quote(cfg)}.bak-{ts} && cat > {shlex.quote(cfg)}.tmp && mv {shlex.quote(cfg)}.tmp {shlex.quote(cfg)}",
+              input=new, timeout=30)
+    if r.returncode:
+        out(f"{rid}: config write failed: {r.stderr[-200:]}")
+        return False
+    # the recipe file itself (its own keys only; `extends` stays)
+    rp = os.path.join(rc.recipes_dir(host), f"{rid}.toml")
+    own = tomllib.load(open(rp, "rb"))
+    open(rp + f".bak-{ts}", "wb").write(open(rp, "rb").read())
+    for o in ov:
+        k, v = o.split("=", 1)
+        speed.set_path(own, k, v)
+    ext = own.pop("extends", None)
+    open(rp, "w").write((f'extends = "{ext}"\n' if ext else "") + F.to_toml(own))
+    d = rc.diff(rc.load(host, rid), rc.live_argv(h, rid))
+    if d:
+        h.run(f"cp {shlex.quote(cfg)}.bak-{ts} {shlex.quote(cfg)}", timeout=30)
+        open(rp, "wb").write(open(rp + f".bak-{ts}", "rb").read())
+        out(f"{rid}: check failed after applying, both restored:\n  " + "\n  ".join(d))
+        return False
+    if res:
+        res["applied_flags"], res["applied_at"] = add, ts
+        json.dump(res, open(path, "w"), indent=1)
+    out(f"{rid}: applied {' '.join(add)} (recipe + llama-swap entry, check OK; backups .bak-{ts})")
+    return True
