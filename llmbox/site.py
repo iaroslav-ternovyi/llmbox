@@ -370,11 +370,13 @@ function scatter(pts, key) {
   const ok = pts.filter(p => p[key] && p.vs != null);
   const front = ok.filter(p => !ok.some(q => q[key] >= p[key] && q.vs >= p.vs && (q[key] > p[key] || q.vs > p.vs))).sort((a, b) => a[key] - b[key]);
   if (front.length > 1) g += `<polyline points="${front.map(p => X(p[key]) + "," + Y(p.vs)).join(" ")}" fill="none" stroke="#FFB000" stroke-dasharray="3 3"/>`;
-  for (const p of ok) { const k = p.vs / p.cap, lo = p.ci[0] * k, hi = Math.min(100, p.ci[1] * k);
+  const used = [];
+  for (const p of ok.sort((a, b) => b.vs - a.vs)) { const k = p.vs / p.cap, lo = p.ci[0] * k, hi = Math.min(100, p.ci[1] * k);
+    let ly = Y(p.vs) + 4; while (used.some(u => Math.abs(u - ly) < 15)) ly += 15; used.push(ly);
     g += `<line x1="${X(p[key])}" y1="${Y(hi)}" x2="${X(p[key])}" y2="${Y(lo)}" stroke="#FFB000" stroke-opacity=".45" stroke-width="6"/>` +
          `<circle cx="${X(p[key])}" cy="${Y(p.vs)}" r="6" fill="${p.pred ? "none" : "#FFB000"}" stroke="#FFB000" stroke-width="2" filter="url(#g)"/>` +
-         (X(p[key]) > R - 230 ? `<text x="${X(p[key]) - 11}" y="${Y(p.vs) + 4}" text-anchor="end" fill="#E8E4D8" font-size="12">${p.id} · ${p.vs.toFixed(0)}%${p.pred ? " · predicted" : ""}</text>`
-                               : `<text x="${X(p[key]) + 11}" y="${Y(p.vs) + 4}" fill="#E8E4D8" font-size="12">${p.id} · ${p.vs.toFixed(0)}%${p.pred ? " · predicted" : ""}</text>`); }
+         (X(p[key]) > R - 230 ? `<text x="${X(p[key]) - 11}" y="${ly}" text-anchor="end" fill="#E8E4D8" font-size="12">${p.id} · ${p.vs.toFixed(0)}%${p.pred ? " · predicted" : ""}</text>`
+                               : `<text x="${X(p[key]) + 11}" y="${ly}" fill="#E8E4D8" font-size="12">${p.id} · ${p.vs.toFixed(0)}%${p.pred ? " · predicted" : ""}</text>`); }
   return `<svg viewBox="0 0 ${W} ${H + 16}" class="scatter" font-family="IBM Plex Mono" font-size="10" fill="#6c695f">${g}` +
          `<text x="${(L + R) / 2}" y="${H + 10}" text-anchor="middle" fill="#8b877b">decode tok/s on your box ${key === "t2" ? "at 2k" : "deep in the context"} →</text>` +
          `<text x="14" y="${T - 6}" fill="#8b877b">↑ % of frontier (bar = 95% CI)</text></svg>`;
@@ -756,7 +758,7 @@ def compare_page(a: str, b: str, ra: dict, rb: dict, ref: dict | None, fa: dict,
     rows = []
     wins = {a: 0, b: 0}
     def row(name, x, y, fmt, higher=True, tip=""):
-        w = None if x is None or y is None or abs(x - y) < 1e-9 else (a if (x > y) == higher else b)
+        w = None if x is None or y is None or fmt(x) == fmt(y) else (a if (x > y) == higher else b)
         if w:
             wins[w] += 1
         cell = lambda v, me: f'<td class="{"win" if w == me else ""}">{fmt(v) if v is not None else "—"}{" ◀" if w == me and me == a else ""}{" ▶" if w == me and me == b else ""}</td>'
