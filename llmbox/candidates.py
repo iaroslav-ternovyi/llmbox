@@ -139,3 +139,19 @@ def recipe_id(repo: str) -> str:
     """The id `llmbox recipe new` gives this repo."""
     import re
     return re.sub(r"[^a-z0-9]+", "-", repo.split("/")[-1].lower().replace("-gguf", "")).strip("-")
+
+
+def base_chain(repo: str, hops: int = 5) -> list[str]:
+    """repo, its declared base, that one's base... (Hugging Face cardData.base_model), cached."""
+    chain = [repo]
+    for _ in range(hops):
+        try:
+            m = _get(f"{API}/{chain[-1]}?expand[]=cardData", ttl=7 * TTL)
+        except Exception:
+            break
+        b = (m.get("cardData") or {}).get("base_model")
+        b = (b[0] if isinstance(b, list) and b else b) or None
+        if not b or b in chain:
+            break
+        chain.append(b)
+    return chain

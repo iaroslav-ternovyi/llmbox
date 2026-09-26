@@ -175,8 +175,8 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
         best(lambda r: r["blocks"].get("longctx"), "Best for long documents", lambda r: f'long docs {r["blocks"]["longctx"]:.0f}'),
     ])
 
-    head = ("<tr><th>#</th><th class='l'>MODEL</th><th>SCORE</th>" + "".join(f"<th>{_tip(b)}</th>" for b in BLOCKS)
-            + "<th>TOK/S<br><span class='faint'>chat · long ctx</span></th><th>FITS</th><th></th></tr>")
+    head = ("<tr><th>#</th><th class='l'>MODEL</th><th data-sort='score'>SCORE ↕</th>" + "".join(f"<th>{_tip(b)}</th>" for b in BLOCKS)
+            + "<th data-sort='speed'>TOK/S ↕<br><span class='faint'>chat · long ctx</span></th><th>FITS</th><th></th></tr>")
     body = []
     for i, r in enumerate(local, 1):
         tps, deep = r["speed"].get("decode_tps"), report._deep(r["speed"])
@@ -273,7 +273,7 @@ _HOME_CSS = """
 .seg button{background:none;border:1px solid transparent;color:var(--muted);font:12px "IBM Plex Mono";padding:5px 10px;cursor:pointer;white-space:nowrap}
 .seg button:hover{color:var(--ink)}.seg button.on{color:var(--amber);border-color:var(--amber-dim)}
 .cmp{display:flex;align-items:center;gap:12px}.cmp .btn[aria-disabled=true]{opacity:.4;pointer-events:none}
-.rank th{padding:10px 5px}.rank td{padding:10px 5px}
+.rank th{padding:10px 5px}.rank td{padding:10px 5px}.rank th[data-sort]{cursor:pointer;user-select:none}.rank th[data-sort]:hover,.rank th[data-sort].on{color:var(--amber)}
 .rank td.rk{color:var(--muted);width:44px;font-size:13px;white-space:nowrap}
 .rank td.mod{min-width:170px}.rank td.mod .m{display:block;white-space:nowrap}.rank .qt{display:block;font-size:11px;color:var(--faint)}
 .rank .tile{min-width:44px}.rank td.sco .tile{min-width:70px;font-size:20px}
@@ -330,7 +330,9 @@ function scatter(pts) {                     // up = smarter, right = faster; the
   return `<svg viewBox="0 0 ${W} ${H}" class="scatter" font-family="IBM Plex Mono" font-size="11" fill="#6c695f" role="img" aria-label="score against speed">${g}` +
          `<text x="${R}" y="${H - 4}" text-anchor="end" fill="#8b877b">faster on your box (tok/s) →</text><text x="${L}" y="12" fill="#8b877b">↑ smarter</text></svg>`;
 }
-let hwNow = null, preset = 0;
+let hwNow = null, preset = 0, sortBy = "score";
+document.querySelectorAll(".rank th[data-sort]").forEach(th => th.addEventListener("click", () => { sortBy = th.dataset.sort;
+  document.querySelectorAll(".rank th[data-sort]").forEach(t => t.classList.toggle("on", t === th)); render(); }));
 const measured = {};
 document.querySelectorAll("tr[data-rid]").forEach(r => measured[r.dataset.rid] = r.querySelector(".spd").innerHTML);
 function render() {
@@ -354,7 +356,9 @@ function render() {
     if (p.t2 && (!fastest || p.t2 > fastest.t2)) fastest = p;
   }
   const tb = document.querySelector(".rank tbody") || document.querySelector(".rank"), refRow = document.querySelector(".rank tr.ref");
-  pts.slice().sort((a, b) => b.vs - a.vs).forEach((p, i) => { const row = document.querySelector(`tr[data-rid="${p.id}"]`);
+  const by = sortBy === "speed" ? (a, b) => (b.t2 || 0) - (a.t2 || 0) : (a, b) => b.vs - a.vs;
+  const ranked = pts.slice().sort((a, b) => b.vs - a.vs).map(p => p.id);
+  pts.slice().sort(by).forEach((p) => { const i = ranked.indexOf(p.id); const row = document.querySelector(`tr[data-rid="${p.id}"]`);
     row.querySelector(".rk").textContent = preset ? i + 1 : (p.rank[0] === p.rank[1] ? p.rank[0] : `${p.rank[0]}–${p.rank[1]}`); tb.insertBefore(row, refRow); });
   if (fastest && $("#fastest")) { $("#fastest .pk").textContent = fastest.id; $("#fastest .pk").href = `recipe-${fastest.id}.html`;
     $("#fastest .pv").textContent = `${fastest.pred ? "~" : ""}${fmt(fastest.t2)} tok/s${fastest.pred ? " predicted" : ""}`; }
@@ -825,16 +829,37 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
             measured[r["id"]] = (F.shape_for(rc.load(host, r["id"])), r.get("vs_ref"))
         except (OSError, ValueError, SystemExit):
             continue
+    from . import eci
+    table = eci.load()
+    ref_cap = next((r["capability"] / (r["vs_ref"] / 100) for r in rs if r.get("vs_ref")), None)
+    by_base: dict = {}
+    for r in rs:   # anchors: measured recipes whose declared base chain reaches a model Epoch has scored
+        try:
+            chain = C.base_chain(rc.load(host, r["id"])["model"].get("hf_repo") or "")
+        except (OSError, ValueError):
+            continue
+        hit = next((eci.match(x, table) for x in chain if eci.match(x, table)), None)
+        if hit:
+            by_base.setdefault(hit[0], (hit[1]["eci"], []))[1].append((r["id"], r["capability"]))
+    anchors = ([(f"{eci.FRONTIER_PROXY} (stands in for the reference)", table[eci.FRONTIER_PROXY]["eci"], ref_cap)]
+               if ref_cap and eci.FRONTIER_PROXY in table else [])
+    anchors += [(f"{name} via {', '.join(i for i, _ in ms)}", e, sum(c for _, c in ms) / len(ms)) for name, (e, ms) in by_base.items()]
+    pred = eci.predictor(table, anchors, ref_cap) if ref_cap else None
     rows = []
     for c in cs:
         if c["repo"] in in_campaign:
             continue
         sh = E.ModelShape(**c["shape"])
         rel = C.relatives(sh, measured)
+        guess = None
+        hit = eci.match(c["repo"], table) if pred and not rel else None
+        if hit:
+            mid, lo, hi = pred(hit[1]["eci"], hit[1]["lo"], hit[1]["hi"])
+            guess = {"mid": round(mid), "lo": round(lo), "hi": round(hi), "name": hit[0], "eci": hit[1]["eci"], "remix": eci.is_remix(c["repo"])}
         kv = "q8_0"
         rows.append({"repo": c["repo"], "rid": C.recipe_id(c["repo"]), "quant": c["quant"], "gb": round(c["bytes"] / 1e9, 1),
                      "dl": c["downloads"], "total": round(sh.total_params / 1e9, 1), "active": round(sh.active_params / 1e9, 1),
-                     "arch": sh.arch, "mtp": bool(sh.n_mtp_layers), "rel": rel,
+                     "arch": sh.arch, "mtp": bool(sh.n_mtp_layers), "rel": rel, "guess": guess,
                      "sh": {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
                             "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used,
                             "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv), "cpuEff": sh.expert_cpu_eff,
@@ -844,10 +869,17 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
  <p class="q" style="margin-top:6px">Popular models on Hugging Face that have no run here. Speed is predicted for <b id="boxname">the reference box</b>
  from each model's file (<a href="index.html">pick your box</a>); the expected score comes only from measured models with the same
  architecture and size. Measure one and it moves into the ranking.</p></div></section>
-<section class="panel"><div class="lbl">{len(rows)} models · most downloaded and trending GGUF</div>
- <div class="tw"><table class="cand"><tr><th class="l">MODEL</th><th>SIZE<br><span class="faint">total · active</span></th><th>EXPECTED SCORE</th>
- <th>TOK/S ON YOUR BOX<br><span class="faint">predicted</span></th><th>FILE</th><th>DOWNLOADS<br><span class="faint">30 days</span></th><th></th></tr>
+<section class="panel"><div class="lbl">{len(rows)} models · most downloaded and trending GGUF · click a column to sort</div>
+ <div class="tw"><table class="cand"><tr><th class="l">MODEL</th><th data-sort="size">SIZE ↕<br><span class="faint">total · active</span></th><th data-sort="exp">EXPECTED SCORE ↕</th>
+ <th data-sort="speed">TOK/S ON YOUR BOX ↕<br><span class="faint">predicted</span></th><th>FILE</th><th data-sort="dl">DOWNLOADS ↕<br><span class="faint">30 days</span></th><th></th></tr>
  <tbody id="rows"></tbody></table></div></section>"""
+    note = ("<section class='panel pad'><div class='lbl'>Where the expected score comes from</div><p class='q' style='max-width:900px;line-height:1.7'>"
+            "Measured relatives first: models with the same architecture and size measured here. Otherwise the model's "
+            "<a href='https://epoch.ai/benchmarks'>Epoch Capabilities Index</a> (one number fitted over many public benchmarks), put on our scale by a "
+            "straight line through models that have both: " + "; ".join(f"{esc(n)}: ECI {e:.0f} = {c / ref_cap * 100:.0f}%" for n, e, c in anchors)
+            + ". Two or three anchors make it rough, hence the wide range; every model measured here adds one. A remix (abliterated, merged, renamed) "
+            "gets its base model's range. ECI data: Epoch AI, 'Capabilities &amp; benchmarking', epoch.ai/benchmarks, CC BY 4.0.</p></section>") if pred else ""
+    body += note
     js = PLAN_JS + "\nconst DATA = " + json.dumps(dict(ref=data["ref"], gpus=data["gpus"], ramKinds=data["ramKinds"], rows=rows)) + ";\n" + _NEW_JS
     return _page("llmbox · not tested yet", "NEW", body, _NEW_CSS, js)
 
@@ -856,6 +888,8 @@ _NEW_CSS = """
 .cand td{padding:10px 8px}.cand td.l .m{display:block}.cand .repo{font-size:11px;color:var(--faint)}
 .cand tr.nofit td{opacity:.45}.cand .rel{display:block;font-size:10.5px;color:var(--muted)}
 .cand .go{font-size:11px;padding:5px 10px;white-space:nowrap}
+th[data-sort]{cursor:pointer;user-select:none}th[data-sort]:hover,th[data-sort].on{color:var(--amber)}
+.cand .guess{color:var(--soft)}
 .cmds{background:#0b0c09;border:1px solid var(--line);padding:12px 14px;margin:4px 0 8px;text-align:left;font-size:12.5px;line-height:1.8;color:var(--soft)}
 .cmds code{display:block;color:var(--amber)}.cmds code:before{content:"$ ";color:var(--faint)}
 """
@@ -864,20 +898,37 @@ const $ = s => document.querySelector(s);
 const box = savedBox(DATA) || { name: "the reference box", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
 $("#boxname").textContent = box.name === "the reference box" ? `the reference box (${DATA.ref.gpu} · ${Math.round(DATA.ref.ram / 1024)} GB · ${DATA.ref.rambw} GB/s)` : `your box (${box.name} · ${Math.round(box.ram / 1024)} GB · ${box.rambw} GB/s)`;
 const fmtDl = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : n;
-const rows = DATA.rows.map(r => { const f = forBox(r.sh, box); return Object.assign({}, r, { f, fits: f.fits,
-  exp: r.rel.length ? [Math.min(...r.rel.map(x => x[1])), Math.max(...r.rel.map(x => x[1]))] : null }); });
-rows.sort((a, b) => (b.fits - a.fits) || ((b.exp ? b.exp[1] : -1) - (a.exp ? a.exp[1] : -1)) || (b.dl - a.dl));
-const tile = v => `<span class="tile pred ${v >= 50 ? "hi" : v >= 25 ? "mid" : "lo"}">${v > 200 ? "200+" : "~" + Math.round(v)}</span>`;   // above ~200 the formula ignores per-token overheads
-$("#rows").innerHTML = rows.map((r, i) => `<tr class="${r.fits ? "" : "nofit"}"><td class="l"><span class="m">${r.repo.split("/")[1].replace(/-GGUF$/i, "")}</span><a class="repo" href="https://huggingface.co/${r.repo}" rel="noopener">${r.repo}</a></td>` +
-  `<td>${r.total}B · ${r.active}B</td>` +
-  `<td>${r.exp ? `${Math.round(r.exp[0])}–${Math.round(r.exp[1])}%<span class="rel" title="${r.rel.map(x => x[0] + " " + Math.round(x[1]) + "%").join(", ")}">${r.rel.length} relative${r.rel.length > 1 ? "s" : ""} measured</span>` : `<span class="q">—</span><span class="rel">no measured relative</span>`}</td>` +
-  `<td>${r.fits ? tile(r.f.t2) + `<span class="rel">${r.f.td > 200 ? "200+" : "~" + Math.round(r.f.td)} at 32k · ${Math.round(r.f.ctx / 1024)}k ctx</span>` : `<span class="red">✗ too big</span>`}</td>` +
-  `<td><span class="q">${r.quant} · ${r.gb} GB</span></td><td>${fmtDl(r.dl)}</td>` +
-  `<td><button class="btn go" data-i="${i}">TEST IT</button></td></tr>` +
-  `<tr class="cmdrow" id="c${i}" hidden><td colspan="7"><div class="cmds">Draft the recipe, download and fit it, tune the speed, run the suite (~2 h):` +
-  `<code>llmbox recipe new ${r.repo} --write</code><code>llmbox install ${r.rid} --apply</code><code>llmbox tune ${r.rid}</code>` +
-  `<code>llmbox bench ${r.rid} --recipe ${r.rid} --speed-probe</code></div></td></tr>`).join("");
-document.querySelectorAll(".go").forEach(b => b.addEventListener("click", () => { const c = $("#c" + b.dataset.i); c.hidden = !c.hidden; }));
+const cap = v => v > 200 ? "200+" : "~" + Math.round(v);   // above ~200 the formula ignores per-token overheads
+const rows = DATA.rows.map(r => { const f = forBox(r.sh, box);
+  const exp = r.rel.length ? { mid: r.rel.reduce((s, x) => s + x[1], 0) / r.rel.length, lo: Math.min(...r.rel.map(x => x[1])), hi: Math.max(...r.rel.map(x => x[1])), src: "rel" }
+            : r.guess ? { mid: r.guess.mid, lo: r.guess.lo, hi: r.guess.hi, src: "eci" } : null;
+  return Object.assign({}, r, { f, fits: f.fits, exp, speed: f.fits ? f.t2 : 0 }); });
+const tile = v => `<span class="tile pred ${v >= 50 ? "hi" : v >= 25 ? "mid" : "lo"}">${cap(v)}</span>`;
+function expCell(r) {
+  if (!r.exp) return `<span class="q">—</span><span class="rel">no measured relative, no public index</span>`;
+  if (r.exp.src === "rel") return `${Math.round(r.exp.lo)}–${Math.round(r.exp.hi)}%<span class="rel" title="${r.rel.map(x => x[0] + " " + Math.round(x[1]) + "%").join(", ")}">${r.rel.length} relative${r.rel.length > 1 ? "s" : ""} measured</span>`;
+  return `<span class="guess">~${r.exp.mid}%</span><span class="rel" title="Epoch Capabilities Index of ${r.guess.name}: ${r.guess.eci.toFixed(1)}">${r.exp.lo}–${r.exp.hi} · from ECI${r.guess.remix ? " of its base" : ""}</span>`;
+}
+let sortKey = "default", sortDir = -1;
+const keys = { exp: r => r.exp ? r.exp.mid : -1, speed: r => r.speed, size: r => r.total, dl: r => r.dl,
+  default: r => (r.fits ? 1e9 : 0) + (r.exp ? r.exp.mid * 1e6 : 0) + r.dl / 1e3 };
+function render() {
+  const k = keys[sortKey];
+  const list = rows.slice().sort((a, b) => sortDir * (k(a) - k(b)) || (b.dl - a.dl));
+  $("#rows").innerHTML = list.map((r, i) => `<tr class="${r.fits ? "" : "nofit"}"><td class="l"><span class="m">${r.repo.split("/")[1].replace(/-GGUF$/i, "")}</span><a class="repo" href="https://huggingface.co/${r.repo}" rel="noopener">${r.repo}</a></td>` +
+    `<td>${r.total}B · ${r.active}B</td><td>${expCell(r)}</td>` +
+    `<td>${r.fits ? tile(r.f.t2) + `<span class="rel">${cap(r.f.td)} at 32k · ${Math.round(r.f.ctx / 1024)}k ctx</span>` : `<span class="red">✗ too big</span>`}</td>` +
+    `<td><span class="q">${r.quant} · ${r.gb} GB</span></td><td>${fmtDl(r.dl)}</td>` +
+    `<td><button class="btn go" data-i="${i}">TEST IT</button></td></tr>` +
+    `<tr class="cmdrow" id="c${i}" hidden><td colspan="7"><div class="cmds">Draft the recipe, download and fit it, tune the speed, run the suite (~2 h):` +
+    `<code>llmbox recipe new ${r.repo} --write</code><code>llmbox install ${r.rid} --apply</code><code>llmbox tune ${r.rid}</code>` +
+    `<code>llmbox bench ${r.rid} --recipe ${r.rid} --speed-probe</code></div></td></tr>`).join("");
+  document.querySelectorAll(".go").forEach(b => b.addEventListener("click", () => { const c = $("#c" + b.dataset.i); c.hidden = !c.hidden; }));
+  document.querySelectorAll("th[data-sort]").forEach(th => th.classList.toggle("on", th.dataset.sort === sortKey));
+}
+document.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("click", () => {
+  sortDir = sortKey === th.dataset.sort ? -sortDir : -1; sortKey = th.dataset.sort; render(); }));
+render();
 """
 
 
