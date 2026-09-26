@@ -12,13 +12,18 @@ Target: a strong 35B-A3B local model scores ~50-60, leaving room above and below
 """
 from __future__ import annotations
 
-from . import agentic, code, longctx, reasoning, sessions, tools, writing
+from . import agentic, code, longctx, reasoning, sessions, techhelp, tools, writing
 from .common import Item
 
-VERSION = "0.9"
-# coding = long agentic tasks (25) + single-file functions (10); then agents/tools, documents, writing, reasoning
-WEIGHTS = {"agentic": 0.25, "code": 0.10, "tools": 0.20, "longctx": 0.15, "writing": 0.15, "reasoning": 0.15}
-MODULES = {"agentic": agentic, "code": code, "tools": tools, "longctx": longctx, "writing": writing, "reasoning": reasoning}
+VERSION = "0.10-dev"
+# v0.10: weights for people who download and run local models (developers and enthusiasts; docs/usage-research.md):
+# coding 30 (agentic 20 + single-file functions 10), agents/tools 20, tech help for their own machines 15 (new: "homelab"
+# is the third-largest local use), writing/editing/translation 15, long documents 10 (real prompts are ~6k tokens; 200k
+# documents are rare and the costliest to prefill locally), exact reasoning 10.
+# v0.9 was agentic 25, code 10, tools 20, longctx 15, writing 15, reasoning 15.
+WEIGHTS = {"agentic": 0.20, "code": 0.10, "tools": 0.20, "techhelp": 0.15, "longctx": 0.10, "writing": 0.15, "reasoning": 0.10}
+MODULES = {"agentic": agentic, "code": code, "tools": tools, "techhelp": techhelp, "longctx": longctx, "writing": writing,
+           "reasoning": reasoning}
 BLOCKS = {b: m.KINDS for b, m in MODULES.items()}
 BLOCKS["agentic"] = {**agentic.KINDS, **sessions.KINDS}   # multi-turn sessions are agentic coding too
 LEVELS = {"quick": [3, 5], "medium": [2, 3, 4, 4, 5, 5, 5], "deep": [2, 3, 4, 4, 5, 5, 5] * 2}
@@ -48,7 +53,10 @@ QUICK_ITEMS = [
     ("reasoning", "arith", 5), ("reasoning", "code_trace", 5), ("reasoning", "arith", 3), ("reasoning", "schedule", 5),
     # v0.9 expert layer (level 6, strict), calibrated on Opus 5.5 2026-09-26: outreach 2/3 (the only reliable frontier
     # headroom - judgment on messy data), audit 3/3, cron 3/3, bulk_discount 3/3, dedupe 3/3 (hard for local models)
-    ("tools", "outreach", 6), ("tools", "bulk_discount", 6), ("tools", "dedupe", 6), ("longctx", "audit", 6), ("code", "cron", 6),
+    ("tools", "bulk_discount", 6), ("tools", "dedupe", 6), ("longctx", "audit", 6), ("code", "cron", 6),
+    # v0.10: tools.outreach L6 out of quick (0 for every local model, 455 s; the adaptive run can still pick it); tech help in
+    ("techhelp", "compose_port", 4), ("techhelp", "nginx_route", 4), ("techhelp", "log_root", 4), ("techhelp", "subnet", 4),
+    ("techhelp", "chmod_seq", 5),
 ]
 
 

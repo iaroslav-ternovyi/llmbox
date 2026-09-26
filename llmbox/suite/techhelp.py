@@ -1,0 +1,374 @@
+"""Tech help: the questions people who run local models ask about their own machines - why a service is not reachable,
+which nginx location answers, what a chmod leaves behind, which subnet routes a packet, which service broke first.
+The largest everyday category of local-LLM users after coding and agents ("homelab", 18.5% of 10k use cases in local-LLM
+communities, docs/usage-research.md). Every answer is exact and computed here from the generated config, so no judge
+is needed, and every seed is a fresh machine, so nothing can be memorized. 5 levels per kind.
+"""
+from __future__ import annotations
+
+import ipaddress
+import re
+from datetime import datetime, timedelta, timezone
+
+from .common import Item, final_answer, num, rng
+
+BLOCK = "techhelp"
+CONVENTIONAL = {"postgres": 5432, "db": 5432, "redis": 6379, "cache": 6379, "grafana": 3000, "minio": 9000, "keycloak": 8080,
+                "queue": 5672, "search": 9200, "nginx": 80, "proxy": 80, "worker": 8081, "auth": 8080, "api": 8000, "web": 80,
+                "app": 3000}
+INSTR = "\n\nThink it through, then finish with a final line exactly in the form:\nANSWER: <answer>"
+
+
+def _set_check(expected: set[str]):
+    """A set of tokens in any order and separator ('8080, 8443' == '8443 8080'); NONE for the empty set."""
+    def check(text: str, _t=None) -> float:
+        a = final_answer(text)
+        if a is None:
+            return 0.0
+        toks = [re.sub(r"^\d+\.\d+\.\d+\.\d+:", "", t) for t in re.findall(r"[\w.:/-]+", a.lower())]   # 127.0.0.1:9000 -> 9000
+        got = {t for t in toks if t not in {"and", "port", "ports", "on", "host"}}
+        want = {e.lower() for e in expected} or {"none"}
+        return 1.0 if got == want else 0.0
+    return check
+
+
+def _word_check(expected: str):
+    def check(text: str, _t=None) -> float:
+        a = (final_answer(text) or "").strip().strip("`'\".").lower()
+        return 1.0 if a == expected.lower() or re.sub(r"\s+", "", a) == re.sub(r"\s+", "", expected.lower()) else 0.0
+    return check
+
+
+def _num_check(expected: float):
+    def check(text: str, _t=None) -> float:
+        v = num(final_answer(text))
+        return 1.0 if v is not None and abs(v - expected) < 1e-9 else 0.0
+    return check
+
+
+# ---- docker compose: where is a service reachable from the host --------------------------------------------------------
+
+def compose_port(seed: int, level: int = 3) -> Item:
+    """docker compose port publishing. Short and long syntax, IP bindings, `expose` (not published), a bare container
+    port (random host port), ${VAR:-default} with a .env file, a second -f file (ports lists concatenate), port ranges,
+    network_mode: host."""
+    r = rng(BLOCK, f"compose{level}", seed)
+    target_svc = r.choice(["web", "api", "grafana", "auth", "search", "app"])
+    names = [target_svc] + r.sample([n for n in CONVENTIONAL if n != target_svc], 1 + level)
+    tport = r.choice([80, 3000, 8000, 8080, 5000, 9090])
+    env_file = {}
+    published: set[str] = set()
+    used_host = {"8080", "8081", "8443", "18080", "3001", "9000", "9443", "8888", "8090", "8181", "9001", "7443", "10080", "8880"}
+    used_host |= {str(p) for p in range(8000, 8005)} | {str(p) for p in range(9100, 9105)}   # the target's candidates
+    lines = ["services:"]
+    extra_files = []
+
+    def add_port(svc_ports: list[str], host: str | None, cont: int, ip: str | None = None, long: bool = False):
+        if long:
+            svc_ports.append(f"      - target: {cont}\n        published: \"{host}\"" + (f"\n        host_ip: {ip}" if ip else ""))
+        elif host is None:
+            svc_ports.append(f"      - \"{cont}\"")
+        else:
+            svc_ports.append(f"      - \"{(ip + ':') if ip else ''}{host}:{cont}\"")
+
+    for i, svc in enumerate(names):
+        lines.append(f"  {svc}:")
+        lines.append(f"    image: example/{svc}:latest")
+        ports: list[str] = []
+        if svc == target_svc:
+            mode = r.choice(["plain", "ip", "env", "range", "host", "expose", "bare"][: min(7, 2 + level)])
+            if mode == "plain":
+                hp = r.choice([8080, 8081, 8443, 18080, 3001])
+                add_port(ports, str(hp), tport, long=level >= 4 and r.random() < 0.5)
+                published.add(str(hp))
+            elif mode == "ip":
+                hp = r.choice([9000, 9443, 8888])
+                add_port(ports, str(hp), tport, ip=r.choice(["127.0.0.1", "0.0.0.0"]))
+                published.add(str(hp))
+            elif mode == "env":
+                var = f"{svc.upper()}_PORT"
+                default = r.choice([8080, 8090, 8181])
+                add_port(ports, f"${{{var}:-{default}}}", tport)
+                if level >= 3 and r.random() < 0.7:
+                    val = r.choice([18080, 8443, 9001])
+                    env_file[var] = str(val)
+                    published.add(str(val))
+                else:
+                    published.add(str(default))
+            elif mode == "range":
+                base_h, base_c = r.choice([(8000, tport - 1), (9100, tport - 2)])
+                span = 4
+                ports.append(f"      - \"{base_h}-{base_h + span}:{base_c}-{base_c + span}\"")
+                published.add(str(base_h + (tport - base_c)))
+            elif mode == "host":
+                lines.append("    network_mode: host")
+                published.add(str(tport))
+            elif mode == "expose":
+                lines.append(f"    expose:\n      - \"{tport}\"")
+            elif mode == "bare":
+                add_port(ports, None, tport)
+        else:   # other services publish their usual ports; some reuse the target's container port on another host port
+            if r.random() < 0.7:
+                cport = CONVENTIONAL.get(svc, tport)
+                hport = cport if r.random() < 0.6 else r.choice([cport + 1, cport + 10000 if cport < 50000 else cport - 1000])
+                if str(hport) not in used_host:
+                    used_host.add(str(hport))
+                    add_port(ports, str(hport), cport)
+        if ports:
+            lines.append("    ports:")
+            lines.extend(ports)
+        if i > 0 and r.random() < 0.4:
+            lines.append(f"    depends_on:\n      - {names[0]}")
+    main = "\n".join(lines) + "\n"
+    files = [("compose.yaml", main)]
+    if level >= 4 and not any("network_mode" in l for l in lines):
+        hp2 = r.choice([7443, 10080, 8880])
+        files.append(("compose.prod.yaml", f"services:\n  {target_svc}:\n    ports:\n      - \"{hp2}:{tport}\"\n"))
+        published.add(str(hp2))
+        extra_files.append("compose.prod.yaml")
+    if env_file:
+        files.append((".env", "".join(f"{k}={v}\n" for k, v in env_file.items())))
+    cmd = "docker compose " + "".join(f"-f {f} " for f in ["compose.yaml"] + extra_files) + "up -d"
+    body = "\n\n".join(f"`{n}`:\n```yaml\n{t}```" if n != ".env" else f"`.env`:\n```\n{t}```" for n, t in files)
+    prompt = (f"A directory contains these files:\n\n{body}\n\nI run `{cmd}` in it. On which host port(s) can I reach container port "
+              f"{tport} of the `{target_svc}` service from the host machine? If it is not reachable from the host at a fixed port, "
+              "answer NONE. If there are several ports, list them all." + INSTR)
+    return Item(f"{BLOCK}.compose_port.L{level}.{seed}", BLOCK, "compose_port", [{"role": "user", "content": prompt}],
+                _set_check(published), max_tokens=16000, meta={"expected": sorted(published) or ["NONE"], "level": level})
+
+
+# ---- nginx: which location answers a request ---------------------------------------------------------------------------
+
+def _nginx_match(locs: list[tuple[str, str, str]], uri: str) -> str:
+    """nginx location selection: exact '=' wins; else the longest prefix; if that prefix is '^~' it wins; else the first
+    matching regex (in config order, '~' case-sensitive, '~*' not); else the longest prefix."""
+    for mod, pat, tgt in locs:
+        if mod == "=" and uri == pat:
+            return tgt
+    prefixes = [(pat, mod, tgt) for mod, pat, tgt in locs if mod in ("", "^~") and uri.startswith(pat)]
+    best = max(prefixes, key=lambda x: len(x[0]), default=None)
+    if best and best[1] == "^~":
+        return best[2]
+    for mod, pat, tgt in locs:
+        if mod == "~" and re.search(pat, uri):
+            return tgt
+        if mod == "~*" and re.search(pat, uri, re.I):
+            return tgt
+    return best[2] if best else "404"
+
+
+def nginx_route(seed: int, level: int = 3) -> Item:
+    r = rng(BLOCK, f"nginx{level}", seed)
+    ups = [f"{c}_pool" for c in r.sample(["blue", "green", "amber", "violet", "teal", "coral", "slate", "olive", "ruby", "indigo"], 9)]   # neutral: the name must not give the answer away
+    locs = [("", "/", ups[0]), ("", "/api/", ups[1])]
+    if level >= 2:
+        locs.append(("", "/api/v2/", ups[2]))
+        locs.append(("=", "/health", ups[6]))
+    if level >= 3:
+        locs.append(("~", r"\.php$", ups[5]))
+        locs.append(("", "/static/", ups[3]))
+    if level >= 4:
+        locs[-1] = ("^~", "/static/", ups[3])
+        locs.append(("~*", r"\.(jpg|png|webp)$", ups[4]))
+    if level >= 5:
+        locs.append(("", "/admin", ups[7]))
+        locs.append(("~", r"^/api/v[0-9]+/ws", ups[8]))
+    r.shuffle(locs)
+    uris = ["/", "/index.html", "/api/users", "/api/v2/orders/7", "/health", "/healthz", "/static/app.js", "/static/logo.PNG",
+            "/api/v2/avatar.png", "/blog/post.php", "/static/old/page.php", "/admin", "/administrator/login", "/api/v2/ws/chat",
+            "/api/v1/ws", "/media/cat.JPG"]
+    # pick a request where a naive reading goes wrong at higher levels
+    cand = [u for u in uris if (level < 3) or _nginx_match(locs, u) != _naive(locs, u)] or uris
+    uri = r.choice(cand)
+    expected = _nginx_match(locs, uri)
+    conf = ["server {", "    listen 80;", "    server_name example.lan;"]
+    for mod, pat, tgt in locs:
+        conf.append(f"    location {mod + ' ' if mod else ''}{pat} {{\n        proxy_pass http://{tgt};\n    }}")
+    conf.append("}")
+    prompt = (f"Here is an nginx server block:\n\n```nginx\n" + "\n".join(conf) + "\n```\n\n"
+              f"A client requests `GET {uri}` for Host example.lan. Which upstream handles it? Answer with the upstream name "
+              "(the part after http://)." + INSTR)
+    return Item(f"{BLOCK}.nginx_route.L{level}.{seed}", BLOCK, "nginx_route", [{"role": "user", "content": prompt}],
+                _word_check(expected), max_tokens=16000, meta={"expected": expected, "uri": uri, "level": level})
+
+
+def _naive(locs, uri):
+    """What 'the longest prefix wins, full stop' would answer: the common misreading."""
+    prefixes = [(pat, tgt) for mod, pat, tgt in locs if mod in ("", "^~", "=") and uri.startswith(pat)]
+    return max(prefixes, key=lambda x: len(x[0]))[1] if prefixes else "404"
+
+
+# ---- networking: hosts, broadcast, routing, summarisation ------------------------------------------------------------
+
+def subnet(seed: int, level: int = 3) -> Item:
+    r = rng(BLOCK, f"subnet{level}", seed)
+    base = ipaddress.ip_address(f"{r.choice([10, 172, 192])}.{r.randint(0, 31) if level > 1 else 168}.{r.randint(0, 255)}.{r.randint(0, 255)}")
+    if level == 1:
+        pfx = r.choice([24, 25, 26, 27, 28])
+        net = ipaddress.ip_network(f"{base}/{pfx}", strict=False)
+        expected, q, chk = net.num_addresses - 2, f"How many usable host addresses does the network {net} have?", None
+    elif level == 2:
+        pfx = r.choice([19, 21, 22, 23, 27, 29])
+        net = ipaddress.ip_network(f"{base}/{pfx}", strict=False)
+        expected, q = str(net.broadcast_address), f"What is the broadcast address of the network that contains {base}/{pfx}?"
+        chk = _word_check(expected)
+    else:
+        # routing table with overlapping routes; longest prefix wins, ties by the lower metric
+        n_routes = 3 + level
+        routes = [("0.0.0.0/0", "wan0", 100)]
+        for _ in range(n_routes):
+            p = r.choice([8, 12, 16, 20, 22, 24, 26])
+            net = ipaddress.ip_network(f"{base}/{p}", strict=False)
+            if r.random() < 0.4:   # the sibling network next to it (does not contain the destination)
+                net = ipaddress.ip_network((int(net.network_address) ^ (1 << (32 - p)), p))
+            routes.append((str(net), r.choice(["eth0", "eth1", "wg0", "br-lan", "tun0"]), r.choice([10, 20, 50, 100, 200])))
+        if level >= 4:   # the same prefix twice with different metrics
+            p, dev, m = routes[-1]
+            routes.append((p, r.choice(["eth2", "wg1"]), m + r.choice([-5, 5, 30])))
+        r.shuffle(routes)
+        dst = ipaddress.ip_address(int(base) + r.randint(0, 3))
+        match = [(ipaddress.ip_network(n), d, m) for n, d, m in routes if dst in ipaddress.ip_network(n)]
+        best = max(match, key=lambda x: (x[0].prefixlen, -x[2]))
+        expected = best[1]
+        table = "\n".join(f"{n:<18s} dev {d:<6s} metric {m}" for n, d, m in routes)
+        q = (f"A Linux router has this routing table:\n\n```\n{table}\n```\n\nThrough which interface does it send a packet to {dst}? "
+             "The kernel picks the most specific route; among equally specific ones, the lowest metric.")
+        if level >= 5:   # add the summarisation question on top
+            nets = [ipaddress.ip_network(f"{base}/{r.choice([24, 25, 26])}", strict=False) for _ in range(3)]
+            sup = nets[0]
+            while not all(n.subnet_of(sup) for n in nets):
+                sup = sup.supernet()
+            expected = f"{expected} {sup}"
+            q += f" Also give the smallest single CIDR that covers all of {', '.join(map(str, nets))}. Answer as: <interface> <cidr>"
+        chk = _word_check(expected)
+    return Item(f"{BLOCK}.subnet.L{level}.{seed}", BLOCK, "subnet", [{"role": "user", "content": q + INSTR}],
+                chk or _num_check(expected), max_tokens=16000, meta={"expected": expected, "level": level})
+
+
+# ---- file permissions: what a chain of chmod leaves ------------------------------------------------------------------
+
+_WHO = {"u": (0o4700, 6), "g": (0o2070, 3), "o": (0o1007, 0)}
+
+
+def chmod_apply(mode: int, spec: str, is_dir: bool = False) -> int:
+    """GNU/BSD symbolic or octal chmod on a mode (who always given, so umask does not apply)."""
+    if re.fullmatch(r"[0-7]{3,4}", spec):
+        return int(spec, 8)
+    for clause in spec.split(","):
+        m = re.fullmatch(r"([ugoa]+)([+=-])([rwxXst]*)", clause)
+        who = "ugo" if "a" in m.group(1) else m.group(1)
+        op, perms = m.group(2), m.group(3)
+        any_x = bool(mode & 0o111)
+        for w in who:
+            _mask, shift = _WHO[w]
+            bits = 0
+            for p in perms:
+                if p == "r":
+                    bits |= 4 << shift
+                elif p == "w":
+                    bits |= 2 << shift
+                elif p == "x" or (p == "X" and (is_dir or any_x)):
+                    bits |= 1 << shift
+                elif p == "s" and w in "ug":
+                    bits |= 0o4000 if w == "u" else 0o2000
+                elif p == "t" and w == "o":
+                    bits |= 0o1000
+            clear = (7 << shift) | (0o4000 if w == "u" else 0o2000 if w == "g" else 0o1000)
+            if op == "+":
+                mode |= bits
+            elif op == "-":
+                mode &= ~bits
+            else:   # '=' sets exactly these bits for this class; on a file that includes clearing its special bit
+                mode = (mode & ~clear) | bits
+    return mode & 0o7777
+
+
+def chmod_seq(seed: int, level: int = 3) -> Item:
+    r = rng(BLOCK, f"chmod{level}", seed)
+    is_dir = level == 4 and r.random() < 0.5   # special bits (level 5) only on files: GNU and BSD differ on directories
+    start = r.choice([0o644, 0o600, 0o640, 0o755, 0o664, 0o700, 0o750]) if not is_dir else r.choice([0o755, 0o750, 0o700, 0o775])
+    pool = ["u+x", "g-w", "o-r", "g+w", "o=r", "a+r", "u-w", "go-rwx", "g=rx", "o+x", "ug+rw", "a-x"]
+    if level >= 3:
+        pool += ["g=u", "740", "u=rwx,g=rx,o=", "a+X", "go+X"]
+    if level >= 5:
+        pool += ["u+s", "g+s", "g-s", "u=rwxs", "u-s"]   # setuid/setgid on files; no sticky: it means nothing on files
+    steps = [r.choice([p for p in pool if p != "g=u"]) for _ in range(1 + level)]
+    mode = start
+    for s in steps:
+        if s == "g=u":
+            mode = (mode & ~0o070) | ((mode & 0o700) >> 3)
+        else:
+            mode = chmod_apply(mode, s, is_dir)
+    what = "directory `data/`" if is_dir else "file `run.sh`"
+    cmds = "\n".join(f"chmod {s} {'data/' if is_dir else 'run.sh'}" for s in steps)
+    prompt = (f"On Linux (GNU coreutils chmod, run as the owner), a {what} has mode {start:04o}. These commands run in order:\n\n```\n{cmds}\n```\n\n"
+              "What is its mode afterwards, as four octal digits (e.g. 0755)?" + INSTR)
+
+    def check(text: str, _t=None, want=mode) -> float:
+        a = re.findall(r"[0-7]{3,4}", final_answer(text) or "")
+        return 1.0 if a and int(a[-1], 8) == want else 0.0
+    return Item(f"{BLOCK}.chmod_seq.L{level}.{seed}", BLOCK, "chmod_seq", [{"role": "user", "content": prompt}], check,
+                max_tokens=16000, meta={"expected": f"{mode:04o}", "steps": steps, "start": f"{start:04o}", "is_dir": is_dir, "level": level})
+
+
+# ---- logs: which service broke first ---------------------------------------------------------------------------------
+
+def log_root(seed: int, level: int = 3) -> Item:
+    """A cascade of failures in journal logs; the root cause is the earliest real failure, not the loudest line. Level
+    adds noise, a recovered error before the root cause (a retry that succeeded), and a second machine whose logs are
+    in another time zone (the order must be read in UTC)."""
+    r = rng(BLOCK, f"log{level}", seed)
+    svcs = ["postgres", "redis", "api", "worker", "nginx", "minio", "keycloak", "grafana"]
+    chain = r.sample(svcs, 4)   # root -> dependents
+    root, deps = chain[0], chain[1:]
+    pid = {s: r.randint(200, 9000) for s in svcs}
+    causes = {
+        "port": (f"could not bind to 0.0.0.0:{CONVENTIONAL.get(root, 8080)}: Address already in use", "EADDRINUSE"),
+        "disk": ("could not write to /var/lib/data: No space left on device", "ENOSPC"),
+        "perm": ("open /etc/ssl/private/server.key: permission denied", "EACCES"),
+        "oom": ("Out of memory: Killed process (oom-kill)", "OOM"),
+    }
+    cause = r.choice(list(causes))
+    t0 = datetime(2026, 9, r.randint(1, 25), r.randint(0, 22), r.randint(0, 59), tzinfo=timezone.utc)
+    ev = []
+    t = t0 - timedelta(seconds=r.randint(30, 120))
+    if level >= 3:   # an earlier error that recovered - a red herring
+        rh = r.choice([s for s in svcs if s not in chain])
+        ev.append((t, "box-a", rh, "error", "connection to upstream timed out, retrying in 5s"))
+        ev.append((t + timedelta(seconds=6), "box-a", rh, "info", "connected to upstream"))
+    ev.append((t0, "box-a", root, "error", causes[cause][0]))
+    ev.append((t0 + timedelta(seconds=1), "box-a", root, "error", f"{root}.service: Main process exited, status=1/FAILURE"))
+    for i, d in enumerate(deps):
+        ev.append((t0 + timedelta(seconds=3 + 4 * i + r.randint(0, 2)), "box-a", d, "error",
+                   f"dependency failed: cannot reach {chain[i]} ({r.choice(['connection refused', 'no route to host', '502 Bad Gateway'])})"))
+    noise = [("info", "health check ok"), ("info", "config reloaded"), ("warn", "slow request 812ms"), ("info", "rotating logs"),
+             ("warn", "high memory usage 87%"), ("info", "checkpoint complete")]
+    for _ in range(3 * level):
+        s = r.choice(svcs)
+        lvl, msg = r.choice(noise)
+        ev.append((t0 + timedelta(seconds=r.randint(-200, 60)), "box-a", s, lvl, msg))
+    remote_tz = None
+    if level >= 4:   # half of the chain logs on a second machine in another time zone
+        remote_tz = timezone(timedelta(hours=r.choice([-7, -5, 2, 3, 9])))
+        moved = set(deps[-2:])
+        ev = [(tt, "box-b" if s in moved else host, s, lvl, msg) for tt, host, s, lvl, msg in ev]
+    ev.sort(key=lambda e: e[0])
+    lines = []
+    for tt, host, s, lvl, msg in ev:
+        shown = tt.astimezone(remote_tz) if (remote_tz and host == "box-b") else tt
+        stamp = shown.strftime("%Y-%m-%dT%H:%M:%S%z") if level >= 4 else shown.strftime("%b %d %H:%M:%S")
+        lines.append(f"{stamp} {host} {s}[{pid[s]}]: {lvl.upper()} {msg}")
+    if level >= 4:   # two separate log files as they would be collected
+        a = [l for l in lines if " box-a " in l]
+        b = [l for l in lines if " box-b " in l]
+        logs = f"box-a (journalctl):\n```\n" + "\n".join(a) + "\n```\n\nbox-b (journalctl):\n```\n" + "\n".join(b) + "\n```"
+    else:
+        logs = "```\n" + "\n".join(lines) + "\n```"
+    prompt = (f"My stack stopped working. Here are the logs:\n\n{logs}\n\nWhich service is the root cause - the one that failed "
+              "first and made the others fail? Answer with the service name only." + INSTR)
+    return Item(f"{BLOCK}.log_root.L{level}.{seed}", BLOCK, "log_root", [{"role": "user", "content": prompt}], _word_check(root),
+                max_tokens=16000, meta={"expected": root, "cause": cause, "level": level})
+
+
+KINDS = {"compose_port": compose_port, "nginx_route": nginx_route, "subnet": subnet, "chmod_seq": chmod_seq, "log_root": log_root}
+QUICK = list(KINDS)

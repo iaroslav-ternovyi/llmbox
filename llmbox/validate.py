@@ -174,6 +174,9 @@ def _writing_oracle(it: Item) -> str | None:
 
 
 def oracle(it: Item) -> str | None:
+    if it.block == "techhelp":   # exact answers; a set of ports is listed comma-separated
+        e = it.meta.get("expected")
+        return "ANSWER: " + (", ".join(e) if isinstance(e, list) else str(e))
     if (it.block, it.kind) in ANSWER_KINDS and it.block != "tools":
         return _answer_oracle(it)
     if it.block == "tools":
