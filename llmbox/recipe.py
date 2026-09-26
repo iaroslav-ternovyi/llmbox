@@ -1,0 +1,135 @@
+"""Recipes: one declarative file per model setup on a host. Launch scripts and serving entries are generated from them.
+
+A recipe is TOML (readable, diffable, comment-friendly). `extends = "<id>"` inherits another recipe and overrides
+fields, e.g. the daily 3-slot entry extends the 1-slot benchmark entry. Every value may carry its source in `notes`.
+"""
+from __future__ import annotations
+
+import copy
+import json
+import os
+import shlex
+import tomllib
+
+from .hosts import HOME
+
+DEFAULTS = {
+    "runtime": {"server": "llama-server", "cpu_affinity": "", "threads": 0},
+    "placement": {"ctx": 0, "kv_type": "q8_0", "fit": True, "fit_target_mib": 256, "flash_attn": True, "load_mode": "none",
+                  "batch": 2048, "ubatch": 2048, "slots": 1, "kv_unified": False, "cache_ram": "auto",
+                  "cache_ram_headroom_mib": 4096, "cache_reuse": 256},
+    "speculative": {"type": "", "draft_max": 0},
+    "sampling": {},
+    "chat": {"template_kwargs": {}, "jinja": True},
+    "antiloop": {"marker_ids": [], "marker_bias": 0.5, "reasoning_budget": -1,
+                 "budget_message": "I have reasoned enough. I will now act on my best plan.",
+                 "dry_think_only": False, "dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 24,
+                 "dry_penalty_last_n": 4096},
+    "serve": {"wait_vram_below_mib": 600, "ttl": 3600, "aliases": []},
+    "extra": {"args": []},
+}
+SAMPLING_FLAGS = {"temp": "--temp", "top_p": "--top-p", "top_k": "--top-k", "min_p": "--min-p",
+                  "presence_penalty": "--presence-penalty", "repeat_penalty": "--repeat-penalty", "max_tokens": "-n"}
+
+
+def recipes_dir(host: str) -> str:
+    return os.path.join(HOME, "recipes", host)
+
+
+def _merge(base: dict, over: dict) -> dict:
+    out = copy.deepcopy(base)
+    for k, v in over.items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else copy.deepcopy(v)
+    return out
+
+
+def load(host: str, rid: str, _seen: tuple = ()) -> dict:
+    if rid in _seen:
+        raise ValueError(f"recipe extends cycle: {' -> '.join(_seen + (rid,))}")
+    with open(os.path.join(recipes_dir(host), f"{rid}.toml"), "rb") as f:
+        r = tomllib.load(f)
+    if r.get("extends"):
+        r = _merge(load(host, r["extends"], _seen + (rid,)), {k: v for k, v in r.items() if k != "extends"})
+    r["id"] = rid
+    return _merge(DEFAULTS, r)
+
+
+def ids(host: str) -> list[str]:
+    d = recipes_dir(host)
+    return sorted(f[:-5] for f in os.listdir(d) if f.endswith(".toml")) if os.path.isdir(d) else []
+
+
+def server_args(r: dict, port: str = "$PORT") -> list[str]:
+    """llama-server argv (without the binary). `$CRAM` is resolved by the launcher when cache_ram = "auto"."""
+    p, sp, ch, al = r["placement"], r["speculative"], r["chat"], r["antiloop"]
+    a = ["--port", port, "-m", r["model"]["path"]]
+    if p["fit"]:
+        a += ["--fit", "on", "--fit-target", str(p["fit_target_mib"])]
+    a += ["--flash-attn", "on" if p["flash_attn"] else "off",
+          "--cache-type-k", p["kv_type"], "--cache-type-v", p["kv_type"], "--load-mode", p["load_mode"],
+          "-c", str(p["ctx"]), "-b", str(p["batch"]), "-ub", str(p["ubatch"]),
+          "--parallel", str(p["slots"]), "--kv-unified" if p["kv_unified"] else "--no-kv-unified"]
+    if r["runtime"]["threads"]:
+        a += ["--threads", str(r["runtime"]["threads"])]
+    for k, flag in SAMPLING_FLAGS.items():
+        if k in r["sampling"]:
+            a += [flag, _num(r["sampling"][k])]
+    a += ["--cache-ram", "$CRAM" if p["cache_ram"] == "auto" else str(p["cache_ram"])]
+    if ch["jinja"]:
+        a.append("--jinja")
+    if p["cache_reuse"]:
+        a += ["--cache-reuse", str(p["cache_reuse"])]
+    if sp["type"]:
+        a += ["--spec-type", sp["type"], "--spec-draft-n-max", str(sp["draft_max"])]
+    if ch["template_kwargs"]:
+        a += ["--chat-template-kwargs", json.dumps(ch["template_kwargs"], separators=(",", ":"))]
+    for tid in al["marker_ids"]:  # repeated flags accumulate; comma-separated values do not parse
+        a += ["--logit-bias", f"{tid}-{_num(al['marker_bias'])}"]
+    if al["dry_think_only"]:
+        a += ["--dry-think-only", "--dry-multiplier", _num(al["dry_multiplier"]), "--dry-base", _num(al["dry_base"]),
+              "--dry-allowed-length", str(al["dry_allowed_length"]), "--dry-penalty-last-n", str(al["dry_penalty_last_n"])]
+    if al["reasoning_budget"] >= 0:
+        a += ["--reasoning-budget", str(al["reasoning_budget"]), "--reasoning-budget-message", al["budget_message"]]
+    a += [str(x) for x in r["extra"]["args"]]
+    return a
+
+
+def _num(v) -> str:
+    return f"{v:g}" if isinstance(v, float) else str(v)
+
+
+def launcher(r: dict) -> str:
+    """A self-contained bash launcher: `<script> <port> [extra llama-server args]`."""
+    p, sv, rt = r["placement"], r["serve"], r["runtime"]
+    lines = ["#!/usr/bin/env bash",
+             f"# Generated by llmbox from recipe '{r['id']}'. Edit the recipe, not this file (`llmbox recipe render`).",
+             *(f"# {n}" for n in r.get("notes", {}).get("lines", [])),
+             'PORT="${1:?usage: $0 <port> [extra llama-server args]}"; shift || true']
+    if p["cache_ram"] == "auto":
+        lines += [f'MODEL={shlex.quote(r["model"]["path"])}',
+                  "# host prompt cache = all RAM this model leaves free, minus headroom (clamped 2048..48000 MiB)",
+                  'case "$MODEL" in *-00001-of-*.gguf) parts=("${MODEL%-00001-of-*}"-0*-of-*.gguf) ;; *) parts=("$MODEL") ;; esac',
+                  'total=$(awk \'/^MemTotal/{print int($2/1024)}\' /proc/meminfo); files=0',
+                  'for f in "${parts[@]}"; do [ -f "$f" ] || { echo "model file missing: $f" >&2; exit 1; }; files=$(( files + $(stat -c %s "$f") / 1048576 )); done',
+                  f'CRAM=$(( total - files - {p["cache_ram_headroom_mib"]} )); [ $CRAM -lt 2048 ] && CRAM=2048; [ $CRAM -gt 48000 ] && CRAM=48000']
+    if sv["wait_vram_below_mib"]:
+        lines += ["# wait until the previous model has left the GPU (llama-swap swaps models)",
+                  "for i in $(seq 1 90); do u=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1); "
+                  f'[ -n "$u" ] && [ "$u" -lt {sv["wait_vram_below_mib"]} ] && break; sleep 1; done']
+    args = server_args(r)
+    quoted = " ".join(a if a in ("$PORT", "$CRAM") else ('"$PORT"' if a == "$PORT" else shlex.quote(a)) for a in args)
+    quoted = quoted.replace("$PORT", '"$PORT"').replace("$CRAM", '"$CRAM"')
+    prefix = f"taskset -c {rt['cpu_affinity']} " if rt["cpu_affinity"] else ""
+    lines.append(f'exec {prefix}{shlex.quote(rt["server"])} {quoted} "$@"')
+    return "\n".join(lines) + "\n"
+
+
+def llama_swap_entry(r: dict, launcher_path: str) -> str:
+    sv = r["serve"]
+    out = [f"  {r['id']}:"]
+    if r.get("description"):
+        out.insert(0, f"  # {r['description']}")
+    if sv["aliases"]:
+        out += ["    aliases:"] + [f"      - {a}" for a in sv["aliases"]]
+    out += [f"    cmd: {launcher_path} ${{PORT}}", f"    ttl: {sv['ttl']}"]
+    return "\n".join(out) + "\n"

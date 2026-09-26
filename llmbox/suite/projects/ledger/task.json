@@ -1,0 +1,30 @@
+{
+  "lang": "python",
+  "prompt": "This repository (see README.md) is a small bookkeeping library. It currently contains {n_bugs} bug(s): places where the code does not do what README.md specifies. The visible tests in tests/ cover only part of the behaviour, so read the specification and the code carefully instead of only relying on the tests. Find and fix every bug without changing the public API. You can run the tests with: python3 -m unittest discover -s tests -v",
+  "mutations": [
+    "money-parens",
+    "money-round",
+    "money-sign",
+    "acc-limit",
+    "acc-atomic",
+    "int-days",
+    "int-tier",
+    "imp-comment",
+    "imp-memo",
+    "rep-month",
+    "rep-abs",
+    "rep-ties"
+  ],
+  "feature": {
+    "strip": "ledger/report.py::monthly_net",
+    "spec": "the function ledger.report.monthly_net is not implemented yet (it raises NotImplementedError). Implement it exactly as README.md specifies."
+  },
+  "grade_cmd": "python3 _hidden_tests/run_grade.py 2>&1",
+  "bugs_per_level": [
+    1,
+    2,
+    4,
+    6,
+    8
+  ]
+}

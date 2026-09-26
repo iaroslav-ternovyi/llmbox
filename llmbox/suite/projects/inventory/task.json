@@ -1,0 +1,30 @@
+{
+  "lang": "javascript",
+  "prompt": "This repository (see README.md) is a small Node.js inventory/order library. It currently contains {n_bugs} bug(s): places where the code does not do what README.md specifies. The visible tests in test/ cover only part of the behaviour, so read the specification and the code carefully instead of only relying on the tests. Find and fix every bug without changing the public API. Run the tests with: node --test",
+  "mutations": [
+    "parse-case",
+    "parse-default",
+    "stock-avail",
+    "stock-reserve",
+    "stock-ship",
+    "price-tier",
+    "price-vat",
+    "ord-rollback",
+    "ord-net",
+    "ord-cancel",
+    "rep-thr",
+    "rep-sort"
+  ],
+  "feature": {
+    "strip_js": "src/report.js::valueOnHand",
+    "spec": "the function valueOnHand in src/report.js is not implemented yet (it throws). Implement it exactly as README.md specifies."
+  },
+  "grade_cmd": "node _hidden_tests/grade.js 2>&1",
+  "bugs_per_level": [
+    1,
+    2,
+    4,
+    6,
+    8
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "lang": "javascript",
+  "kind": "implement",
+  "prompt": "Implement the template engine specified in README.md: render() and TemplateError in src/tmpl.js (currently a stub). This is a from-scratch implementation task - read the whole specification carefully; hidden tests check every rule (paths, escaping, filters and their arguments, conditions, loops with loop variables and nesting, whitespace control, comments and error cases). You may add files under src/. Run the visible tests with: node --test",
+  "levels_tests": {"3": ["L3_"], "4": ["L3_", "L4_"], "5": ["L3_", "L4_", "L5_"]},
+  "grade_cmd": "node _hidden_tests/grade.js 2>&1"
+}

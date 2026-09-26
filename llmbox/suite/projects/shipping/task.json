@@ -1,0 +1,34 @@
+{
+  "lang": "python",
+  "prompt": "This repository (see README.md) is a shipping-quote library with a CLI. It currently contains {n_bugs} bug(s): places where the code does not do what README.md specifies; some bugs only show up through other modules (for example in the final quote). The visible tests in tests/ cover only a small part of the behaviour, so read the specification and the code carefully, write your own quick checks if useful, and do not rely only on the tests. Find and fix every bug without changing the public API. Run the tests with: python3 -m unittest discover -s tests -v",
+  "mutations": [
+    "u-lb",
+    "u-round",
+    "p-sort",
+    "p-smallest",
+    "p-weight",
+    "p-tare",
+    "r-zone",
+    "r-dim",
+    "r-step",
+    "c-hol",
+    "c-cutoff",
+    "c-express",
+    "pr-case",
+    "pr-free",
+    "pr-bulk",
+    "i-vat"
+  ],
+  "bugs_per_level": [
+    2,
+    3,
+    5,
+    7,
+    9
+  ],
+  "feature": {
+    "blocks": "insurance",
+    "spec": "the insurance feature described in README.md (section 'insurance' and the CLI flag --insure) is not implemented yet. Implement it end to end: the Order field, the quote output and total, and the CLI flag."
+  },
+  "grade_cmd": "python3 _hidden_tests/run_grade.py 2>&1"
+}

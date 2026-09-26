@@ -1,0 +1,7 @@
+{
+  "lang": "python",
+  "kind": "implement",
+  "prompt": "Implement the spreadsheet engine specified in README.md: the class sheet.engine.Sheet (currently a stub). This is a from-scratch implementation task - read the whole specification carefully; hidden tests check every rule, including precedence, text handling, functions, error propagation order and cycle detection. You may add modules inside the sheet/ package. Run the visible tests with: python3 -m unittest discover -s tests -v",
+  "levels_tests": {"3": ["L3_"], "4": ["L3_", "L4_"], "5": ["L3_", "L4_", "L5_"]},
+  "grade_cmd": "python3 _hidden_tests/run_grade.py 2>&1"
+}

@@ -1,0 +1,231 @@
+"""Predict how a GGUF model fits a host and how fast it decodes, from the header alone.
+
+Model of llama.cpp with `--fit on` (the placement we use):
+  GPU  <- every non-expert weight (attention, SSM, norms, shared experts, output head), KV cache, compute buffers,
+          and as many expert layers as still fit;
+  RAM  <- the remaining expert layers (pinned).
+Decode is memory-bound, so time/token = bytes read from RAM / RAM bandwidth + bytes read from VRAM / VRAM bandwidth
++ a fixed per-token overhead. An MoE layer reads only expert_used/expert_count of its expert weights per token.
+The constants are calibrated against measured runs (see CALIBRATION); keep them honest when new measurements arrive.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from .gguf import GGUFHeader
+
+# Measured on gpu-box (RTX 5070 + DDR5, llama.cpp b11161). Efficiency = achieved / nominal bandwidth during decode.
+RAM_EFFICIENCY = 0.80
+VRAM_EFFICIENCY = 0.75
+OVERHEAD_MS_PER_LAYER = 0.025      # kernel launches / sync per transformer layer (fit on 6 models, 2026-09-25)
+GPU_RESERVE_MIB = 700              # driver + display + fit-target margin
+COMPUTE_BUFFER_MIB = {512: 900, 1024: 1300, 2048: 2100}  # by -ub, measured-ish for 35B-A3B class
+
+KV_BYTES = {"f16": 2.0, "bf16": 2.0, "q8_0": 34 / 32, "q5_1": 24 / 32, "q4_0": 18 / 32}
+
+_BLK = re.compile(r"^blk\.(\d+)\.")
+
+# ggml types whose CPU dot products are compute-bound (lattice/codebook lookups) rather than bandwidth-bound.
+# Calibrated: Ling IQ3_XXS decoded at ~0.55 of the bandwidth-bound prediction. IQ4_XS/IQ4_NL behave like K-quants.
+_SLOW_CPU_TYPES = {16, 17, 18, 19, 21, 22, 29}  # IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ3_S, IQ2_S, IQ1_M
+
+
+def _cpu_eff(ggml_type: int) -> float:
+    return 0.55 if ggml_type in _SLOW_CPU_TYPES else 1.0
+
+
+@dataclass
+class ModelShape:
+    arch: str
+    n_layers: int                     # transformer layers used for normal decoding (MTP/nextn layers excluded)
+    n_mtp_layers: int
+    attn_layers: int                  # layers with a KV cache
+    kv_heads: int
+    k_len: int
+    v_len: int
+    mla_kv_dim: int = 0               # MLA (compressed KV) models: per-layer latent size
+    n_expert: int = 0
+    n_expert_used: int = 0
+    total_bytes: int = 0
+    expert_bytes: int = 0             # routed experts (MoE)
+    expert_bytes_by_layer: dict = field(default_factory=dict)
+    nonexpert_bytes: int = 0          # everything read on the GPU per token (excl. embedding table, MTP layers)
+    embed_bytes: int = 0
+    mtp_bytes: int = 0
+    recurrent_state_bytes: int = 0    # per sequence, for hybrid SSM / linear-attention layers
+    expert_cpu_eff: float = 1.0       # relative CPU dequant speed of the expert quant type (IQ* are slower)
+    context_length: int = 0
+    total_params: int = 0
+    active_params: int = 0
+    sampling: dict = field(default_factory=dict)
+
+    @property
+    def is_moe(self) -> bool:
+        return self.n_expert > 1 and self.expert_bytes > 0
+
+    def kv_bytes_per_token(self, kv_type: str = "q8_0") -> float:
+        b = KV_BYTES.get(kv_type, 2.0)
+        if self.mla_kv_dim:
+            return self.attn_layers * self.mla_kv_dim * b
+        return self.attn_layers * self.kv_heads * (self.k_len + self.v_len) * b
+
+
+def analyze(headers: list[GGUFHeader]) -> ModelShape:
+    h0 = headers[0]
+    tensors = [t for h in headers for t in h.tensors]
+    n_blocks = int(h0.get("block_count", 0))
+    n_mtp = int(h0.get("nextn_predict_layers", 0) or 0)
+    n_layers = n_blocks - n_mtp
+    mtp_ids = set(range(n_layers, n_blocks))
+
+    kv_heads = h0.get("attention.head_count_kv", 0)
+    if isinstance(kv_heads, list):  # per-layer list in some hybrids: 0 = no attention in that layer
+        kv_heads = max(kv_heads) if kv_heads else 0
+    heads = int(h0.get("attention.head_count", 0) or 0)
+    emb = int(h0.get("embedding_length", 0) or 0)
+    k_len = int(h0.get("attention.key_length", 0) or (emb // heads if heads else 0))
+    v_len = int(h0.get("attention.value_length", 0) or k_len)
+    mla = int(h0.get("attention.kv_lora_rank", 0) or 0)
+    mla_dim = (mla + int(h0.get("rope.dimension_count", 0) or 0)) if mla else 0
+
+    s = ModelShape(arch=h0.arch, n_layers=n_layers, n_mtp_layers=n_mtp, attn_layers=0, kv_heads=int(kv_heads or 0),
+                   k_len=k_len, v_len=v_len, mla_kv_dim=mla_dim,
+                   n_expert=int(h0.get("expert_count", 0) or 0), n_expert_used=int(h0.get("expert_used_count", 0) or 0),
+                   context_length=int(h0.get("context_length", 0) or 0),
+                   sampling={k.split(".", 2)[2]: v for k, v in h0.kv.items() if k.startswith("general.sampling.")})
+    layer_names: dict[int, set] = {}
+    slow_time = 0.0  # bytes weighted by 1/efficiency of their quant type
+    for t in tensors:
+        s.total_bytes += t.nbytes
+        s.total_params += t.n_elements
+        m = _BLK.match(t.name)
+        layer = int(m.group(1)) if m else None
+        if layer is not None and layer in mtp_ids:
+            s.mtp_bytes += t.nbytes
+            continue
+        if t.name == "token_embd.weight":
+            s.embed_bytes += t.nbytes
+            continue
+        if layer is not None:
+            layer_names.setdefault(layer, set()).add(t.name.split(".", 2)[2])
+        if "_exps" in t.name:
+            s.expert_bytes += t.nbytes
+            s.expert_bytes_by_layer[layer] = s.expert_bytes_by_layer.get(layer, 0) + t.nbytes
+            slow_time += t.nbytes / _cpu_eff(t.ggml_type)
+            continue
+        s.nonexpert_bytes += t.nbytes
+    if s.expert_bytes:  # mixed-type quants (e.g. unsloth UD): effective speed of the whole expert mix
+        s.expert_cpu_eff = s.expert_bytes / slow_time
+    # Which layers keep a per-token KV cache? Hybrids mix full attention with linear attention / SSM layers,
+    # and the linear ones carry ssm_* tensors (and may still have attn_qkv / attn_k) but only a fixed-size state.
+    kvh = h0.get("attention.head_count_kv", 0)
+    if isinstance(kvh, list):
+        s.attn_layers = sum(1 for i, v in enumerate(kvh) if v and i < n_layers)
+    else:
+        def has_kv(names: set) -> bool:
+            if any(n.startswith("ssm_") for n in names):
+                return False
+            return any(n.startswith(("attn_k.", "attn_k_b", "attn_kv_a", "attn_qkv.", "attn_q.")) for n in names)
+        s.attn_layers = sum(1 for i, names in layer_names.items() if i < n_layers and has_kv(names)) or n_layers
+    embed_params = sum(t.n_elements for t in tensors if t.name == "token_embd.weight")
+    mtp_params = sum(t.n_elements for t in tensors if _in(t.name, mtp_ids))
+    base = s.total_params - embed_params - mtp_params
+    if s.is_moe:
+        frac = s.n_expert_used / s.n_expert
+        exp_params = sum(t.n_elements for t in tensors if "_exps" in t.name and not _in(t.name, mtp_ids))
+        s.active_params = base - exp_params + int(exp_params * frac)
+    else:
+        s.active_params = base
+    inner = int(h0.get("ssm.inner_size", 0) or 0)
+    if inner:  # rough recurrent state (conv + ssm) per sequence, f32
+        state = int(h0.get("ssm.state_size", 0) or 0)
+        conv = int(h0.get("ssm.conv_kernel", 0) or 0)
+        rec_layers = n_layers - s.attn_layers
+        s.recurrent_state_bytes = rec_layers * (inner * state + inner * conv) * 4
+    return s
+
+
+def _in(name: str, ids: set) -> bool:
+    m = _BLK.match(name)
+    return bool(m) and int(m.group(1)) in ids
+
+
+@dataclass
+class HostSpec:
+    vram_mib: int
+    ram_mib: int
+    ram_bw_gbs: float                 # measured sustained read bandwidth
+    vram_bw_gbs: float
+    ram_headroom_mib: int = 4096
+
+
+@dataclass
+class Plan:
+    ctx: int
+    slots: int
+    kv_type: str
+    fits: bool
+    reason: str
+    gpu_expert_frac: float
+    vram_used_mib: float
+    ram_used_mib: float
+    decode_tps: float                 # predicted at shallow depth, speculative decoding off
+    decode_tps_at_depth: float
+    depth: int
+
+
+def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv_type: str = "q8_0",
+         ubatch: int = 2048, depth: int = 50_000) -> Plan:
+    ctx = ctx or s.context_length or 32768
+    mib = 1 / 2**20
+    kv = s.kv_bytes_per_token(kv_type) * ctx + s.recurrent_state_bytes * slots
+    buf = COMPUTE_BUFFER_MIB.get(ubatch, 2100)
+    gpu_fixed = (s.nonexpert_bytes + kv) * mib + buf + GPU_RESERVE_MIB
+    free_for_experts = hw.vram_mib - gpu_fixed
+    if not s.is_moe:
+        # dense: everything must live on the GPU (we don't run dense models split across RAM)
+        need = gpu_fixed + s.embed_bytes * mib
+        fits = need <= hw.vram_mib
+        gpu_frac = 1.0
+        ram_used = s.embed_bytes * mib
+        reason = "fits in VRAM" if fits else f"dense model needs {need/1024:.1f} GiB VRAM"
+        per_token_gpu = s.nonexpert_bytes
+        per_token_cpu = 0.0
+    else:
+        gpu_frac = max(0.0, min(1.0, free_for_experts / (s.expert_bytes * mib))) if s.expert_bytes else 1.0
+        cpu_expert = s.expert_bytes * (1 - gpu_frac)
+        ram_used = (cpu_expert + s.embed_bytes) * mib
+        fits = free_for_experts > -1 and ram_used + hw.ram_headroom_mib <= hw.ram_mib
+        reason = ("fits" if fits else
+                  "VRAM too small for non-expert weights + KV" if free_for_experts <= -1 else
+                  f"needs {(ram_used + hw.ram_headroom_mib)/1024:.1f} GiB RAM")
+        frac = s.n_expert_used / s.n_expert
+        per_token_cpu = cpu_expert * frac
+        per_token_gpu = s.nonexpert_bytes + s.expert_bytes * gpu_frac * frac
+    vram_used = min(hw.vram_mib, gpu_fixed + (s.expert_bytes * gpu_frac * mib if s.is_moe else s.embed_bytes * mib))
+
+    def tps(d: int) -> float:
+        kv_read = s.kv_bytes_per_token(kv_type) * d
+        t = (per_token_cpu / (hw.ram_bw_gbs * 1e9 * RAM_EFFICIENCY * s.expert_cpu_eff)
+             + (per_token_gpu + kv_read) / (hw.vram_bw_gbs * 1e9 * VRAM_EFFICIENCY)
+             + s.n_layers * OVERHEAD_MS_PER_LAYER / 1000)
+        return 1 / t
+
+    return Plan(ctx=ctx, slots=slots, kv_type=kv_type, fits=fits, reason=reason, gpu_expert_frac=gpu_frac,
+                vram_used_mib=vram_used, ram_used_mib=ram_used, decode_tps=tps(0),
+                decode_tps_at_depth=tps(min(depth, ctx)), depth=min(depth, ctx))
+
+
+def max_context(s: ModelShape, hw: HostSpec, kv_type: str = "q8_0", ubatch: int = 2048, floor_frac: float = 0.95) -> int:
+    """Largest power-of-two-ish context (up to native) whose shallow decode stays within floor_frac of the 32k plan."""
+    base = plan(s, hw, ctx=min(32768, s.context_length or 32768), kv_type=kv_type, ubatch=ubatch)
+    best = base.ctx
+    ctx = best
+    while ctx < (s.context_length or 32768):
+        ctx = min(ctx * 2, s.context_length or ctx * 2)
+        p = plan(s, hw, ctx=ctx, kv_type=kv_type, ubatch=ubatch)
+        if not p.fits or p.decode_tps < base.decode_tps * floor_frac:
+            break
+        best = ctx
+    return best
