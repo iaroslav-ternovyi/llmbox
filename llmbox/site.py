@@ -196,13 +196,13 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
     if run or nxt:
         w = 100 * run["done"] / run["total"] if run and run["total"] else 0
         qline = ("<div class='queue'>" + (f"<span class='live'>●</span> Measuring <b>{esc(run['model'])}</b><span class='prog'><i style='width:{w:.0f}%'></i></span>"
-                                          f"<span class='q'>{run['done']} of {run['total']} tasks</span>" if run else "")
+                                          (f"<span class='q'>{run['done']} of {run['total']} tasks</span>" if run["total"] else "<span class='q'>starting</span>") if run else "")
                  + (f"<span class='q nx'>Next: {esc(', '.join(nxt))}</span>" if nxt else "") + "</div>")
 
     feed = []
     for j in q:
         if j["status"] == "running":
-            feed.append(f"<li><span class='live'>●</span> <b>{esc(j['model'])}</b> <span class='q'>measuring {j['done']}/{j['total']}</span><span class='when'>now</span></li>")
+            feed.append(f"<li><span class='live'>●</span> <b>{esc(j['model'])}</b> <span class='q'>{f"measuring {j['done']}/{j['total']}" if j['total'] else "starting"}</span><span class='when'>now</span></li>")
     for rec in sorted(report.results.load_all(host) + report.results.load_all("cloud"), key=lambda x: x.get("created", ""), reverse=True):
         su, s = rec.get("suite", {}), rec.get("summary", {})
         if rec.get("kind") != "suite" or su.get("version") != suite_version or su.get("tier") != tier or su.get("blocks"):
