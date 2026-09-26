@@ -185,4 +185,63 @@ def total(seed: int, level: int = 3) -> Item:
     return _item("total", seed, level, build)
 
 
-KINDS = {"lookup": lookup, "multihop": multihop, "count": count, "latest": latest, "total": total}
+def audit(seed: int, level: int = 6) -> Item:
+    """Expert: fact-check a draft monthly report (40 lines) against the incident log - the log is the source of truth and
+    later updates override earlier facts. Errors are subtle: a pre-correction severity or root-cause code, two swapped
+    digits in the user count, a duration off by an hour, a wrong service. Strict: the exact set of wrong lines."""
+    r = rng(BLOCK, f"audit{level}", seed)
+    staff, mgr_info, incidents = _world(r, TOKENS[4], corrections=2)
+    doc = _render(staff, mgr_info, incidents)
+    corrected = [i for i in incidents if i["updates"]]
+    rest = [i for i in incidents if not i["updates"]]
+    chosen = r.sample(corrected, min(14, len(corrected))) + r.sample(rest, 40 - min(14, len(corrected)))
+    chosen.sort(key=lambda i: i["opened"])
+
+    def fields(i):
+        d = i["resolved"] - i["opened"]
+        return {"service": i["service"], "sev": i["sev"], "users": i["users"], "dur": int(d.total_seconds() // 60), "code": i["code"]}
+
+    def line(i, f):
+        return (f"- {i['id']} ({f['service']}, {f['sev']}): about {f['users']:,} users affected, resolved after "
+                f"{f['dur'] // 60}h {f['dur'] % 60:02d}m, root-cause code {f['code']}.")
+    wrong = set()
+    kinds = ["stale_sev", "stale_code", "digits", "duration", "service", "stale_sev", "stale_code", "digits"]
+    targets = r.sample(chosen, len(kinds))
+    lines = []
+    plan = dict(zip((t["id"] for t in targets), kinds))
+    for i in chosen:
+        f = fields(i)
+        k = plan.get(i["id"])
+        if k == "stale_sev" and i["sev0"] != i["sev"]:
+            f["sev"] = i["sev0"]
+        elif k == "stale_code" and i["code0"] != i["code"]:
+            f["code"] = i["code0"]
+        elif k in ("stale_sev", "stale_code", "digits"):
+            s_ = str(f["users"])
+            if len(s_) >= 2 and len(set(s_)) > 1:
+                p = r.choice([j for j in range(len(s_) - 1) if s_[j] != s_[j + 1]] or [0])
+                s_ = s_[:p] + s_[p + 1] + s_[p] + s_[p + 2:]
+                f["users"] = int(s_)
+        elif k == "duration":
+            f["dur"] = max(1, f["dur"] + r.choice([-60, 60]))
+        elif k == "service":
+            f["service"] = r.choice([x for x in SERVICES if x != i["service"]])
+        if f != fields(i):
+            wrong.add(i["id"])
+        lines.append(line(i, f))
+    exp = [i["id"] for i in chosen if i["id"] in wrong]
+    report = "## Draft monthly reliability report (to be checked)\n\n" + "\n".join(lines)
+    question = ("The draft reliability report below was written from the incident log above. Check EVERY line of the report "
+                "against the log (the log is the source of truth, and later updates in the log override earlier facts). "
+                "List the ids of all incidents whose report line contains at least one error, in report order.")
+    fin = "\n\nAnswer from the documents only. Finish with a final line exactly in the form:\nANSWER: <comma-separated incident ids, or none>"
+
+    def check(t, _t=None, exp=tuple(exp)) -> float:
+        got = re.findall(r"INC-\d+", final_answer(t) or "")
+        return 1.0 if set(got) == set(exp) and len(got) == len(set(got)) else 0.0
+    return Item(f"{BLOCK}.audit.L{level}.{seed}", BLOCK, "audit",
+                [{"role": "user", "content": doc + "\n\n---\n" + report + "\n\n---\n" + question + fin}], check, max_tokens=32000,
+                meta={"expected": ", ".join(exp), "doc_tokens_est": (len(doc) + len(report)) // 4, "level": level, "wrong": len(exp)})
+
+
+KINDS = {"lookup": lookup, "multihop": multihop, "count": count, "latest": latest, "total": total, "audit": audit}
