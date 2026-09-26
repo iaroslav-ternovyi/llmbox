@@ -128,44 +128,24 @@ RAM_KINDS = [("DDR4-3200", 40), ("DDR5-5600", 60), ("DDR5-6400", 75), ("DDR5-800
 
 
 def shape_data(local: list[dict], host: str = "box") -> dict:
-    """Per recipe: the GGUF shape numbers estimate.plan() uses, plus a calibration factor = measured / predicted on the
-    reference box (it carries what the model does not: MTP speed-up, kernel quirks). Shapes are cached per file."""
-    import json
-    from . import estimate as E, hosts, recipe as rc, speed
-    cache = os.path.join(HOME, "shapes")
-    os.makedirs(cache, exist_ok=True)
+    """Per recipe: the GGUF shape numbers estimate.plan() uses, plus the calibration measured / predicted on the
+    reference box (llmbox.fit, the same numbers `llmbox fit` prints)."""
+    from . import fit as F, hosts, recipe as rc
     prof = hosts.load(host)
     ref_hw = hosts.spec(prof)
-    h = None
     out = {}
     for r in local:
         try:
             rec = rc.load(host, r["id"])
         except (OSError, ValueError):
             continue
-        path = rec["model"]["path"]
-        cp = os.path.join(cache, os.path.basename(path) + ".json")
-        if os.path.exists(cp):
-            sh = E.ModelShape(**json.load(open(cp)))
-        else:
-            h = h or hosts.host_of(prof)
-            sh = speed.shape_on_host(h, path)
-            json.dump({k: v for k, v in sh.__dict__.items()}, open(cp, "w"))
+        sh = F.shape_for(rec, host=hosts.host_of(prof))
+        cal = F.calibration(rec, sh, host)
         kv, ctx = rec["placement"]["kv_type"], rec["placement"]["ctx"] or sh.context_length
-        bd = (r["speed"].get("by_depth") or {})
-        m2 = r["speed"].get("decode_tps")
-        deep = [(report._depth_k(k), d["decode_tps"]) for k, d in bd.items() if report._depth_k(k) >= 24 and d.get("decode_tps")]
-        p2 = E.plan(sh, ref_hw, ctx=ctx, kv_type=kv, depth=2000).decode_tps_at_depth
-        k2 = m2 / p2 if m2 else 1.0
-        if deep:
-            dk, dv = max(deep)
-            kd = dv / E.plan(sh, ref_hw, ctx=ctx, kv_type=kv, depth=int(dk * 1000)).decode_tps_at_depth
-        else:
-            dk, kd = 88, k2
         out[r["id"]] = {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
                         "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used, "rec": sh.recurrent_state_bytes,
-                        "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "ctx": ctx, "k2": round(k2, 4), "kd": round(kd, 4),
-                        "deepK": dk, "size": round((sh.total_bytes or 0) / 1e9, 1)}
+                        "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "ctx": ctx, "k2": round(cal.k2, 4), "kd": round(cal.kd, 4),
+                        "deepK": cal.deep_k, "size": round((sh.total_bytes or 0) / 1e9, 1)}
     return {"recipes": out, "ref": {"gpu": prof["hw"]["gpus"][0]["name"].replace("NVIDIA GeForce ", "") if prof["hw"]["gpus"] else "",
                                     "vram": ref_hw.vram_mib, "ram": ref_hw.ram_mib, "rambw": ref_hw.ram_bw_gbs, "vrambw": ref_hw.vram_bw_gbs},
             "gpus": GPUS, "ramKinds": RAM_KINDS}
@@ -318,7 +298,7 @@ _HOME_CSS = """
 _JS = r"""
 const $ = s => document.querySelector(s);
 const fmt = v => v.toFixed(0);
-const kfmt = c => `${Math.round(c / 1000)}k`;
+const kfmt = c => `${Math.round(c / 1024)}k`;
 function sameClass(hw) { const r = DATA.ref; return hw.gpu === r.gpu && Math.abs(hw.rambw - r.rambw) / r.rambw < 0.15 && hw.ram >= r.ram * 0.9; }
 function tile(v, small, pred) { const c = v >= 85 ? "hi" : v >= 50 ? "mid" : "lo";
   return `<span class="tile ${c}${pred ? " pred" : ""}">${pred ? "~" : ""}${fmt(v)}<small>${small}</small></span>`; }
@@ -661,7 +641,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict
                 ("Anti-loop", (f'marker bias −{al.get("marker_bias")} on {len(al.get("marker_ids") or [])} tokens' if al.get("marker_ids") else "none") + (f' · DRY in thinking, allowed {al.get("dry_allowed_length")}' if al.get("dry_think_only") else "")),
                 ("KV cache", pl.get("kv_type", "?")),
                 ("Speculative", f'{spc.get("type")} · draft {spc.get("draft_max")}' if spc.get("type") else "off")]
-    hwrows = [("Context", f'{round((pl.get("ctx") or 0) / 1000)}k'), ("Batch", f'{pl.get("batch")} / ubatch {pl.get("ubatch")}'), ("Threads", f'{(rcp.get("runtime") or {}).get("threads")} on cores {(rcp.get("runtime") or {}).get("cpu_affinity") or "any"}')]
+    hwrows = [("Context", f'{round((pl.get("ctx") or 0) / 1024)}k'), ("Batch", f'{pl.get("batch")} / ubatch {pl.get("ubatch")}'), ("Threads", f'{(rcp.get("runtime") or {}).get("threads")} on cores {(rcp.get("runtime") or {}).get("cpu_affinity") or "any"}')]
     recipe_html = ('<div class="rgrid"><div><div class="sc">Same on every box · these set the score</div><dl>'
                    + "".join(f"<dt>{k}</dt><dd class='val'>{esc(v)}</dd>" for k, v in portable)
                    + '</dl></div><div><div class="sc">Fitted to each box · speed only</div><dl>'
@@ -934,6 +914,6 @@ rows.sort((a, b) => b.t2 - a.t2);
 const T = (v, pred) => `<span class="tile ${v >= 50 ? "hi" : v >= 25 ? "mid" : "lo"}${pred ? " pred" : ""}">${pred ? "~" : ""}${Math.round(v)}</span>`;
 $("#boxes").innerHTML = `<tr><th class="l">BOX</th><th>TOK/S<br><span class="faint">short chat</span></th><th>TOK/S<br><span class="faint">long context</span></th><th>EXPERTS<br><span class="faint">on the GPU</span></th><th>CONTEXT</th><th class="l"></th></tr>` +
   rows.map(r => `<tr class="${r.measured || r.mine ? "sel" : ""}"><td class="l"><span class="m">${r.name}</span>${r.measured ? ' <span class="youb">MEASURED</span>' : r.mine ? ' <span class="youb">YOUR BOX</span>' : ""}</td>` +
-    `<td>${T(r.t2, !r.measured)}</td><td>${r.td ? T(r.td, !r.measured) : "—"}</td><td>${Math.round(r.f.gf * 100)}%</td><td>${r.f.fits ? "✓ " + Math.round(r.f.ctx / 1000) + "k" : "✗"}</td>` +
+    `<td>${T(r.t2, !r.measured)}</td><td>${r.td ? T(r.td, !r.measured) : "—"}</td><td>${Math.round(r.f.gf * 100)}%</td><td>${r.f.fits ? "✓ " + Math.round(r.f.ctx / 1024) + "k" : "✗"}</td>` +
     `<td class="l">${r.measured ? '<span class="q">1 run</span>' : r.low ? '<span class="lowc">rough estimate</span>' : '<span class="q">predicted</span>'}</td></tr>`).join("");
 """

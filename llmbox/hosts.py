@@ -19,12 +19,29 @@ GPU_BW = {
     "RTX PRO 6000": 1792, "RTX A6000": 768, "A100": 1935, "H100": 3350, "L40S": 864,
 }
 
+# VRAM (MiB) of the common size of each card, for what-if fits without a host profile (8 GB variants: pass --vram-gb)
+GPU_VRAM_MIB = {
+    "RTX 5090": 32607, "RTX 5080": 16303, "RTX 5070 Ti": 16303, "RTX 5070": 12227, "RTX 5060 Ti": 16311,
+    "RTX 4090": 24564, "RTX 4080 SUPER": 16376, "RTX 4080": 16376, "RTX 4070 Ti SUPER": 16376, "RTX 4070 Ti": 12282,
+    "RTX 4070 SUPER": 12282, "RTX 4070": 12282, "RTX 4060 Ti": 16380, "RTX 3090 Ti": 24576, "RTX 3090": 24576,
+    "RTX 3080 Ti": 12288, "RTX 3060": 12288,
+}
+
+
+def _lookup(table: dict, name: str):
+    for key in sorted(table, key=len, reverse=True):  # longest match first ("5070 Ti" before "5070")
+        if key.lower() in name.lower():
+            return table[key]
+    return None
+
+
+def gpu_vram(name: str) -> int | None:
+    return _lookup(GPU_VRAM_MIB, name)
+
 
 def gpu_bw(name: str) -> float | None:
-    for key in sorted(GPU_BW, key=len, reverse=True):  # longest match first ("5070 Ti" before "5070")
-        if key.lower() in name.lower():
-            return float(GPU_BW[key])
-    return None
+    v = _lookup(GPU_BW, name)
+    return float(v) if v else None
 
 
 def path(name: str) -> str:

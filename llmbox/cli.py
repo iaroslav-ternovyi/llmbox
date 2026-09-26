@@ -53,6 +53,62 @@ def cmd_scout(a: argparse.Namespace) -> None:
         print(scout.render(a.repo, rows, hw))
 
 
+def _ctx_arg(v: str | None) -> int | None:
+    if not v:
+        return None
+    v = v.lower().strip()
+    return int(float(v[:-1]) * 1024) if v.endswith("k") else int(v)
+
+
+def cmd_fit(a: argparse.Namespace) -> None:
+    """Fit the hardware layer of a recipe to a host (or to hardware described on the command line)."""
+    import re as _re
+    from . import estimate as E, fit as F, recipe as rc
+    r = rc.load(a.src, a.recipe)
+    src_prof = hosts.load(a.src) if os.path.exists(hosts.path(a.src)) else None
+    prof, cores = None, None
+    if a.gpu:
+        vram = int(a.vram_gb * 1024) if a.vram_gb else hosts.gpu_vram(a.gpu)
+        if not vram:
+            raise SystemExit(f"unknown VRAM for {a.gpu!r}: pass --vram-gb")
+        hw = E.HostSpec(vram_mib=vram, ram_mib=int(a.ram_gb * 1024), ram_bw_gbs=a.ram_bw, vram_bw_gbs=hosts.gpu_bw(a.gpu) or 500.0)
+        target, cores = f"{a.gpu} · {a.ram_gb:g} GB RAM @ {a.ram_bw:g} GB/s (what-if)", a.cores
+    else:
+        prof = hosts.load(a.host or a.src)
+        hw = hosts.spec(prof)
+        target = prof["name"]
+        cpu = prof["hw"].get("cpu") or {}
+        cores = a.cores or cpu.get("cores") or cpu.get("threads")
+    same = prof is not None and prof["name"] == a.src
+    shape = F.shape_for(r, host=hosts.host_of(src_prof) if src_prof else None)
+    cal = F.calibration(r, shape, a.src) if src_prof else F.Calibration()
+    f = F.fit(r, shape, hw, cores=cores, cal=cal, ctx=_ctx_arg(a.ctx), same_host=same)
+    if a.json:
+        json.dump({"recipe": a.recipe, "target": target, "fits": f.fits, "ctx": f.ctx, "want_ctx": f.want_ctx, "ubatch": f.ubatch,
+                   "threads": f.threads, "cpu_affinity": f.cpu_affinity, "tps": round(f.tps, 1), "tps_deep": round(f.tps_deep, 1),
+                   "deep_k": f.deep_k, "gpu_expert_frac": round(f.plan.gpu_expert_frac, 3) if f.plan else None,
+                   "calibration": f.calibration.source, "warnings": f.warnings, "options": f.options, "alternatives": f.alternatives,
+                   "hardware": F.layer(F.apply(r, f), F.HARDWARE) if f.fits else None}, sys.stdout, indent=1)
+        print()
+    else:
+        print(F.render(a.recipe, r, f, target, shape, hw))
+    if not a.write:
+        return
+    if not prof:
+        raise SystemExit("--write needs a registered host (--host); a what-if fit has nowhere to go")
+    if not f.fits:
+        raise SystemExit("nothing written: the model does not fit")
+    out = os.path.join(rc.recipes_dir(prof["name"]), f"{a.recipe}.toml")
+    if os.path.exists(out) and not a.force:
+        raise SystemExit(f"\n{out} exists (the recipe itself on its own host); --force to replace it with the fitted copy")
+    runtimes = sorted(prof["hw"].get("runtimes") or [], key=lambda x: int((_re.search(r"build (\d+)", x.get("version", "")) or [0, 0])[1]))
+    fitted = F.apply(r, f, models_dir=None if same else prof["hw"].get("models_dir_guess"),
+                     server=None if same or not runtimes else runtimes[-1]["path"])
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    open(out, "w").write(F.to_toml(fitted, header=F.stamp(target, hw, f)))
+    print(f"\nwrote {out}")
+
+
 def cmd_loops(a: argparse.Namespace) -> None:
     import os
     from . import loops
@@ -370,6 +426,20 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_scout)
 
+    fp = sub.add_parser("fit", help="fit a recipe's hardware layer (context, batch, threads...) to a host; no download")
+    fp.add_argument("recipe")
+    fp.add_argument("--from", dest="src", default="box", help="host whose recipe and measurements to start from (default box)")
+    fp.add_argument("--host", help="registered target host (default: the --from host)")
+    fp.add_argument("--gpu", help="what-if target instead of a host, e.g. 'RTX 4090'")
+    fp.add_argument("--vram-gb", type=float, help="what-if VRAM (default: the card's common size)")
+    fp.add_argument("--ram-gb", type=float, default=64, help="what-if system RAM, GB (default 64)")
+    fp.add_argument("--ram-bw", type=float, default=60, help="what-if RAM read bandwidth, GB/s (default 60)")
+    fp.add_argument("--cores", type=int, help="CPU cores for llama.cpp threads")
+    fp.add_argument("--ctx", help="context to fit instead of the recipe's, e.g. 128k")
+    fp.add_argument("--write", action="store_true", help="save the fitted recipe under the target host")
+    fp.add_argument("--force", action="store_true", help="with --write: replace an existing recipe file")
+    fp.add_argument("--json", action="store_true")
+    fp.set_defaults(fn=cmd_fit)
     lp = sub.add_parser("loops", help="fast reasoning-loop test: replay contexts where models looped before")
     lp.add_argument("action", choices=["extract", "replay"])
     lp.add_argument("--transcripts", default="~/agent-bench-runs/claude-config/projects")
