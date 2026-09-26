@@ -196,7 +196,7 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
     if run or nxt:
         w = 100 * run["done"] / run["total"] if run and run["total"] else 0
         qline = ("<div class='queue'>" + (f"<span class='live'>●</span> Measuring <b>{esc(run['model'])}</b><span class='prog'><i style='width:{w:.0f}%'></i></span>"
-                                          (f"<span class='q'>{run['done']} of {run['total']} tasks</span>" if run["total"] else "<span class='q'>starting</span>") if run else "")
+                                          + (f"<span class='q'>{run['done']} of {run['total']} tasks</span>" if run["total"] else "<span class='q'>starting</span>") if run else "")
                  + (f"<span class='q nx'>Next: {esc(', '.join(nxt))}</span>" if nxt else "") + "</div>")
 
     feed = []
@@ -240,7 +240,9 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
  <div class="tw"><table class="rank">{head}{''.join(body)}</table></div>{qline}</section>
 <div class="below">
- <section class="panel chart"><div class="lbl">Smarter vs faster</div><div id="scatter">{_scatter(local)}</div></section>
+ <section class="panel chart"><div class="lbl">Smarter vs faster</div><div id="scatter">{_scatter(local)}</div>
+  <p class="legend"><svg width="12" height="16" viewBox="0 0 12 16"><g stroke="#FFB000" stroke-opacity=".6" stroke-width="1.5"><line x1="6" y1="1" x2="6" y2="15"/><line x1="1" y1="1" x2="11" y2="1"/><line x1="1" y1="15" x2="11" y2="15"/></g></svg>
+  where the score probably really is (95%). With ~30 tasks one task moves it a few points; when two ranges overlap, the difference is not settled yet. <a href="method.html">More</a></p></section>
  <section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
 </div>
 <footer><span>Every number comes from a saved run. The score does not depend on the box; speed does. <a href="method.html">How scores work →</a></span><span>generated {time.strftime('%b %d, %Y %H:%M')}</span></footer>
@@ -286,6 +288,7 @@ _HOME_CSS = """
 .prog{width:120px;height:4px;background:var(--line);display:inline-block}.prog i{display:block;height:100%;background:var(--amber)}
 .below{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:22px}
 .chart{padding:18px 16px 10px}.scatter{width:100%;height:auto;display:block}
+.legend{display:flex;gap:10px;align-items:flex-start;font-size:12px;color:var(--muted);margin:6px 8px 4px;line-height:1.5}.legend svg{flex:none;margin-top:2px}
 .feed ul{list-style:none;padding:14px 18px}.feed li{font-size:13px;padding:8px 0;border-bottom:1px solid var(--line2)}.feed li:last-child{border-bottom:0}
 .feed .fv{color:var(--soft);margin-left:6px}.feed .when{display:block;font-size:11px;color:var(--faint)}
 @media (max-width:900px){
@@ -319,7 +322,8 @@ function scatter(pts) {                     // up = smarter, right = faster; the
     const k = p.vs / p.cap, lo = p.ci[0] * k, hi = Math.min(100, p.ci[1] * k), x = X(p.t2), y = Y(p.vs);
     let ly = y + 4; while (used.some(u => Math.abs(u - ly) < 16)) ly += 16; used.push(ly);
     const right = x < R - 215;
-    g += `<line x1="${x}" y1="${Y(hi)}" x2="${x}" y2="${Y(lo)}" stroke="#FFB000" stroke-opacity=".3" stroke-width="2"/>` +
+    g += `<g stroke="#FFB000" stroke-opacity=".45" stroke-width="1.5"><line x1="${x}" y1="${Y(hi)}" x2="${x}" y2="${Y(lo)}"/>` +   // error bar with end caps
+         `<line x1="${x - 5}" y1="${Y(hi)}" x2="${x + 5}" y2="${Y(hi)}"/><line x1="${x - 5}" y1="${Y(lo)}" x2="${x + 5}" y2="${Y(lo)}"/></g>` +
          `<circle cx="${x}" cy="${y}" r="6" fill="${p.pred ? "#0E0F0C" : "#FFB000"}" stroke="#FFB000" stroke-width="2" filter="url(#g)"/>` +
          `<text x="${right ? x + 12 : x - 12}" y="${ly}" text-anchor="${right ? "start" : "end"}" fill="#E8E4D8" font-size="13" stroke="#121310" stroke-width="5" paint-order="stroke">${p.id} <tspan fill="#FFB000">${p.vs.toFixed(0)}% · ${Math.round(p.t2)} tok/s</tspan></text>`;
   }
