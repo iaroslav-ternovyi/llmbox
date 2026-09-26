@@ -14,9 +14,27 @@ BLOCK_NAMES = {"agentic": "Agentic coding", "code": "Code", "tools": "Tools & au
                "writing": "Writing", "reasoning": "Reasoning"}
 
 
+def latest_probe(recs: list[dict], rid: str, after: str = "") -> dict | None:
+    """Newest 1-stream speed re-measurement of a recipe (`llmbox probe`, e.g. after `llmbox tune`) made after `after`."""
+    ps = [x for x in recs if x.get("kind") == "probe" and (x.get("recipe") or {}).get("id") == rid and x.get("created", "") > after
+          and ((x.get("summary") or {}).get("speed") or {}).get("decode_tps")]
+    return max(ps, key=lambda x: x["created"]) if ps else None
+
+
+def with_probe(rec: dict, recs: list[dict]) -> dict:
+    """The suite record with its speed replaced by a newer re-measurement (quality is the suite's; speed is today's)."""
+    p = latest_probe(recs, (rec.get("recipe") or {}).get("id"), rec.get("created", ""))
+    if not p:
+        return rec
+    out = dict(rec, summary=dict(rec["summary"], speed=p["summary"]["speed"]))
+    out["speed_note"] = f"re-measured {p['created'][:10]}" + (" after tune" if p.get("tuned") else "")
+    return out
+
+
 def rows(host: str | None = None, suite_version: str | None = None, tier: str | None = None) -> list[dict]:
     out = []
     recs = results.load_all(host) + (results.load_all("cloud") if host and host != "cloud" else [])
+    recs = [with_probe(x, recs) if x.get("kind") == "suite" else x for x in recs]
     for rec in recs:
         if rec.get("kind") != "suite":
             continue

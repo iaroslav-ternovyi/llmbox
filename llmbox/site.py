@@ -961,7 +961,9 @@ def build(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str
     os.makedirs(out_dir, exist_ok=True)
     written = [home(out_dir, host, suite_version, tier)]
     recs = load_records(host, suite_version, tier)
-    local, ref = recs["local"], recs["ref"]
+    local_run, ref = recs["local"], recs["ref"]
+    allrecs = report.results.load_all(host)
+    local = {rid: report.with_probe(rec, allrecs) for rid, rec in local_run.items()}   # speed re-measured after tune; run pages keep their own
     rs = [r for r in report.rows(host, suite_version=suite_version, tier=tier) if r["host"].get("id") != "cloud" and not r.get("partial")]
     ranks = rank_ranges(rs)
     n_total = len(rs) + len([j for j in queue_state() if j["model"] not in local])
@@ -976,7 +978,7 @@ def build(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str
     for rid in order:
         rec = local[rid]
         w(f"recipe-{rid}.html", recipe_page(rid, rec, ref, local, ranks, flags[rid], len(local), n_total))
-        w(f"run-{rec['id'][:8]}.html", run_page(rid, rec, ref, flags[rid]))
+        w(f"run-{rec['id'][:8]}.html", run_page(rid, local_run[rid], ref, flags[rid]))
         if rid in data["recipes"]:
             w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
     for a, b in itertools.combinations(order, 2):

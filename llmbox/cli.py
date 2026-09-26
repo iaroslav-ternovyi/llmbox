@@ -128,6 +128,25 @@ def cmd_tune(a: argparse.Namespace) -> None:
         tune.run(a.host, rid)
 
 
+def cmd_probe(a: argparse.Namespace) -> None:
+    """Re-measure only the 1-stream speed of a served recipe (after tune); quality stays from its suite run."""
+    import json as _json
+    from . import bench, recipe as rc, results, runinfo
+    rid = a.recipe or a.model
+    cap = runinfo.begin(a.host, a.endpoint, a.model)
+    sp = bench.speed_probe(a.endpoint, a.model)
+    r = rc.load(a.host, rid)
+    info = runinfo.end(cap, r)
+    rec = results.new("probe", hosts.load(a.host), recipe=r, model={k: r["model"].get(k) for k in ("hf_repo", "file", "path", "sha256")})
+    rec["summary"] = {"speed": sp}
+    rec["runtime"], rec["telemetry"] = info["runtime"], info["telemetry"]
+    tuned = os.path.join(hosts.HOME, "tuned", a.host, f"{rid}.json")
+    rec["tuned"] = bool(os.path.exists(tuned) and (_json.load(open(tuned)).get("applied_flags")))
+    print(f"{rid}: {sp['decode_tps']} tok/s short, " + " | ".join(f"{k} {v['decode_tps']}" for k, v in (sp.get("by_depth") or {}).items())
+          + f"  ({(info['runtime'] or {}).get('variant', '?')})")
+    print(f"  saved {results.save(a.host, rec)}")
+
+
 def cmd_loops(a: argparse.Namespace) -> None:
     import os
     from . import loops
@@ -495,6 +514,12 @@ def main(argv: list[str] | None = None) -> None:
     tp.add_argument("--host", default="box")
     tp.add_argument("--plan", action="store_true", help="list the variants only, measure nothing")
     tp.set_defaults(fn=cmd_tune)
+    pp = sub.add_parser("probe", help="re-measure only the 1-stream speed of a served recipe (e.g. after tune)")
+    pp.add_argument("model", help="llama-swap id")
+    pp.add_argument("--host", default="box")
+    pp.add_argument("--recipe", help="recipe id (default: the model id)")
+    pp.add_argument("--endpoint", default="http://192.0.2.10:8080")
+    pp.set_defaults(fn=cmd_probe)
     lp = sub.add_parser("loops", help="fast reasoning-loop test: replay contexts where models looped before")
     lp.add_argument("action", choices=["extract", "replay"])
     lp.add_argument("--transcripts", default="~/agent-bench-runs/claude-config/projects")
