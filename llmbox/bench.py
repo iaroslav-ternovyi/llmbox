@@ -191,7 +191,7 @@ def run(base_url: str, model: str, tier: str = "quick", seed0: int = 0, blocks: 
     s = summarize(rows, time.time() - t0)
     if parallel > 1:   # per-request speeds were measured under contention: the caller replaces them with a 1-stream probe
         s["parallel"] = parallel
-    return {"suite": {"name": "llmbox-standard", "version": suite.VERSION, "tier": tier, "seed0": seed0,
+    return {"suite": {"name": "llmbox-standard", "version": suite.VERSION, "content_hash": suite.content_hash(), "tier": tier, "seed0": seed0,
                       "weights": suite.WEIGHTS, "blocks": sorted(blocks) if blocks else None}, "summary": s, "rows": rows}
 
 

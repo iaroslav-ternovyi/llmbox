@@ -73,3 +73,20 @@ def build(tier: str = "quick", seed0: int = 0, blocks: list[str] | None = None) 
     lc = sorted((it for it in items if it.block == "longctx"), key=lambda it: (it.meta.get("level", 0), it.id.split(".")[-1]))
     it_lc = iter(lc)
     return [next(it_lc) if it.block == "longctx" else it for it in items]
+
+
+def content_hash() -> str:
+    """sha256 (12 hex) over all suite sources, projects and sessions: identifies the exact tasks + graders of a result."""
+    import hashlib
+    import os
+    root = os.path.dirname(os.path.abspath(__file__))
+    h = hashlib.sha256()
+    for dp, dns, fns in sorted(os.walk(root)):
+        dns[:] = sorted(d for d in dns if d != "__pycache__")
+        for fn in sorted(fns):
+            if fn.endswith((".pyc", ".tgz")):
+                continue
+            path = os.path.join(dp, fn)
+            h.update(os.path.relpath(path, root).encode())
+            h.update(open(path, "rb").read())
+    return h.hexdigest()[:12]

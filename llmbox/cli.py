@@ -97,7 +97,7 @@ def cmd_speed(a: argparse.Namespace) -> None:
 def cmd_bench(a: argparse.Namespace) -> None:
     from . import bench, results
     print(f"llmbox standard suite · tier {a.tier} · model {a.model} @ {a.endpoint}", flush=True)
-    jl = os.path.expanduser(f"~/.llmbox/runs/{a.model}-{a.tier}-{int(__import__('time').time())}.jsonl")
+    jl = a.jsonl or os.path.expanduser(f"~/.llmbox/runs/{a.model}-{a.tier}-{int(__import__('time').time())}.jsonl")
     os.makedirs(os.path.dirname(jl), exist_ok=True)
     if a.endpoint.startswith("claude-code"):
         from . import frontier
@@ -164,6 +164,48 @@ def _vram_check(prof: dict) -> dict:
         return {"used_mib": used, "total_mib": total, "idle_mib": idle}
     except Exception as e:  # never fail a finished run on a telemetry problem
         return {"error": str(e)[:200]}
+
+
+def cmd_queue(a: argparse.Namespace) -> None:
+    from . import queue as q
+    if a.action == "add":
+        import shlex
+        extra = shlex.split(a.bench_args or "")
+        for m in a.models:
+            jid = q.add(m, a.suite, a.tier, a.host, extra, a.priority, a.note or "")
+            print(f"queued job {jid}: {m} [{a.suite} {a.tier}] {' '.join(extra)}")
+    elif a.action in ("list", "status"):
+        rows = q.jobs(all_=a.all)
+        if not rows:
+            print("no jobs")
+        for r in rows:
+            prog = q.progress(r) if r["status"] == "running" else ""
+            res = os.path.basename(r["result"] or "") if r["status"] == "done" else (r["note"] or "")
+            print(f"{r['id']:>4} {r['status']:<11} {r['model']:<24} {r['suite']:<11} {r['tier']:<6} "
+                  f"{' '.join(json.loads(r['args'] or '[]'))[:60]:<60} {prog or res}")
+    elif a.action == "run":
+        q.run(until_empty=a.until_empty)
+    elif a.action == "cancel":
+        for i in a.ids:
+            q.set_status(int(i), "cancelled")
+            print(f"job {i} cancelled (a running job keeps running; stop it with: pkill -f 'job-{i}.jsonl')")
+    elif a.action == "retry":
+        for i in a.ids:
+            q.set_status(int(i), "queued", attempts=0)
+            print(f"job {i} re-queued")
+    elif a.action == "pause":
+        os.makedirs(q.QDIR, exist_ok=True)
+        open(q.PAUSE, "w").close()
+        print("paused: the worker starts no new job (the running one finishes)")
+    elif a.action == "resume":
+        if os.path.exists(q.PAUSE):
+            os.remove(q.PAUSE)
+        print("resumed")
+
+
+def cmd_snapshot(a: argparse.Namespace) -> None:
+    from . import queue as q
+    print(q.snapshot(a.tag))
 
 
 def cmd_regrade(a: argparse.Namespace) -> None:
@@ -248,10 +290,28 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--recipe", help="recipe id to attach (default: same as model)")
     b.add_argument("--resume", help="jsonl of an interrupted run: reuse its finished items")
     b.add_argument("--rerun", action="append", help="with --resume: run this item id again (repeatable)")
+    b.add_argument("--jsonl", help="where to append per-item rows (default: ~/.llmbox/runs/<model>-<tier>-<time>.jsonl)")
     b.add_argument("--parallel", type=int, default=1, help="concurrent items (the served entry needs that many slots, unified KV)")
     b.add_argument("--speed-model", help="single-slot model id for the 1-stream speed probe (default: --recipe or model)")
     b.add_argument("--speed-probe", action="store_true", help="also run the 1-stream speed-by-depth probe after the run")
     b.set_defaults(fn=cmd_bench)
+
+    qp = sub.add_parser("queue", help="persistent benchmark job queue with GPU health gating and auto-resume")
+    qp.add_argument("action", choices=["add", "list", "status", "run", "cancel", "retry", "pause", "resume"])
+    qp.add_argument("models", nargs="*", help="add: model ids at the endpoint")
+    qp.add_argument("--suite", default="suite-v0.8", help="git tag of the suite to run (frozen via llmbox snapshot)")
+    qp.add_argument("--tier", default="quick")
+    qp.add_argument("--host", default="box")
+    qp.add_argument("--priority", type=int, default=0)
+    qp.add_argument("--note")
+    qp.add_argument("--all", action="store_true", help="list: include done / cancelled jobs")
+    qp.add_argument("--until-empty", action="store_true", help="run: exit when no job is left")
+    qp.add_argument("--ids", nargs="*", default=[], help="cancel / retry: job ids")
+    qp.add_argument("--bench-args", default="", help='add: extra bench args, e.g. --bench-args "--recipe x --parallel 3"')
+    qp.set_defaults(fn=cmd_queue)
+    sn = sub.add_parser("snapshot", help="freeze a git tag of llmbox into ~/.llmbox/snapshots/<tag>")
+    sn.add_argument("tag")
+    sn.set_defaults(fn=cmd_snapshot)
 
     rg = sub.add_parser("regrade", help="re-score text-graded items of saved results with the current graders")
     rg.add_argument("results", nargs="+", help="result json files (~/.llmbox/results/<host>/*.json)")
