@@ -95,7 +95,7 @@ def server_args(r: dict, port: str = "$PORT") -> list[str]:
               "--dry-allowed-length", str(al["dry_allowed_length"]), "--dry-penalty-last-n", str(al["dry_penalty_last_n"])]
     if al["reasoning_budget"] >= 0:
         a += ["--reasoning-budget", str(al["reasoning_budget"]), "--reasoning-budget-message", al["budget_message"]]
-    if al["reasoning_loop"]:   # content-based loop detector (local llama.cpp patch 0002)
+    if al.get("reasoning_loop"):   # content-based loop detector (local llama.cpp patch 0002)
         a += ["--reasoning-loop", str(al["reasoning_loop"])]
     a += [str(x) for x in r["extra"]["args"]]
     return a
