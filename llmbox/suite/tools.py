@@ -557,7 +557,184 @@ def reconcile(seed: int, level: int = 3) -> Item:
     return _item("reconcile", seed, user, check, w, {"expected": [[x["tx"]] + [str(v) for v in x["exp"]] for x in lines], "level": level})
 
 
+
+# ---- expert level (6): calibrated so the frontier reference solves only part of it -------------------------------
+
+class OutreachWorld(World):
+    """World with the mess real CRMs have: merged duplicate records, names with diacritics, emails with stray spaces,
+    and a mail API whose 504s are ambiguous - some failed sends were actually delivered."""
+
+    def __init__(self, r, level: int = 5):
+        super().__init__(r, level=level)
+        self.r2 = r
+        self.send_calls = 0
+        for c in self.customers.values():
+            c.setdefault("merged_into", None)
+
+    def call(self, name: str, a: dict):
+        if name == "send_email" and not (self.rate_limit and (self.calls + 1) % 9 == 0):
+            self.calls += 1
+            self.send_calls += 1
+            to = str(a.get("to", "")).strip().lower()
+            flaky = self.r2.random() < 0.3
+            delivered = (not flaky) or self.r2.random() < 0.5
+            if delivered:
+                self.emails.append({"to": a.get("to"), "subject": a.get("subject", ""), "body": a.get("body", "")})
+                cid = next((c["id"] for c in self.customers.values() if c["email"].strip().lower() == to), None)
+                if cid:
+                    self.log.setdefault(cid, []).append((TODAY.isoformat(), a.get("subject", "")))
+            if flaky:
+                return {"error": "504 Gateway Timeout - the mail service did not confirm; the message may or may not have been sent."}
+            return {"ok": True, "message_id": f"M{len(self.emails)}"}
+        return super().call(name, a)
+
+
+def _plain_upper(name: str) -> str:
+    return _plain(name).upper()
+
+
+def outreach(seed: int, level: int = 6) -> Item:
+    """Win-back outreach from a messy sales list (expert). Per list line the right outcome is one email to the right
+    (primary) record, a collections task, a skip, or 'not in the CRM'; duplicates of a person, doubled emails after an
+    ambiguous 504 and actions on people not on the list are all wrong."""
+    r = rng(BLOCK, f"outreach{level}", seed)
+    w = OutreachWorld(r, level=5)
+    today = TODAY.isoformat()
+    custs = list(w.customers.values())
+    accented = [c for c in custs if c["name"] != _plain(c["name"])]
+    plain = [c for c in custs if c["name"] == _plain(c["name"])]
+    lines, exp = [], []            # exp: (line, kind, primary_id or None)
+
+    def overdue30(c):
+        return any(i["due_date"] < (TODAY - dt.timedelta(days=30)).isoformat() for i in w.unpaid(c["id"]))
+
+    def fmt(c, style):
+        f, l = c["name"].split()
+        return {0: f"{_plain_upper(l)}, {_plain_upper(f)}", 1: f"{_plain(f).lower()} {_plain(l).lower()}", 2: f"{l} {f}"}[style]
+
+    def clean_for_email(c):
+        w.log.pop(c["id"], None)
+        for i in w.invoices.values():
+            if i["customer_id"] == c["id"] and i["status"] == "unpaid" and i["due_date"] < (TODAY - dt.timedelta(days=30)).isoformat():
+                i["status"] = "paid"
+    used = set()
+
+    def pick(pool):
+        c = r.choice([x for x in pool if x["id"] not in used])
+        used.add(c["id"])
+        return c
+    # 1) accented names written without accents (search is accent-sensitive): plain email expected
+    for _ in range(6):
+        c = pick(accented); clean_for_email(c)
+        lines.append(f"{fmt(c, r.choice([0, 1]))} ({c['city']})"); exp.append(("email", c["id"]))
+    # 2) merged duplicates: the old record (plain name, old address) points to the primary
+    for _ in range(2):
+        c = pick(accented); clean_for_email(c)
+        dup_id = f"C-{100 + len(w.customers)}"
+        w.customers[dup_id] = {"id": dup_id, "name": _plain(c["name"]), "city": c["city"], "tier": c["tier"],
+                               "email": f"{_plain(c['name']).split()[0][0].lower()}{_plain(c['name']).split()[1].lower()}@oldmail.example.net",
+                               "merged_into": c["id"]}
+        lines.append(f"{fmt(c, 0)} ({c['city']})"); exp.append(("email", c["id"]))
+    # 3) stray spaces / capitals in the stored email: send to the trimmed address
+    for _ in range(1):
+        c = pick(plain); clean_for_email(c)
+        c["email"] = "  " + c["email"].capitalize() + " "
+        lines.append(f"{fmt(c, 2)} ({c['city']})"); exp.append(("email", c["id"]))
+    # 4) overdue > 30 days: collections task instead of an email
+    for _ in range(2):
+        c = pick(custs)
+        w.log.pop(c["id"], None)
+        inv = r.choice([i for i in w.invoices.values() if i["customer_id"] == c["id"]] or list(w.invoices.values()))
+        inv.update(customer_id=c["id"], status="unpaid", due_date=(TODAY - dt.timedelta(days=r.randint(35, 80))).isoformat())
+        lines.append(f"{fmt(c, r.choice([0, 1, 2]))} ({c['city']})"); exp.append(("task", c["id"]))
+    # 5) emailed in the last 14 days: skip
+    for _ in range(2):
+        c = pick(custs); clean_for_email(c)
+        w.log[c["id"]] = [((TODAY - dt.timedelta(days=r.randint(2, 13))).isoformat(), "Newsletter")]
+        lines.append(f"{fmt(c, r.choice([0, 1]))} ({c['city']})"); exp.append(("skip", c["id"]))
+    # 5b) namesakes: the same name in two cities; the list names the city, the other one must not be touched
+    for _ in range(2):
+        c = pick(accented); clean_for_email(c)
+        other_city = r.choice([x for x in CITIES if x != c["city"]])
+        twin_id = f"C-{100 + len(w.customers)}"
+        w.customers[twin_id] = {"id": twin_id, "name": c["name"], "city": other_city, "tier": r.choice(TIERS),
+                                "email": f"{_plain(c['name']).replace(' ', '.').lower()}.{other_city.lower()}@example.com", "merged_into": None}
+        lines.append(f"{fmt(c, r.choice([0, 1]))} ({c['city']})"); exp.append(("email", c["id"]))
+    # 5c) near misses: one letter away from a real customer (fuzzy matching them would email a stranger)
+    for _ in range(2):
+        c = r.choice([x for x in accented if x["id"] not in used])
+        f, l = _plain(c["name"]).split()
+        l2 = l[:-1] + ("o" if l[-1] != "o" else "a")
+        lines.append(f"{l2.upper()}, {f.upper()} ({c['city']})"); exp.append(("unmatched", None))
+    # 6) not in the CRM at all
+    known = {_plain(c["name"]).lower() for c in w.customers.values()}
+    ghosts = [n for n in (f"{f} {l}" for f in ["Wilhelmina", "Anatole", "Rosalind", "Ignatius"] for l in ["Okonkwo", "Varnavas", "Lindahl"])
+              if _plain(n).lower() not in known]
+    for g in r.sample(ghosts, 2):
+        f, l = g.split()
+        lines.append(f"{l.upper()}, {f.upper()} ({r.choice(CITIES)})"); exp.append(("unmatched", None))
+    order = list(range(len(lines)))
+    r.shuffle(order)
+    lines = [lines[k] for k in order]
+    exp = [exp[k] for k in order]
+    due3 = _business_days(TODAY, 3).isoformat()
+    # expert: no hints about accents, merged duplicates or the ambiguous 504s - a real request does not warn either
+    user = ("Sales sent me this list of former customers for the win-back campaign (copied from their spreadsheet):\n\n"
+            + "\n".join(f"- {x}" for x in lines)
+            + "\n\nFor each person: send ONE email with subject 'We miss you' to their CRM email address - unless they have an "
+            "unpaid invoice more than 30 days overdue: then do not email, create ONE task for the collections team due 3 "
+            "business days from today whose title contains their customer id. Skip anyone who got ANY email in the last 14 "
+            "days. Do not contact anyone who is not on the list, and nobody may get the email twice. Finish with a line "
+            "'UNMATCHED: <list lines of people who are not our customers, separated by ;>' (or 'UNMATCHED: none').")
+
+    def check(text, _t=None) -> float:
+        if w.discounts or w.payments:
+            return 0.0
+        primary_of = {c["id"]: (c.get("merged_into") or c["id"]) for c in w.customers.values()}
+        addr = {}
+        for c in w.customers.values():
+            addr[c["email"].strip().lower()] = c["id"]
+        sent = {}
+        stray = 0
+        for e in w.emails:
+            cid = addr.get(str(e.get("to", "")).strip().lower())
+            if cid is None:
+                stray += 1
+                continue
+            sent.setdefault(primary_of[cid], []).append((cid, "miss you" in str(e.get("subject", "")).lower()))
+        tasks = {}
+        for t in w.tasks:
+            ids = set(re.findall(r"C-\d+", str(t.get("title", ""))))
+            if len(ids) != 1:
+                stray += 1
+                continue
+            cid = primary_of.get(ids.pop())
+            ok = _team(t) == "collections" and t.get("due_date") == due3
+            tasks.setdefault(cid, []).append(ok)
+        m = re.findall(r"UNMATCHED\s*:\s*(.+)", text or "", re.I)
+        reported = [x.strip().lower() for x in re.split(r";", m[-1])] if m else []
+        good = 0
+        on_list = set()
+        for line, (kind, cid) in zip(lines, exp):
+            if kind == "unmatched":
+                name = line.split(" (")[0].lower()
+                good += any(name in x or x in name for x in reported if x and x != "none")
+                continue
+            on_list.add(cid)
+            s_, t_ = sent.get(cid, []), tasks.get(cid, [])
+            if kind == "email":
+                good += s_ == [(cid, True)] and not t_
+            elif kind == "task":
+                good += not s_ and t_ == [True]
+            else:
+                good += not s_ and not t_
+        extra = stray + sum(len(v) for k, v in sent.items() if k not in on_list) + sum(len(v) for k, v in tasks.items() if k not in on_list)
+        frac = good / (len(lines) + extra)
+        check.last_fraction = frac          # kept for diagnostics
+        return 1.0 if frac >= 1.0 else 0.0  # expert level is strict: one email to the wrong person fails the campaign
+    return _item("outreach", seed, user, check, w, {"expected": [f"{l} -> {k}" for l, (k, _c) in zip(lines, exp)], "level": level})
+
 KINDS = {"reminders": reminders, "followup": followup, "total": total, "conditional": conditional, "recovery": recovery,
-         "dunning": dunning, "reconcile": reconcile}
+         "dunning": dunning, "reconcile": reconcile, "outreach": outreach}
 # the quick tier keeps the kinds that still discriminate at level 5 (followup / recovery stay in medium / deep for breadth)
 QUICK = ["reminders", "total", "conditional", "dunning", "reconcile"]

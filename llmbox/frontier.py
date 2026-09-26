@@ -113,7 +113,7 @@ def run_item(model: str, it: Item, effort: str | None = None, deadline_s: float 
                             text=True, bufsize=1)
     timer = threading.Timer(deadline_s, proc.kill)
     timer.start()
-    final, finish, steps, results = "", None, 0, []
+    final, finish, steps, results, seen_msgs = "", None, 0, [], set()
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "cache_read_tokens": 0}
     max_steps = it.meta.get("max_steps", 16)   # whole conversation, like the local client (sessions budget all turns)
     try:
@@ -126,7 +126,11 @@ def run_item(model: str, it: Item, effort: str | None = None, deadline_s: float 
             except ValueError:
                 continue
             if ev.get("type") == "assistant":
-                steps += 1
+                # one event per content block (text, each tool_use): count distinct messages, i.e. model turns
+                mid = (ev.get("message") or {}).get("id")
+                if mid not in seen_msgs:
+                    seen_msgs.add(mid)
+                    steps += 1
                 if steps > max_steps:
                     finish = "max_steps"
                     proc.kill()
