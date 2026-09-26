@@ -106,11 +106,15 @@ def plan(rid: str, src: str, target: str, force: bool = False) -> tuple[dict, li
                           f"cat > {_q(lpath)} <<'LLMBOX'\n{text}LLMBOX\nchmod +x {_q(lpath)}"))
     has = h.run(f"grep -qE '^  {rid}:' {_q(cfg)} && echo yes || echo no", timeout=30).stdout.strip() == "yes"
     entry = rc.llama_swap_entry(fitted, lpath)
+    last_top = h.run(f"grep -E '^[A-Za-z]' {_q(cfg)} | tail -1", timeout=30).stdout.strip()
     if has:
         steps.append(Step("entry", "done", f"{rid} is in {cfg}"))
+    elif not last_top.startswith("models:"):   # appending would land in another section
+        steps.append(Step("entry", "blocked", f"{cfg} has a section after models: ({last_top!r}); add the entry by hand:\n{entry}"))
     else:
         steps.append(Step("entry", "todo" if idle else "blocked", f"append to {cfg}" + ("" if idle else " - host busy"),
-                          f"cp {_q(cfg)} {_q(cfg)}.bak-{time.strftime('%Y%m%d-%H%M%S')} && cat >> {_q(cfg)} <<'LLMBOX'\n{entry}LLMBOX"))
+                          f"cp {_q(cfg)} {_q(cfg)}.bak-{time.strftime('%Y%m%d-%H%M%S')} && {{ [ -z \"$(tail -c1 {_q(cfg)})\" ] || echo >> {_q(cfg)}; }} "
+                          f"&& cat >> {_q(cfg)} <<'LLMBOX'\n{entry}LLMBOX"))
     steps.append(Step("check", "todo", "llmbox recipe check: the entry starts what the recipe says"))
     return fitted, steps, h
 
