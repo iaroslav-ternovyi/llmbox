@@ -117,9 +117,49 @@ def _other_bench_running() -> bool:
     return any(int(p) != os.getpid() for p in out)
 
 
-def _next_job() -> sqlite3.Row | None:
+DENSE_POWER_LIMIT_W = 180   # gpu-box: four Xid 79 crashes, all with a dense model near 250 W (2026-09-14..26)
+
+
+def power_hold(job: sqlite3.Row) -> str | None:
+    """Why a job must wait before it may start, or None. A dense model sits entirely on the GPU and holds it at full
+    power for minutes; on the reference box that makes the GPU fall off the bus unless its power limit is capped
+    (host profile key `dense_power_limit_w`, default 180 W). MoE models, which keep most weights in RAM, pass."""
+    args = json.loads(job["args"] or "[]")
+    rid = args[args.index("--recipe") + 1] if "--recipe" in args else None
+    if not rid:
+        return None
+    try:
+        from . import fit, recipe as rc
+        prof = hosts.load(job["host"])
+        shape = fit.shape_for(rc.load(job["host"], rid))
+    except (OSError, ValueError, SystemExit):
+        return None
+    if shape.is_moe:
+        return None
+    cap = float(prof.get("dense_power_limit_w") or DENSE_POWER_LIMIT_W)
+    try:
+        out = hosts.host_of(prof).run("nvidia-smi --query-gpu=power.limit --format=csv,noheader,nounits", timeout=30).stdout
+        limit = float(out.split()[0])
+    except (Exception,):
+        return f"dense model: GPU power limit unreadable, needs <= {cap:.0f} W"
+    if limit > cap + 1:
+        return f"dense model on a GPU capped at {limit:.0f} W: run `sudo nvidia-smi -pl {cap:.0f}` on {job['host']} first"
+    return None
+
+
+def _next_job(holds: dict | None = None) -> sqlite3.Row | None:
+    """The first runnable job by priority; jobs held back (see power_hold) are skipped and their reason recorded."""
     with _db() as c:
-        return c.execute("SELECT * FROM jobs WHERE status IN ('queued','interrupted') ORDER BY priority DESC, id LIMIT 1").fetchone()
+        cands = c.execute("SELECT * FROM jobs WHERE status IN ('queued','interrupted') ORDER BY priority DESC, id").fetchall()
+    for job in cands:
+        why = power_hold(job)
+        if holds is not None:
+            if why and holds.get(job["id"]) != why:
+                event(f"job {job['id']} {job['model']} held: {why}")
+            holds[job["id"]] = why
+        if not why:
+            return job
+    return None
 
 
 def _run_job(job: sqlite3.Row) -> None:
@@ -186,11 +226,12 @@ def run(until_empty: bool = False) -> None:
     lock.flush()
     event(f"worker started (pid {os.getpid()})")
     waiting = ""
+    holds: dict = {}
     while True:
         if os.path.exists(PAUSE):
             reason = "paused (remove ~/.llmbox/queue/PAUSE to continue)"
         else:
-            job = _next_job()
+            job = _next_job(holds)
             if job is None:
                 if until_empty:
                     event("queue empty - worker exits")
