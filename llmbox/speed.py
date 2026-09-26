@@ -40,7 +40,7 @@ def shape_on_host(host, path: str) -> E.ModelShape:
 
 
 def measure(host_name: str, rid: str, overrides: list[str] | None = None, depths: list[int] | None = None,
-            unload: bool = False, save: bool = True) -> dict:
+            unload: bool = False, save: bool = True, sampling: dict | None = None, repeats: int = 2) -> dict:
     prof = hosts.load(host_name)
     h = hosts.host_of(prof)
     r = recipe.load(host_name, rid)
@@ -55,7 +55,7 @@ def measure(host_name: str, rid: str, overrides: list[str] | None = None, depths
     args = args[:i] + args[i + 2:]
     spec = {"server": r["runtime"]["server"], "args": args, "affinity": r["runtime"]["cpu_affinity"],
             "model_files": model_files(r["model"]["path"]), "headroom_mib": r["placement"]["cache_ram_headroom_mib"],
-            "depths": depths or [32000], "gen_tokens": 400, "prefill_tokens": 12000, "repeats": 2}
+            "depths": depths or [32000], "gen_tokens": 400, "prefill_tokens": 12000, "repeats": repeats, "sampling": sampling or {}}
     m = h.agent("probe-server", json.dumps(spec), timeout=3600)
     rec = results.new("speed", prof, recipe=r, model={k: r["model"].get(k) for k in ("hf_repo", "file", "path", "sha256")})
     rec["overrides"] = overrides or []

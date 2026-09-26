@@ -1,0 +1,134 @@
+"""`llmbox tune <recipe>`: measure the speed knobs the formula cannot settle, on the real box, and keep what wins.
+
+`fit` places the model from its header; tune then tries, one at a time, the knobs whose effect depends on the machine
+and the model's text: speculative decoding (on / off / draft depth - it pays only when the verification batch does not
+pull many more experts from RAM), the VRAM margin left by --fit, and the prompt batch. Each variant is a fresh
+llama-server measured with the recipe's own sampling (acceptance at temperature 0 flatters MTP). The winners are
+then combined and measured once more.
+
+A variant wins on the time of a typical agent step: read 3k new tokens, write 600 with 32k already in context. It must
+beat the baseline by more than the run-to-run noise, measured by running the baseline twice. Every knob here is
+speed-only; the context size is measured as a separate "fast profile" because it limits the longest document.
+The box must be idle: tune unloads llama-swap's model and starts its own server on a free port.
+"""
+from __future__ import annotations
+
+import json
+import os
+import time
+
+from . import fit as F
+from . import recipe as rc
+from .bench import TYPICAL_STEP
+from .hosts import HOME
+
+DEPTH = 32000
+MIN_GAIN = 0.03
+
+
+def variants(r: dict, shape) -> list[tuple[str, list[str], bool]]:
+    """(name, overrides, speed-only) for this recipe. Speed-only variants may be chosen; the others are reported."""
+    out = [("baseline", [], True)]
+    sp, pl = r["speculative"], r["placement"]
+    if sp["type"]:
+        out.append(("speculative off", ['speculative.type=""'], True))
+        for n in (1, 3):
+            if n != sp["draft_max"]:
+                out.append((f"draft {n}", [f"speculative.draft_max={n}"], True))
+    elif shape.n_mtp_layers:
+        out += [("MTP draft 2", ['speculative.type="draft-mtp"', "speculative.draft_max=2"], True)]
+    if pl["fit"] and shape.is_moe:
+        for m in (128, 512):
+            if m != pl["fit_target_mib"]:
+                out.append((f"VRAM margin {m} MiB", [f"placement.fit_target_mib={m}"], True))
+    if pl["ubatch"] != 1024:
+        out.append(("prompt batch 1024", ["placement.ubatch=1024", "placement.batch=2048"], True))
+    ctx = pl["ctx"] or shape.context_length
+    if ctx and ctx > 131072:
+        out.append((f"context {131072 // 1024}k (fast profile)", ["placement.ctx=131072"], False))
+    return out
+
+
+def _step_s(m: dict) -> float | None:
+    sp = m.get("speed") or {}
+    deep = next((d.get("decode_tps") for d in sp.get("depth") or [] if d.get("decode_tps")), None) or sp.get("decode_tps")
+    if not deep or not sp.get("prefill_tps"):
+        return None
+    return TYPICAL_STEP["new_prompt_tokens"] / sp["prefill_tps"] + TYPICAL_STEP["output_tokens"] / deep
+
+
+def _row(name: str, m: dict) -> dict:
+    sp = m.get("speed") or {}
+    deep = next((d.get("decode_tps") for d in sp.get("depth") or [] if d.get("decode_tps")), None)
+    return {"name": name, "overrides": m.get("overrides", []), "error": m.get("error"), "decode": sp.get("decode_tps"),
+            "deep": deep, "prefill": sp.get("prefill_tps"), "acceptance": sp.get("draft_acceptance"), "step_s": _step_s(m),
+            "load_s": sp.get("load_seconds")}
+
+
+def run(host: str, rid: str, out=print, measure=None) -> dict:
+    from . import speed
+    measure = measure or speed.measure
+    r = rc.load(host, rid)
+    from . import hosts
+    shape = F.shape_for(r, host=hosts.host_of(hosts.load(host)))
+    sampling = {k: v for k, v in {"temperature": r["sampling"].get("temp"), "top_p": r["sampling"].get("top_p"),
+                                   "top_k": r["sampling"].get("top_k"), "min_p": r["sampling"].get("min_p")}.items() if v is not None}
+    todo = variants(r, shape)
+    rows = []
+
+    def one(name: str, ov: list[str]) -> dict:
+        t = time.time()
+        m = measure(host, rid, overrides=ov, depths=[DEPTH], unload=True, save=True, sampling=sampling)
+        row = _row(name, m)
+        rows.append(row)
+        out(f"  {name:32s} " + (f"ERROR {row['error']}" if row["error"] else
+            f"{row['decode'] or 0:6.1f} tok/s  {row['deep'] or 0:6.1f} @32k  prefill {row['prefill'] or 0:6.0f}  "
+            f"step {row['step_s'] or 0:5.2f} s" + (f"  accept {row['acceptance'] * 100:.0f}%" if row["acceptance"] else "")
+            + f"   ({time.time() - t:.0f} s)"))
+        return row
+
+    out(f"tune {rid} on {host}: {len(todo)} variants + a second baseline and the combination, sampling {sampling}")
+    base = one("baseline", [])
+    if base["error"]:
+        out(f"stopped: {base['error']}")
+        return {"rid": rid, "rows": rows, "error": base["error"]}
+    tried = [(n, ov, ok, one(n, ov)) for n, ov, ok in todo[1:]]
+    base2 = one("baseline again", [])
+    b = [x["step_s"] for x in (base, base2) if x["step_s"]]
+    ref = sum(b) / len(b)
+    noise = abs(b[0] - b[-1]) / ref if len(b) == 2 else 0.0
+    bar = max(MIN_GAIN, 2 * noise)
+    wins = [(n, ov, row) for n, ov, ok, row in tried if ok and row["step_s"] and row["step_s"] < ref * (1 - bar)]
+    # one winner per knob: the best speculative setting, the best margin, the best batch
+    knob = lambda ov: "speculative" if ov[0].startswith("speculative") else ov[0].split("=")[0]
+    best: dict = {}
+    for n, ov, row in sorted(wins, key=lambda w: w[2]["step_s"]):
+        best.setdefault(knob(ov), (n, ov, row))
+    chosen = [ov for _, ov, _ in best.values()]
+    combo = None
+    if len(chosen) > 1:
+        combo = one("combined winners", [o for ov in chosen for o in ov])
+    final = combo if combo and combo["step_s"] and combo["step_s"] < min(w[2]["step_s"] for w in best.values()) else \
+        (min(best.values(), key=lambda w: w[2]["step_s"])[2] if best else None)
+    res = {"rid": rid, "host": host, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "sampling": sampling, "noise": round(noise, 3),
+           "bar": round(bar, 3), "baseline_step_s": round(ref, 3), "rows": rows,
+           "chosen": final["overrides"] if final else [], "gain": round(1 - final["step_s"] / ref, 3) if final else 0.0}
+    d = os.path.join(HOME, "tuned", host)
+    os.makedirs(d, exist_ok=True)
+    json.dump(res, open(os.path.join(d, f"{rid}.json"), "w"), indent=1)
+    out(f"\nnoise {noise * 100:.1f}% -> a variant must be {bar * 100:.0f}% faster per agent step")
+    if final:
+        out(f"best: {' '.join(final['overrides'])}  step {final['step_s']:.2f} s vs {ref:.2f} s  (-{res['gain'] * 100:.0f}%)")
+        out("apply to the recipe's hardware layer (llama-swap launcher/entry change: box must be idle, your call)")
+    else:
+        out("the recipe's settings are already the fastest measured")
+    fast = next(((n, ov, row) for n, ov, ok, row in tried if not ok), None)
+    if fast and fast[2]["step_s"]:
+        daily = one("fast profile + winners", fast[1] + res["chosen"]) if res["chosen"] else fast[2]
+        res["fast_profile"] = {"overrides": fast[1] + res["chosen"], "step_s": daily["step_s"], "decode": daily["decode"],
+                               "gain": round(1 - daily["step_s"] / ref, 3) if daily["step_s"] else None}
+        json.dump(res, open(os.path.join(d, f"{rid}.json"), "w"), indent=1)
+        if daily["step_s"]:
+            out(f"daily profile ({' '.join(res['fast_profile']['overrides'])}): {daily['decode'] or 0:.0f} tok/s, step {daily['step_s']:.2f} s "
+                f"({res['fast_profile']['gain'] * 100:+.0f}%); documents over ~110k tokens no longer fit")
+    return res

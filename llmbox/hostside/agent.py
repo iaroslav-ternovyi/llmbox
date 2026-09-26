@@ -223,11 +223,12 @@ def probe_server(spec: dict) -> dict:
             time.sleep(2)
         out["load_seconds"] = round(time.time() - t0, 1)
         n_gen = int(spec.get("gen_tokens", 400))
+        samp = spec.get("sampling") or {}   # the recipe's sampling: speculative acceptance at temperature 0 flatters MTP
         # decode speed on natural code generation (speculative decoding acceptance depends on content)
         dec = []
         for i in range(int(spec.get("repeats", 2))):
             r = _post(base + "/completion", {"prompt": _CODE_PROMPT + f" (variant {i})", "n_predict": n_gen, "temperature": 0,
-                                             "cache_prompt": False, "ignore_eos": True})
+                                             "cache_prompt": False, "ignore_eos": True, **samp})
             t = r.get("timings", {})
             dec.append({"tps": t.get("predicted_per_second"), "n": t.get("predicted_n"),
                         "draft_n": t.get("draft_n"), "draft_accepted": t.get("draft_n_accepted")})
@@ -241,7 +242,7 @@ def probe_server(spec: dict) -> dict:
         out["depth"] = []
         for d in spec.get("depths", [32000]):
             r = _post(base + "/completion", {"prompt": _filler(d, 100 + d) + "\n\n" + _CODE_PROMPT, "n_predict": 200,
-                                             "temperature": 0, "cache_prompt": False, "ignore_eos": True})
+                                             "temperature": 0, "cache_prompt": False, "ignore_eos": True, **samp})
             t = r.get("timings", {})
             out["depth"].append({"depth": t.get("prompt_n"), "prefill_tps": t.get("prompt_per_second"),
                                  "decode_tps": t.get("predicted_per_second")})

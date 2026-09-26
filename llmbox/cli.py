@@ -116,6 +116,18 @@ def cmd_install(a: argparse.Namespace) -> None:
     raise SystemExit(install.run(a.recipe, a.src, a.host or a.src, dry_run=not a.apply, force=a.force))
 
 
+def cmd_tune(a: argparse.Namespace) -> None:
+    from . import fit as F, recipe as rc, tune
+    for rid in a.recipes:
+        if a.plan:
+            r = rc.load(a.host, rid)
+            print(f"{rid}:")
+            for n, ov, ok in tune.variants(r, F.shape_for(r, host=hosts.host_of(hosts.load(a.host)))):
+                print(f"  {n:32s} {' '.join(ov):50s} {'' if ok else '(reported, not chosen: limits the longest document)'}")
+            continue
+        tune.run(a.host, rid)
+
+
 def cmd_loops(a: argparse.Namespace) -> None:
     import os
     from . import loops
@@ -477,6 +489,11 @@ def main(argv: list[str] | None = None) -> None:
     ip.add_argument("--apply", action="store_true", help="do it (default: show the plan and every command, write nothing)")
     ip.add_argument("--force", action="store_true", help="replace a different existing launcher (kept as .bak); act while the host is busy")
     ip.set_defaults(fn=cmd_install)
+    tp = sub.add_parser("tune", help="measure speed knobs (speculative decoding, VRAM margin, prompt batch) on the idle box; keep what wins")
+    tp.add_argument("recipes", nargs="+")
+    tp.add_argument("--host", default="box")
+    tp.add_argument("--plan", action="store_true", help="list the variants only, measure nothing")
+    tp.set_defaults(fn=cmd_tune)
     lp = sub.add_parser("loops", help="fast reasoning-loop test: replay contexts where models looped before")
     lp.add_argument("action", choices=["extract", "replay"])
     lp.add_argument("--transcripts", default="~/agent-bench-runs/claude-config/projects")

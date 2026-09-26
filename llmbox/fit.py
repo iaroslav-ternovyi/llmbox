@@ -1,9 +1,9 @@
 """`llmbox fit`: the hardware half of a recipe, fitted to one machine in seconds, without downloading the model.
 
 A recipe has two layers (docs/product.md §3):
-  portable - model file, chat template, sampling, anti-loop, KV type, speculative type. They set the quality score, so
+  portable - model file, chat template, sampling, anti-loop, KV type. They set the quality score, so
              fit never changes them.
-  hardware - context, batch, threads, prompt cache, slots, draft depth, local paths. Speed and memory only.
+  hardware - context, batch, threads, prompt cache, slots, speculative decoding, local paths. Speed and memory only.
 fit reads the model's shape (GGUF header), the target host and, when the recipe was measured somewhere, the ratio
 measured / predicted on that box (it carries what the formula misses: the MTP speed-up, kernel quirks).
 
@@ -25,11 +25,11 @@ from .hosts import HOME
 
 # dotted paths; a table name covers everything under it
 PORTABLE = ("description", "notes", "model.hf_repo", "model.file", "model.sha256", "chat", "sampling", "antiloop",
-            "speculative.type", "placement.kv_type")
+            "placement.kv_type")
 HARDWARE = ("model.path", "runtime", "placement.ctx", "placement.fit", "placement.fit_target_mib", "placement.flash_attn",
             "placement.load_mode", "placement.batch", "placement.ubatch", "placement.slots", "placement.kv_unified",
-            "placement.cache_ram", "placement.cache_ram_headroom_mib", "placement.cache_reuse", "speculative.draft_max",
-            "serve", "extra")
+            "placement.cache_ram", "placement.cache_ram_headroom_mib", "placement.cache_reuse",
+            "speculative", "serve", "extra")   # speculative decoding is lossless: whether it pays is a speed question
 MIN_CTX = 8192
 LONGDOC_TOKENS = 200_000      # the suite's longest documents (long-document block, suite v0.9)
 SHAPES = os.path.join(HOME, "shapes")
