@@ -203,9 +203,30 @@ def cmd_queue(a: argparse.Namespace) -> None:
         print("resumed")
 
 
+def cmd_validate(a: argparse.Namespace) -> None:
+    from . import validate as v
+    seeds = tuple(range(1, a.seeds + 1))
+    res = v.run(None if a.all else "quick", a.kind, seeds, "claude-code:high" if a.frontier else None,
+                progress=lambda m: print(m, flush=True))
+    bad = [r for r in res if not r["ok"]]
+    review = [r for r in res if r.get("review")]
+    print(f"\n{len(res) - len(bad)}/{len(res)} kinds pass" + (f"; frontier failures to review: {[r['kind'] for r in review]}" if review else ""))
+    if bad:
+        raise SystemExit(1)
+
+
 def cmd_snapshot(a: argparse.Namespace) -> None:
     from . import queue as q
-    print(q.snapshot(a.tag))
+    dst = q.snapshot(a.tag)
+    if not a.no_validate:   # a frozen suite must pass validate (run from the snapshot itself, i.e. the tagged code)
+        import subprocess
+        env = dict(os.environ, PYTHONPATH=dst, PYTHONDONTWRITEBYTECODE="1")
+        r = subprocess.run([sys.executable, "-m", "llmbox.cli", "validate", "--seeds", "1"], cwd=dst, env=env)
+        if r.returncode:
+            import shutil
+            shutil.rmtree(dst, ignore_errors=True)
+            raise SystemExit(f"{a.tag}: validate failed - snapshot removed (use --no-validate to force)")
+    print(dst)
 
 
 def cmd_regrade(a: argparse.Namespace) -> None:
@@ -309,8 +330,15 @@ def main(argv: list[str] | None = None) -> None:
     qp.add_argument("--ids", nargs="*", default=[], help="cancel / retry: job ids")
     qp.add_argument("--bench-args", default="", help='add: extra bench args, e.g. --bench-args "--recipe x --parallel 3"')
     qp.set_defaults(fn=cmd_queue)
+    va = sub.add_parser("validate", help="check every task kind: determinism, oracle = 1, empty = 0, answer-format tolerance")
+    va.add_argument("--all", action="store_true", help="every kind of every block (default: the quick tier's kinds)")
+    va.add_argument("--kind", action="append", help="only these kinds (e.g. tools.outreach or outreach), repeatable")
+    va.add_argument("--seeds", type=int, default=3)
+    va.add_argument("--frontier", action="store_true", help="also run the frontier reference (Claude subscription) and flag its failures")
+    va.set_defaults(fn=cmd_validate)
     sn = sub.add_parser("snapshot", help="freeze a git tag of llmbox into ~/.llmbox/snapshots/<tag>")
     sn.add_argument("tag")
+    sn.add_argument("--no-validate", action="store_true", help="skip the validate gate (not recommended)")
     sn.set_defaults(fn=cmd_snapshot)
 
     rg = sub.add_parser("regrade", help="re-score text-graded items of saved results with the current graders")
