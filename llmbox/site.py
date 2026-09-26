@@ -239,7 +239,7 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
         lo, hi = ranks[r["id"]]
         rk = f"{lo}" if lo == hi else f"{lo}–{hi}"
         tps = sp.get("decode_tps")
-        body.append(f"<tr class='{'sel' if i == 1 else ''}' data-rid='{esc(r['id'])}'><td class='rk'>{i}</td><td class='l mod'><span class='m'>{esc(r['id'])}</span><br><span class='q'>{esc(_quant(r['file']))} · 1 run</span><div class='cmpbox'><i></i>compare</div></td>"
+        body.append(f"<tr class='{'sel' if i == 1 else ''}' data-rid='{esc(r['id'])}'><td class='rk'>{i}</td><td class='l mod'><a class='m' href='recipe-{esc(r['id'])}.html'>{esc(r['id'])}</a><br><span class='q'>{esc(_quant(r['file']))} · 1 run</span><div class='cmpbox'><i></i>compare</div></td>"
                     f"<td><span class='rkr'>{rk}</span></td><td>{_tile(r.get('vs_ref'), f'{r['capability']:.1f} · {r['ci'][0]:.0f}–{r['ci'][1]:.0f}', big=True)}</td>"
                     + "".join(f"<td>{_tile(r['blocks'].get(b))}</td>" for b in BLOCKS)
                     + f"<td class='spd'>{_tile(tps, f'{deep} deep') if tps else '—'}<small class='how'>measured · reference box</small></td><td class='fit q'>—</td><td class='num'>{r['solved_per_hour']:.1f}</td></tr>")
@@ -272,7 +272,7 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
 <svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>
 <div class="wrap">
 <header class="plate"><div class="brand glow">LLMBOX<small>LOCAL LLM BENCHMARK</small></div><div class="search">Search: tiel, qwen3.8, 12 GB …</div></header>
-<nav class="tabs"><a class="on">MODELS</a><a>RECIPES</a><a>HARDWARE</a><a>COMPARE</a><a>METHODOLOGY</a><span class="sp"></span><a class="cta">TEST YOUR BOX ↓</a></nav>
+<nav class="tabs"><a class="on" href="index.html">MODELS</a><a href="recipe-{esc(local[0]['id']) if local else ''}.html">RECIPES</a><a href="hardware-{esc(local[0]['id']) if local else ''}.html">HARDWARE</a><a href="{f"compare-{local[0]['id']}-vs-{local[1]['id']}.html" if len(local) > 1 else '#'}">COMPARE</a><a href="#">METHODOLOGY</a><span class="sp"></span><a class="cta" href="#">TEST YOUR BOX ↓</a></nav>
 <section class="panel summary"><div class="lbl">WHAT SHOULD I RUN ON MY BOX? · <span id="boxlbl">REFERENCE BOX: {esc(hw.get('gpu', '').replace('NVIDIA GeForce ', '').upper())} · {hw.get('ram_gib', '?')} GB @ {hw.get('ram_read_gbs', '?')} GB/s</span></div>
 <div class="sumrow">{summary}{pend}</div></section>
 <div class="layout">
@@ -423,4 +423,490 @@ document.querySelectorAll(".xtabs span").forEach(t => t.addEventListener("click"
 try { const h = Object.fromEntries(new URLSearchParams(location.hash.slice(1))); const saved = h.gpu ? h : JSON.parse(localStorage.getItem("llmbox-box") || "null");
   if (saved && saved.gpu) { $("#gpu").value = saved.gpu; if (saved.ram) $("#ram").value = saved.ram; if (saved.bw) { const o = [...$("#bw").options].find(o => o.value == saved.bw); if (o) $("#bw").value = saved.bw; else $("#bwn").value = saved.bw; } if (saved.bwn) $("#bwn").value = saved.bwn; readBox(); } else render();
 } catch (e) { render(); }
+"""
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# every page: records -> HTML. Flat folder, simple relative links: index, recipe-<id>, run-<id8>, hardware-<id>, compare-<a>-vs-<b>
+
+PLAN_JS = r"""
+function plan(sh, hw, ctx, depth) {
+  const mib = 1 / 1048576, kv = sh.kvB * ctx + sh.rec, gpuFixed = (sh.nonexp + kv) * mib + 2100 + 700, free = hw.vram - gpuFixed;
+  let gf, ramUsed, fits, perCpu, perGpu;
+  if (!sh.moe) { const need = gpuFixed + sh.embed * mib; fits = need <= hw.vram; gf = 1; ramUsed = sh.embed * mib; perGpu = sh.nonexp; perCpu = 0; }
+  else { gf = Math.max(0, Math.min(1, free / (sh.exp * mib))); const cpuExp = sh.exp * (1 - gf); ramUsed = (cpuExp + sh.embed) * mib;
+         fits = free > -1 && ramUsed + 4096 <= hw.ram; const fr = sh.nUsed / sh.nExp; perCpu = cpuExp * fr; perGpu = sh.nonexp + sh.exp * gf * fr; }
+  const tps = d => 1 / (perCpu / (hw.rambw * 1e9 * 0.8 * sh.cpuEff) + (perGpu + sh.kvB * d) / (hw.vrambw * 1e9 * 0.75) + sh.layers * 0.025 / 1000);
+  return { fits, gf, ramUsed, vram: Math.min(hw.vram, gpuFixed + (sh.moe ? sh.exp * gf * mib : sh.embed * mib)), t2: tps(2000), td: tps(Math.min(depth, ctx)) };
+}
+function forBox(sh, hw) {
+  let ctx = sh.ctx, p = plan(sh, hw, ctx, sh.deepK * 1000);
+  while (!p.fits && ctx > 8192) { ctx = ctx / 2; p = plan(sh, hw, ctx, sh.deepK * 1000); }
+  return Object.assign(p, { ctx, t2: p.t2 * sh.k2, td: p.td * sh.kd });
+}
+function savedBox(DATA) {
+  try { const s = JSON.parse(localStorage.getItem("llmbox-box") || "null"); if (!s || !s.gpu) return null;
+    const g = DATA.gpus.find(x => x[0] === s.gpu); if (!g) return null;
+    return { name: s.gpu, gpu: g[0].replace(/ \d+ GB$/, ""), vram: g[1], vrambw: g[2], ram: parseInt(s.ram) * 1024, rambw: parseFloat(s.bwn) || parseFloat(s.bw) }; } catch (e) { return null; }
+}
+"""
+TAB_LINKS = {"MODELS": "index.html", "RECIPES": None, "HARDWARE": None, "COMPARE": None, "METHODOLOGY": "#"}
+
+
+def _page(title: str, tab: str, body: str, css: str = "", js: str = "", links: dict | None = None) -> str:
+    links = dict(TAB_LINKS, **(links or {}))
+    nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "RECIPES", "HARDWARE", "COMPARE", "METHODOLOGY"))
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<title>{esc(title)}</title><link rel="stylesheet" href="osc.css"><style>{_PAGES_CSS}{css}</style></head><body>'
+            '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
+            '<div class="wrap"><header class="plate"><a class="brand glow" href="index.html" style="text-decoration:none">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>'
+            '<div class="search">Search: tiel, qwen3.8, 12 GB …</div></header>'
+            f'<nav class="tabs">{nav}<span class="sp"></span><a class="cta" href="#">TEST YOUR BOX ↓</a></nav>{body}'
+            f'<footer><span>Every number on this page comes from a saved run record; nothing is typed by hand.</span><span>generated {time.strftime("%b %d, %Y %H:%M")}</span></footer>'
+            f'</div>{f"<script>{js}</script>" if js else ""}</body></html>')
+
+
+def load_records(host: str, suite_version: str, tier: str) -> dict:
+    """Newest suite record per recipe id for this host and suite, plus the frontier reference. Keeps the file path."""
+    import json as _json
+    out, ref = {}, None
+    for h in (host, "cloud"):
+        d = os.path.join(HOME, "results", h)
+        for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+            if not f.endswith(".json"):
+                continue
+            try:
+                rec = _json.load(open(os.path.join(d, f)))
+            except ValueError:
+                continue
+            su = rec.get("suite") or {}
+            if rec.get("kind") != "suite" or su.get("version") != suite_version or su.get("tier") != tier or su.get("blocks"):
+                continue
+            rec["_path"] = os.path.join(d, f)
+            rid = (rec.get("recipe") or {}).get("id")
+            if h == "cloud":
+                if not ref or rec["summary"]["capability"] > ref["summary"]["capability"]:
+                    ref = rec
+            elif rid:
+                out[rid] = rec   # sorted by name = by time: the newest wins
+    return {"local": out, "ref": ref}
+
+
+def _trace_dir(rec: dict) -> str | None:
+    """Traces are saved per queue job (~/.llmbox/traces/job-N); the queue knows which job produced which record."""
+    db = os.path.join(HOME, "queue.db")
+    if os.path.exists(db):
+        row = sqlite3.connect(db).execute("SELECT id FROM jobs WHERE result=?", (rec.get("_path"),)).fetchone()
+        if row:
+            d = os.path.join(HOME, "traces", f"job-{row[0]}")
+            return d if os.path.isdir(d) else None
+    return None
+
+
+def task_flags(rec: dict) -> dict:
+    """item id -> {'cut': bool, 'loop': bool, 'max_reply': int} from the rows and the saved thinking."""
+    import gzip
+    import json as _json
+    from . import loopdetect
+    td = _trace_dir(rec)
+    out = {}
+    for r in rec.get("rows", []):
+        cut = bool(r.get("reasoning_cut")) or "I have reasoned enough" in (r.get("reasoning_tail") or "")
+        loop = False
+        if td and os.path.exists(os.path.join(td, r["id"] + ".json.gz")):
+            t = _json.load(gzip.open(os.path.join(td, r["id"] + ".json.gz"), "rt"))
+            loop = any(loopdetect.scan(x)["fired_at"] for x in t["thinking"])
+        out[r["id"]] = {"cut": cut, "loop": loop, "max_reply": max([x.get("predicted_n") or 0 for x in r.get("timings") or []] or [0])}
+    return out
+
+
+def _vs(rec: dict, ref: dict | None) -> float | None:
+    return round(100 * rec["summary"]["capability"] / ref["summary"]["capability"], 1) if ref else None
+
+
+def _verdict(vs: float | None) -> str:
+    if vs is None:
+        return "—"
+    return "excellent" if vs >= 85 else "very good" if vs >= 70 else "good" if vs >= 50 else "weak"
+
+
+def _spark(vals: list, lo: float, hi: float, w: int = 300, h: int = 44) -> str:
+    if not vals or len(vals) < 2:
+        return ""
+    pts = " ".join(f"{2 + i*(w-4)/(len(vals)-1):.1f},{h-2-(min(max(v, lo), hi)-lo)/(hi-lo)*(h-4):.1f}" for i, v in enumerate(vals))
+    return f'<svg viewBox="0 0 {w} {h}" class="spark"><polyline points="{pts}" fill="none" stroke="#FFB000" stroke-width="1.4" filter="url(#g)"/></svg>'
+
+
+def _telemetry_panel(t: dict | None, title: str = "HARDWARE DURING THE RUN") -> str:
+    if not t or not t.get("samples"):
+        return f'<section class="panel pad"><div class="lbl">{title}</div><span class="q">no telemetry recorded for this run</span></section>'
+    cells = []
+    spec = [("gpu_temp_c", "GPU temp", "°C avg", 30, 95), ("gpu_power_w", "GPU power", "W avg", 0, 300), ("gpu_util_pct", "GPU util", "% avg", 0, 100),
+            ("cpu_temp_c", "CPU temp", "°C avg", 30, 95), ("ram_used_mib", "System RAM", "GB avg", 0, None), ("vram_used_mib", "VRAM", "GB", 0, None)]
+    for k, name, unit, lo, hi in spec:
+        v = t.get(k)
+        if not v:
+            continue
+        mb = k.endswith("_mib")
+        f = (lambda x: x / 1024) if mb else (lambda x: x)
+        hi2 = hi or max(v.get("per_min") or [v["max"]]) * 1.2
+        cells.append(f'<div><span class="sc">{name}</span><div class="tv">{f(v["avg"]):.{1 if mb else 0}f}<small>{unit} · max {f(v["max"]):.{1 if mb else 0}f}</small></div>'
+                     f'{_spark(v.get("per_min") or [], lo, hi2)}</div>')
+    src = f' · {esc(t["source"])}' if t.get("source") else ""
+    return (f'<section class="panel"><div class="lbl">{title} · {t.get("samples")} SAMPLES{src.upper()}</div>'
+            f'<div class="tele" style="grid-template-columns:repeat({len(cells)},1fr)">{"".join(cells)}</div></section>')
+
+
+def _star(blocks: dict, ref_blocks: dict, lost: dict, W: int = 400) -> str:
+    """Six-axis star with the reference outline; each axis label has a hover listing the tasks this recipe lost there."""
+    import math
+    cx, cy, R = W / 2, 150, 105
+    pt = lambda i, v: (cx + R * v / 100 * math.cos(math.radians(-90 + 60 * i)), cy + R * v / 100 * math.sin(math.radians(-90 + 60 * i)))
+    ring = lambda f: " ".join(f"{x:.1f},{y:.1f}" for x, y in (pt(i, f) for i in range(6)))
+    poly = lambda d: " ".join(f"{x:.1f},{y:.1f}" for x, y in (pt(i, d.get(b) or 0) for i, b in enumerate(BLOCKS)))
+    spokes = "".join(f'<line x1="{cx}" y1="{cy}" x2="{pt(i,100)[0]:.1f}" y2="{pt(i,100)[1]:.1f}"/>' for i in range(6))
+    dots = "".join(f'<circle cx="{pt(i, blocks.get(b) or 0)[0]:.1f}" cy="{pt(i, blocks.get(b) or 0)[1]:.1f}" r="3.2" fill="{"#ff5a36" if (blocks.get(b) or 0) < 50 else "#FFB000"}"/>' for i, b in enumerate(BLOCKS))
+    svg = (f'<svg viewBox="0 0 {W} 300"><g stroke="#2a2c22" fill="none"><polygon points="{ring(100)}"/><polygon points="{ring(50)}"/>'
+           f'<polygon points="{ring(75)}" stroke-dasharray="2 4"/>{spokes}</g>'
+           + (f'<polygon points="{poly(ref_blocks)}" fill="none" stroke="#E8E4D8" stroke-opacity=".85" stroke-dasharray="4 4" stroke-width="1.2"/>' if ref_blocks else "")
+           + f'<polygon points="{poly(blocks)}" fill="rgba(255,176,0,.14)" stroke="#FFB000" stroke-width="2" filter="url(#g)"/>{dots}</svg>')
+    labels = []
+    for i, b in enumerate(BLOCKS):
+        x, y = pt(i, 128)
+        v = blocks.get(b)
+        title, text, _ = TIPS[b]
+        ls = "".join(f"<li>Lost: {esc(n)}</li>" for n in lost.get(b, [])) or "<li>no task lost here</li>"
+        left = x / W * 100
+        labels.append(f'<div class="ax tip" style="left:calc({left:.1f}% - 40px);top:{y - 14:.0f}px">{LABEL[b]}<b class="{"r" if v is not None and v < 50 else ""}">{v:.0f}</b>'
+                      f'<span class="pop"><b>{esc(title)}</b>{esc(text)}<ul>{ls}</ul></span></div>')
+    return f'<div class="starw">{svg}{"".join(labels)}<div class="lgd"><span class="amb">━</span> this recipe &nbsp; <span>┅</span> frontier reference</div></div>'
+
+
+def _depth_chart(series: list[tuple[str, dict, bool]]) -> str:
+    """decode tok/s by context depth for several recipes (log x); the first one is highlighted."""
+    import math
+    X = lambda k: 60 + (math.log(max(k, 1)) / math.log(262)) * 500
+    allv = [d["decode_tps"] for _, bd, _ in series for d in bd.values() if d.get("decode_tps")]
+    ymax = max(allv + [60]) * 1.25
+    Y = lambda t: 200 - t / ymax * 170
+    g = "".join(f'<line x1="60" y1="{Y(v):.1f}" x2="560" y2="{Y(v):.1f}" stroke="#2a2c22" stroke-dasharray="2 4"/><text x="52" y="{Y(v)+4:.1f}" text-anchor="end">{v:.0f}</text>'
+                for v in [ymax * f / 4 for f in range(5)])
+    g += "".join(f'<line x1="{X(k):.1f}" y1="30" x2="{X(k):.1f}" y2="200" stroke="#2a2c22" stroke-dasharray="2 4"/><text x="{X(k):.1f}" y="218" text-anchor="middle">{k}k</text>' for k in (2, 8, 28, 88, 262))
+    lines = []
+    for n, (rid, bd, hl) in enumerate(series):
+        pts = sorted((report._depth_k(k), d["decode_tps"]) for k, d in bd.items() if d.get("decode_tps"))
+        if not pts:
+            continue
+        pl = " ".join(f"{X(k):.1f},{Y(t):.1f}" for k, t in pts)
+        if hl:
+            lines.append(f'<polyline points="{pl}" fill="none" stroke="#FFB000" stroke-width="2.4" filter="url(#g)"/>'
+                         + "".join(f'<circle cx="{X(k):.1f}" cy="{Y(t):.1f}" r="3.6" fill="#FFB000"/><text x="{X(k)+6:.1f}" y="{Y(t)-8:.1f}" fill="#E8E4D8" font-size="12">{t:.1f}</text>' for k, t in pts))
+        else:
+            d = 100 * (pts[-1][1] / pts[0][1] - 1)
+            lines.append(f'<polyline points="{pl}" fill="none" stroke="#b9b4a6" stroke-opacity=".55" stroke-width="1.2"/>'
+                         f'<text x="{X(pts[-1][0])+6:.1f}" y="{Y(pts[-1][1])+4:.1f}" fill="#8b877b">{esc(rid)} {d:+.0f}%</text>')
+    return (f'<svg viewBox="0 0 600 236" font-family="IBM Plex Mono" font-size="10" fill="#6c695f">{g}{"".join(lines[::-1])}'
+            '<text x="60" y="234" fill="#8b877b">context already in the conversation (tokens, log scale)</text><text x="14" y="22" fill="#8b877b">tok/s</text></svg>')
+
+
+def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict, flags: dict, n_measured: int, n_total: int) -> str:
+    s, sp = rec["summary"], rec["summary"]["speed"]
+    bd = sp.get("by_depth") or {}
+    vs = _vs(rec, ref)
+    depths = sorted((report._depth_k(k), d) for k, d in bd.items())
+    deep = depths[-1] if depths else None
+    d_pct = 100 * (deep[1]["decode_tps"] / depths[0][1]["decode_tps"] - 1) if len(depths) > 1 else None
+    k28 = next((d for k, d in depths if k >= 24), None)
+    ttft2 = 2000 / depths[0][1]["prefill_tps"] if depths and depths[0][1].get("prefill_tps") else None
+    rows = rec.get("rows", [])
+    n_cut = sum(1 for f in flags.values() if f["cut"])
+    n_cut_ok = sum(1 for r in rows if flags.get(r["id"], {}).get("cut") and r["score"] >= 0.99)
+    n_loop = sum(1 for f in flags.values() if f["loop"])
+    lost = {}
+    for r in rows:
+        if r["score"] < 0.99:
+            f = flags.get(r["id"], {})
+            why = " — thinking looped" if f.get("loop") else " — ran out of thinking room" if f.get("cut") else ""
+            lost.setdefault(r["block"], []).append(f'{r["kind"].replace("_", " ")} {r["id"].rsplit(".", 2)[-2]} ({r["score"]*100:.0f}){why}')
+    lo, hi = ranks.get(rid, (1, 1))
+    rk = f"{lo}" if lo == hi else f"{lo}–{hi}"
+    m = rec.get("model") or {}
+    rcp = rec.get("recipe") or {}
+    lines = [
+        ("Capability", f'{s["capability"]:.1f}', f'95% CI {s["capability_ci95"][0]:.0f}–{s["capability_ci95"][1]:.0f} · ' + " · ".join(f'{LABEL[b].lower()} {s["blocks"].get(b, 0):.0f}' for b in BLOCKS), _verdict(vs), vs is not None and vs >= 50),
+        ("Speed on the reference box", f'{sp.get("decode_tps")} tok/s', f'prefill {sp.get("prefill_tps") or 0:,.0f} tok/s · typical agent step {sp.get("typical_agent_step_s")} s', sp.get("label") or "", True),
+        ("Deep context", f"{d_pct:+.0f}%" if d_pct is not None else "—", " · ".join(f'{k:.0f}k {d["decode_tps"]}' for k, d in depths) + " tok/s", "steady" if (d_pct or 0) > -15 else "slows down", (d_pct or 0) > -15),
+        ("First word", f"{ttft2:.1f} s" if ttft2 else "—", (f"at 2k context · {28000 / k28['prefill_tps']:.1f} s at 28k" if k28 and k28.get("prefill_tps") else "at 2k context") + (f" · {deep[0]*1000/deep[1]['prefill_tps']:.0f} s to read a fresh {deep[0]:.0f}k document" if deep and deep[1].get("prefill_tps") else ""), "quick" if (ttft2 or 9) < 2 else "slow", (ttft2 or 9) < 2),
+        ("Reliability", f"{n_cut + n_loop} flags / {len(rows)}", f"{n_cut} replies cut at the reasoning reserve ({n_cut_ok} still solved) · {n_loop} reasoning loops · {s.get('errors', 0)} errors", "clean" if n_cut + n_loop == 0 else "thinking issues", n_cut + n_loop == 0),
+        ("Efficiency", f'{s["solved_per_hour"]} solved/h', f'{s["solved"]} of {s["items"]} tasks in {s["wall_minutes"]} min', "", True),
+    ]
+    line_html = "".join(f'<div class="line"><div class="h"><span class="k">{k}<em class="{"" if ok else "r"}">{esc(v)}</em></span>{f'<span class="v {"ok" if ok else "bad"}">{esc(vd)}</span>' if vd else ""}</div><div class="s">{esc(sub)}</div></div>' for k, v, sub, vd, ok in lines)
+    strong = sorted(((v, b) for b, v in s["blocks"].items() if v >= 85), reverse=True)[:3]
+    weak = sorted((v, b) for b, v in s["blocks"].items() if v < 85)[:3]
+    sw = ('<div class="sw"><div><div class="sc">Strengths</div><ul>' + ("".join(f'<li><b>{TIPS[b][0].split(" ·")[0]} {v:.0f}</b></li>' for v, b in strong) or "<li class='q'>none above 85 yet</li>")
+          + '</ul></div><div class="w"><div class="sc">Weaknesses</div><ul>'
+          + ("".join(f'<li><b>{TIPS[b][0].split(" ·")[0]} {v:.0f}</b> · lost: {esc("; ".join(lost.get(b, [])[:2]))}</li>' for v, b in weak) or "<li class='q'>none below 85</li>") + "</ul></div></div>")
+    series = [(rid, bd, True)] + [(o, r["summary"]["speed"].get("by_depth") or {}, False) for o, r in others.items() if o != rid]
+    dtable = "".join(f'<tr><td class="l">{k:.0f}k</td><td>{_tile(d["decode_tps"]) if d.get("decode_tps") else "—"}</td><td>{f"{d['prefill_tps']:,.0f}" if d.get("prefill_tps") else "—"}</td>'
+                     f'<td>{(k*1000/d["prefill_tps"]):.1f} s</td></tr>' for k, d in depths if d.get("prefill_tps"))
+    rt = rec.get("runtime") or {}
+    notes = (rcp.get("notes") or {}).get("lines", [])
+    sam = rcp.get("sampling") or {}
+    al = rcp.get("antiloop") or {}
+    pl = rcp.get("placement") or {}
+    spc = rcp.get("speculative") or {}
+    chat = (rcp.get("chat") or {}).get("template_kwargs") or {}
+    portable = [("SAMPLING", " · ".join(f"{k.replace('_', '-')} {v}" for k, v in sam.items() if k != "max_tokens") or "server defaults"),
+                ("TEMPLATE", " · ".join(f"{k} {v}" for k, v in chat.items()) or "model default"),
+                ("REASONING", (f'reserve {al.get("reasoning_budget")}' if (al.get("reasoning_budget") or -1) >= 0 else "no budget") + (f' · loop detector {al["reasoning_loop"]}' if al.get("reasoning_loop") else "")),
+                ("LOOPS", (f'marker bias −{al.get("marker_bias")} on {len(al.get("marker_ids") or [])} tokens' if al.get("marker_ids") else "none") + (f' · DRY in thinking, allowed {al.get("dry_allowed_length")}' if al.get("dry_think_only") else "")),
+                ("KV CACHE", pl.get("kv_type", "?")),
+                ("SPECULATIVE", f'{spc.get("type")} · draft {spc.get("draft_max")}' if spc.get("type") else "off")]
+    hwrows = [("CONTEXT", f'{round((pl.get("ctx") or 0) / 1000)}k'), ("BATCH", f'{pl.get("batch")} / ubatch {pl.get("ubatch")}'), ("THREADS", f'{(rcp.get("runtime") or {}).get("threads")} on cores {(rcp.get("runtime") or {}).get("cpu_affinity") or "any"}')]
+    recipe_html = ('<div class="cmdl"><code>llmbox install ' + esc(rid) + '</code><span class="q">download · fit to your box · register</span></div><div class="rgrid"><div><div class="sc" style="margin-bottom:6px">Travels with the recipe · carries the score</div><dl>'
+                   + "".join(f"<dt>{k}</dt><dd class='val'>{esc(v)}</dd>" for k, v in portable)
+                   + '</dl></div><div><div class="sc" style="margin-bottom:6px">Fitted to each box by llmbox fit · speed only · here: reference box</div><dl>'
+                   + "".join(f"<dt>{k}</dt><dd>{esc(v)}</dd>" for k, v in hwrows)
+                   + "</dl></div></div>" + (f'<div class="notes"><div class="sc">Why these settings (from the recipe)</div><ul>{"".join(f"<li>{esc(n)}</li>" for n in notes)}</ul></div>' if notes else ""))
+    runs_html = (f'<table><tr><th class="l">RUN</th><th class="l">BOX · SETTINGS THAT DIFFER FROM THE RECIPE</th><th>OF FRONTIER</th><th>TOK/S 2k</th><th>DEEP</th><th></th></tr>'
+                 f'<tr><td class="l"><a class="who" href="run-{rec["id"][:8]}.html">{rec["id"][:8]}</a><br><span class="q">{_ago(rec.get("created", ""))}</span></td>'
+                 f'<td class="l cfg">{esc((rec["host"].get("gpu") or "").replace("NVIDIA GeForce ", ""))} · {rec["host"].get("ram_gib")} GB · {rec["host"].get("ram_read_gbs")} GB/s · llama.cpp {esc(rt.get("llama_cpp_build") or "?")}<br>{esc(rt.get("variant") or "not recorded")}</td>'
+                 f'<td>{_tile(vs, f"{s["capability"]:.1f}")}</td><td>{_tile(sp.get("decode_tps"))}</td><td>{report._deep(sp)}</td><td><a class="btn" href="run-{rec["id"][:8]}.html">OPEN</a></td></tr></table>')
+    body = f'''
+<section class="panel title"><div><div class="org">{esc(m.get("hf_repo") or "")}</div><h1>{esc(rid)} <span class="muted" style="font-weight:500">· {esc(_quant(m.get("file")))}</span></h1>
+ <div class="meta">{esc(rcp.get("description") or "")}</div><div class="meta">FILE <b>{esc(m.get("file") or "?")}</b>{f' · {m["bytes"]/1e9:.1f} GB' if m.get("bytes") else ""} · SHA256 <b>{esc((m.get("sha256") or "not recorded")[:16])}</b> · SUITE <b>v{esc(rec["suite"]["version"])} {esc(rec["suite"]["tier"])}</b></div></div>
+ <div class="acts"><span class="btn solid">$ llmbox install {esc(rid)}</span><a class="btn" href="hardware-{esc(rid)}.html">HARDWARE</a></div></section>
+<section class="panel"><div class="lbl">SCORE · MEASURED ON THE REFERENCE BOX · QUALITY IS THE SAME ON ANY BOX</div><div class="top">
+ <div class="score"><div class="n glow">{f"{vs:.0f}" if vs is not None else "—"}<small>%</small></div><div class="of">OF FRONTIER</div><div class="rk">rank {rk} of {n_measured} measured</div>
+  <div class="faint" style="font-size:10.5px;margin-top:3px">{n_total - n_measured} recipes still in the queue</div><div class="conf">confirmed by<b>1 run</b><span>more runs narrow the interval</span></div></div>
+ <div class="lines">{line_html}</div>
+ <div>{_star(s["blocks"], (ref or {}).get("summary", {}).get("blocks") or {}, lost)}</div></div></section>
+<section class="panel"><div class="lbl">SPEED BY CONTEXT DEPTH · REFERENCE BOX · SINGLE STREAM · REAL CODE</div><div class="depth"><div class="dc">{_depth_chart(series)}</div>
+ <div class="dt"><table><tr><th class="l">DEPTH</th><th>DECODE</th><th>PREFILL</th><th>READ WHOLE<br>CONTEXT</th></tr>{dtable}</table>
+ <p class="q" style="margin-top:12px">Your box's speed: pick it on the home page, or see <a href="hardware-{esc(rid)}.html">hardware for this recipe</a>.</p></div></div>{sw}</section>
+{_telemetry_panel(rec.get("telemetry"))}
+<section class="panel recipe"><div class="lbl">RECIPE · WHAT EACH SETTING IS</div>{recipe_html}</section>
+<section class="panel runs"><div class="lbl">RUNS OF THIS RECIPE · WITH THE SETTINGS EACH ONE USED</div>{runs_html}</section>'''
+    return _page(f"llmbox · {rid}", "RECIPES", body, _RECIPE_CSS, links={"RECIPES": f"recipe-{rid}.html", "HARDWARE": f"hardware-{rid}.html"})
+
+
+def run_page(rid: str, rec: dict, ref: dict | None, flags: dict) -> str:
+    s, sp, h, m, rt = rec["summary"], rec["summary"]["speed"], rec["host"], rec.get("model") or {}, rec.get("runtime") or {}
+    vs = _vs(rec, ref)
+    bd = sorted((report._depth_k(k), d) for k, d in (sp.get("by_depth") or {}).items())
+    body_rows = []
+    for b in BLOCKS:
+        items = [r for r in rec.get("rows", []) if r["block"] == b]
+        if not items:
+            continue
+        body_rows.append(f'<tr class="grp"><td class="l" colspan="7">{TIPS[b][0].split(" ·")[0].upper()} · {s["blocks"].get(b, 0):.0f} · {len(items)} tasks</td></tr>')
+        for r in items:
+            f = flags.get(r["id"], {})
+            fl = ('<span class="flag lo">CUT</span>' if f.get("cut") else "") + ('<span class="flag lo">LOOP</span>' if f.get("loop") else "")
+            lvl = r["id"].rsplit(".", 2)[-2]
+            body_rows.append(f'<tr><td class="l"><span class="m2">{esc(r["kind"].replace("_", " "))}</span> <span class="q">{lvl}</span>{" <span class=flag>EXPERT</span>" if lvl == "L6" else ""}</td>'
+                             f'<td>{_tile(r["score"] * 100)}</td><td>{r["seconds"]:.0f} s</td><td>{r.get("steps") or 1}</td><td>{f.get("max_reply", 0):,}</td><td class="l">{fl or "<span class=q>—</span>"}</td><td class="q">{esc(r["id"])}</td></tr>')
+    argv = rt.get("argv") or []
+    diff = rt.get("diff_vs_recipe")
+    diff_html = ("<span class='v ok'>identical to the recipe</span>" if diff == [] else
+                 "".join(f"<div><span class='flag {'lo' if d['class'] == 'quality' else ''}'>{d['class'].upper()}</span> {esc(d['flag'])}: recipe {esc(' '.join(d['recipe']) or '—')} → run {esc(' '.join(d['run']) or '—')}</div>" for d in diff) if diff
+                 else "<span class='q'>not recorded for this run</span>")
+    body = f'''
+<section class="panel hd"><div><div class="sc">Benchmark run</div><h1><a href="recipe-{esc(rid)}.html">{esc(rid)}</a> on {esc((h.get("gpu") or "").replace("NVIDIA GeForce ", ""))} · {h.get("ram_gib")} GB</h1>
+ <div class="id">run <b>{rec["id"][:8]}</b> · {esc(rec.get("created", "")[:16].replace("T", " "))} · suite v{esc(rec["suite"]["version"])} {esc(rec["suite"]["tier"])}, hash {esc(rec["suite"].get("content_hash") or "?")} · {s["wall_minutes"]} min</div></div>
+ <div class="acts"><span class="btn">COMPARE WITH MY RUN</span><span class="btn">COPY SETTINGS</span><span class="btn">JSON ↓</span></div></section>
+<section class="panel sum">
+ <div><b>{f"{vs:.0f}%" if vs is not None else "—"}</b><span>of frontier · {s["capability"]:.1f} ({s["capability_ci95"][0]:.0f}–{s["capability_ci95"][1]:.0f})</span></div>
+ <div><b class="w">{s["solved"]}</b><span>of {s["items"]} tasks solved</span></div>
+ <div><b>{sp.get("decode_tps")}</b><span>tok/s at 2k · {report._deep(sp)} deep</span></div>
+ <div><b class="w">{f"{2000/bd[0][1]['prefill_tps']:.1f} s" if bd and bd[0][1].get("prefill_tps") else "—"}</b><span>first word at 2k</span></div>
+ <div><b class="w">{s["solved_per_hour"]}</b><span>solved tasks per hour</span></div>
+ <div><b class="w" style="color:var(--red)">{sum(1 for f in flags.values() if f["cut"]) + sum(1 for f in flags.values() if f["loop"])}</b><span>thinking flags: {sum(1 for f in flags.values() if f["cut"])} cut, {sum(1 for f in flags.values() if f["loop"])} loop</span></div></section>
+<div class="two"><section class="panel sys"><div class="lbl">SYSTEM · FINGERPRINT {esc(h.get("id") or "?")}</div><dl>
+ <dt>GPU</dt><dd>{esc(h.get("gpu"))} · {h.get("vram_gib")} GiB</dd><dt>DRIVER</dt><dd>{esc(h.get("gpu_driver"))} · power limit {esc(h.get("gpu_power_limit_w"))} W</dd>
+ <dt>CPU</dt><dd>{esc(h.get("cpu"))}</dd><dt>RAM</dt><dd>{h.get("ram_gib")} GiB · measured {h.get("ram_read_gbs")} GB/s read</dd><dt>OS</dt><dd>{esc(h.get("os"))}</dd>
+ <dt>RUNTIME</dt><dd>llama.cpp {esc(rt.get("llama_cpp_build") or "not recorded")}</dd><dt>MODEL</dt><dd>{esc(m.get("hf_repo") or "")}<br><span class="q">{esc(m.get("file") or "")}</span></dd>
+ <dt>SHA256</dt><dd class="{"" if m.get("sha256") else "todo"}">{esc(m.get("sha256") or "not recorded")}</dd></dl></section>
+ <section class="panel"><div class="lbl">SETTINGS USED · FROM THE SERVER'S COMMAND LINE AND /props{(" · " + esc(rt["source"].split(":")[0].upper())) if rt.get("source") else ""}</div>
+  <div class="argv">{esc(" ".join(argv)) if argv else "<span class=q>not recorded for this run</span>"}</div>
+  <div class="diff">{diff_html}{" <span class='q'>· consistent start to end</span>" if rt.get("settings_consistent") else ""}</div></section></div>
+{_telemetry_panel(rec.get("telemetry"))}
+<section class="panel tasks"><div class="lbl">EVERY TASK · SCORE · TIME · LONGEST REPLY · THINKING FLAGS</div>
+ <table><tr><th class="l">TASK</th><th>SCORE</th><th>TIME</th><th>STEPS</th><th>LONGEST REPLY</th><th class="l">FLAGS</th><th>ID</th></tr>{"".join(body_rows)}</table></section>'''
+    return _page(f"llmbox · run {rec['id'][:8]} · {rid}", "RECIPES", body, _RUN_CSS, links={"RECIPES": f"recipe-{rid}.html", "HARDWARE": f"hardware-{rid}.html"})
+
+
+def hardware_page(rid: str, rec: dict, shape: dict, data: dict) -> str:
+    """Measured boxes for this recipe + predictions for common boxes; the upgrade advisor is computed in the page for
+    the visitor's box (saved by the picker on the home page), else for the reference box."""
+    import json as _json
+    body = f'''
+<section class="panel hd"><div><div class="sc">Hardware</div><h1>Which box runs <a href="recipe-{esc(rid)}.html">{esc(rid)}</a> best?</h1>
+ <p class="q" style="max-width:860px;margin-top:6px">Measured runs first, then predictions from the model file's header and each box's memory bandwidth, calibrated on the measured run. Quality does not depend on the box; only speed does.</p></div></section>
+<section class="panel"><div class="lbl">UPGRADE ADVISOR · <span id="advbox">FOR THE REFERENCE BOX</span></div><div class="adv" id="adv"></div>
+ <div class="why"><b>Why:</b> a mixture-of-experts model reads only its active experts per token, but which ones changes every token. Whatever does not fit in VRAM is read from system RAM, so on small cards RAM bandwidth, not the GPU, sets the pace. Measure yours with <b>llmbox host add</b>; pick your box on the home page.</div></section>
+<section class="panel"><div class="lbl">BOXES · SORTED BY SPEED AT 2k · MEASURED SOLID, PREDICTED DASHED</div><table id="boxes"></table></section>'''
+    js = PLAN_JS + f"\nconst DATA = {_json.dumps(dict(data, sh=shape, measured={'gpu': data['ref']['gpu'], 'ram': data['ref']['ram'], 'rambw': data['ref']['rambw'], 't2': rec['summary']['speed'].get('decode_tps'), 'td': float(report._deep(rec['summary']['speed'])) if report._deep(rec['summary']['speed']) != '-' else None}))};\n" + _HW_JS
+    return _page(f"llmbox · hardware for {rid}", "HARDWARE", body, _HW_CSS, js, links={"RECIPES": f"recipe-{rid}.html", "HARDWARE": f"hardware-{rid}.html"})
+
+
+def compare_page(a: str, b: str, ra: dict, rb: dict, ref: dict | None, fa: dict, fb: dict) -> str:
+    sa, sb = ra["summary"], rb["summary"]
+    va, vb = _vs(ra, ref), _vs(rb, ref)
+    rows = []
+    wins = {a: 0, b: 0}
+    def row(name, x, y, fmt, higher=True, tip=""):
+        w = None if x is None or y is None or abs(x - y) < 1e-9 else (a if (x > y) == higher else b)
+        if w:
+            wins[w] += 1
+        cell = lambda v, me: f'<td class="{"win" if w == me else ""}">{fmt(v) if v is not None else "—"}{" ◀" if w == me and me == a else ""}{" ▶" if w == me and me == b else ""}</td>'
+        rows.append(f'<tr><td class="l">{tip or name}</td>{cell(x, a)}{cell(y, b)}</tr>')
+    row("Of frontier", va, vb, lambda v: f"{v:.0f}%")
+    for bl in BLOCKS:
+        row(LABEL[bl], sa["blocks"].get(bl), sb["blocks"].get(bl), lambda v: f"{v:.0f}", tip=_tip(bl))
+    da, db = sa["speed"].get("by_depth") or {}, sb["speed"].get("by_depth") or {}
+    row("tok/s at 2k (reference box)", sa["speed"].get("decode_tps"), sb["speed"].get("decode_tps"), lambda v: f"{v:.1f}")
+    dpa, dpb = report._deep(sa["speed"]), report._deep(sb["speed"])
+    row("tok/s deep", float(dpa) if dpa != "-" else None, float(dpb) if dpb != "-" else None, lambda v: f"{v:.1f}")
+    row("Solved tasks / hour", sa.get("solved_per_hour"), sb.get("solved_per_hour"), lambda v: f"{v:.1f}")
+    ta, tb = (ra.get("telemetry") or {}), (rb.get("telemetry") or {})
+    g = lambda t, k: (t.get(k) or {}).get("avg")
+    row("VRAM used (GB)", (g(ta, "vram_used_mib") or 0) / 1024 or None, (g(tb, "vram_used_mib") or 0) / 1024 or None, lambda v: f"{v:.1f}", higher=False)
+    row("GPU power avg (W)", g(ta, "gpu_power_w"), g(tb, "gpu_power_w"), lambda v: f"{v:.0f}", higher=False)
+    row("Thinking flags (cut + loop)", sum(f["cut"] + f["loop"] for f in fa.values()), sum(f["cut"] + f["loop"] for f in fb.values()), lambda v: f"{v}", higher=False)
+    # settings that differ between the two recipes
+    import json as _json
+    flat = lambda d, p="": {k2: v2 for k, v in (d or {}).items() for k2, v2 in (flat(v, f"{p}{k}.") if isinstance(v, dict) else {f"{p}{k}": v}).items()}
+    fa_, fb_ = flat({k: (ra.get("recipe") or {}).get(k) for k in ("sampling", "chat", "antiloop", "placement", "speculative")}), flat({k: (rb.get("recipe") or {}).get(k) for k in ("sampling", "chat", "antiloop", "placement", "speculative")})
+    diffs = [(k, fa_.get(k), fb_.get(k)) for k in sorted(set(fa_) | set(fb_)) if fa_.get(k) != fb_.get(k) and not k.endswith("marker_ids")]
+    only = lambda rows_, other: [r["kind"].replace("_", " ") + " " + r["id"].rsplit(".", 2)[-2] for r in rows_ if r["score"] < 0.99 and next((o["score"] for o in other if o["id"] == r["id"]), 0) >= 0.99]
+    la, lb = only(ra.get("rows", []), rb.get("rows", [])), only(rb.get("rows", []), ra.get("rows", []))
+    body = f'''
+<section class="panel hd"><div><div class="sc">Compare</div><h1><a href="recipe-{esc(a)}.html">{esc(a)}</a> <span class="muted">vs</span> <a href="recipe-{esc(b)}.html">{esc(b)}</a></h1>
+ <p class="q" style="margin-top:6px">Same 31 tasks, same reference box. Wins count rows where one is strictly better; differences inside the confidence intervals ({sa["capability_ci95"][0]:.0f}–{sa["capability_ci95"][1]:.0f} vs {sb["capability_ci95"][0]:.0f}–{sb["capability_ci95"][1]:.0f}) are noise.</p></div>
+ <div class="score2"><div><b>{wins[a]}</b><span>{esc(a)}</span></div><div class="vs">:</div><div><b>{wins[b]}</b><span>{esc(b)}</span></div></div></section>
+<div class="two2"><section class="panel"><div class="lbl">HEAD TO HEAD · HOVER A SCORE NAME</div><table class="h2h"><tr><th class="l"></th><th>{esc(a)}</th><th>{esc(b)}</th></tr>{"".join(rows)}</table></section>
+<div><section class="panel"><div class="lbl">SPEED BY CONTEXT DEPTH</div><div class="pad0">{_depth_chart([(a, da, True), (b, db, False)])}</div></section>
+<section class="panel pad"><div class="lbl">TASKS ONLY ONE OF THEM SOLVED</div><div class="only"><div><div class="sc">{esc(a)} solved, {esc(b)} did not</div><ul>{"".join(f"<li>{esc(x)}</li>" for x in lb) or "<li class=q>none</li>"}</ul></div>
+ <div><div class="sc">{esc(b)} solved, {esc(a)} did not</div><ul>{"".join(f"<li>{esc(x)}</li>" for x in la) or "<li class=q>none</li>"}</ul></div></div></section></div></div>
+<section class="panel"><div class="lbl">SETTINGS THAT DIFFER BETWEEN THE RECIPES</div><table><tr><th class="l">SETTING</th><th class="l">{esc(a)}</th><th class="l">{esc(b)}</th></tr>
+ {"".join(f"<tr><td class='l q'>{esc(k)}</td><td class='l amb'>{esc(x)}</td><td class='l amb'>{esc(y)}</td></tr>" for k, x, y in diffs)}</table></section>'''
+    return _page(f"llmbox · {a} vs {b}", "COMPARE", body, _CMP_CSS, links={"COMPARE": f"compare-{a}-vs-{b}.html"})
+
+
+def build(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str = "quick") -> list[str]:
+    """The whole site: home, a page per recipe, per run, hardware per recipe, compare per pair of measured recipes."""
+    import itertools
+    import json as _json
+    out_dir = os.path.expanduser(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    written = [home(out_dir, host, suite_version, tier)]
+    recs = load_records(host, suite_version, tier)
+    local, ref = recs["local"], recs["ref"]
+    rs = [r for r in report.rows(host, suite_version=suite_version, tier=tier) if r["host"].get("id") != "cloud" and not r.get("partial")]
+    ranks = rank_ranges(rs)
+    n_total = len(rs) + len([j for j in queue_state() if j["model"] not in local])
+    data = shape_data(rs, host)
+    flags = {rid: task_flags(rec) for rid, rec in local.items()}
+    order = sorted(local, key=lambda k: -local[k]["summary"]["capability"])
+    def w(name, html_):
+        p = os.path.join(out_dir, name)
+        open(p, "w").write(html_)
+        written.append(p)
+    for rid in order:
+        rec = local[rid]
+        w(f"recipe-{rid}.html", recipe_page(rid, rec, ref, local, ranks, flags[rid], len(local), n_total))
+        w(f"run-{rec['id'][:8]}.html", run_page(rid, rec, ref, flags[rid]))
+        if rid in data["recipes"]:
+            w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
+    for a, b in itertools.combinations(order, 2):
+        w(f"compare-{a}-vs-{b}.html", compare_page(a, b, local[a], local[b], ref, flags[a], flags[b]))
+    return written
+
+
+_PAGES_CSS = """
+a{color:var(--amber)} .tabs a{text-decoration:none}
+.title{display:grid;grid-template-columns:1fr auto;align-items:end;padding:20px 22px 16px}.title .org{font-size:13px;color:var(--amber)}
+.title h1,.hd h1{font:600 34px/1.05 "IBM Plex Sans Condensed"}.title h1 a,.hd h1 a{color:var(--ink);text-decoration:none;border-bottom:1px dotted var(--amber-dim)}
+.title .meta{font-size:12px;color:var(--muted);margin-top:8px;letter-spacing:.06em}.title .meta b{color:var(--ink);font-weight:400}
+.title .acts,.hd .acts{display:flex;gap:10px}
+.hd{display:grid;grid-template-columns:1fr auto;align-items:end;padding:18px 22px}.hd .id{font-size:12px;color:var(--muted);margin-top:6px}.hd .id b{color:var(--amber);font-weight:400}
+.tele{display:grid}.tele>div{padding:14px 16px;border-right:1px dashed var(--amber-faint)}.tele>div:last-child{border-right:0}
+.tele .tv{font-size:22px;margin-top:2px}.tele .tv small{font-size:11px;color:var(--muted);margin-left:4px}
+.spark{width:100%;height:44px;display:block;margin-top:6px}
+.flag{font-size:10px;letter-spacing:.14em;border:1px solid var(--amber-dim);color:var(--amber);padding:1px 6px;margin-right:4px}.flag.lo{border-color:var(--red-dim);color:var(--red)}
+.m2{font:600 14px "IBM Plex Sans Condensed";color:var(--ink)}
+"""
+_RECIPE_CSS = """
+.top{display:grid;grid-template-columns:150px minmax(0,1fr) 420px}
+.score{padding:24px 10px;text-align:center;border-right:1px dashed var(--amber-faint)}.score .n{font:300 64px/1 "IBM Plex Mono";color:var(--amber)}.score .n small{font-size:26px}
+.score .of{font-size:11px;letter-spacing:.16em;color:var(--muted);margin-top:6px}.score .rk{margin-top:16px;font-size:12px}
+.conf{margin-top:18px;font-size:11px;color:var(--muted);border-top:1px dashed var(--amber-faint);padding-top:12px}.conf b{display:block;font:400 18px "IBM Plex Mono";color:var(--ink)}.conf span{display:block;font-size:10px;color:var(--faint)}
+.lines{padding:16px 22px;border-right:1px dashed var(--amber-faint)}.line{padding:8px 0;border-bottom:1px dashed var(--amber-faint)}.line:last-child{border-bottom:0}
+.line .h{display:flex;justify-content:space-between;align-items:baseline}.line .k{font:600 16px "IBM Plex Sans Condensed"}
+.line .k em{font-style:normal;font:400 14px "IBM Plex Mono";color:var(--amber);margin-left:10px}.line .k em.r{color:var(--red)}.line .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.starw{position:relative;padding:18px 10px 10px}.starw svg{width:100%;height:auto;display:block}
+.ax{position:absolute;width:80px;font-size:10.5px;letter-spacing:.12em;color:var(--muted);text-align:center;line-height:1.3}.ax>b{display:block;font:400 16px "IBM Plex Mono";color:var(--ink);letter-spacing:0}.ax>b.r{color:var(--red)}
+.ax .pop{left:-120px;width:320px;text-align:left;letter-spacing:0;font-size:12.5px}.ax .pop b{display:block;font:500 11px "IBM Plex Mono";color:var(--amber);letter-spacing:.14em;text-transform:uppercase}
+.lgd{text-align:center;font-size:11px;color:var(--muted);margin-top:22px}
+.depth{display:grid;grid-template-columns:minmax(0,1fr) 400px}.depth .dc{padding:14px 18px;border-right:1px dashed var(--amber-faint)}.depth svg{width:100%;height:auto}.depth .dt{padding:14px 18px}
+.sw{display:grid;grid-template-columns:1fr 1fr;border-top:1px dashed var(--amber-faint)}.sw>div{padding:14px 22px}.sw>div:first-child{border-right:1px dashed var(--amber-faint)}
+.sw li{list-style:none;font-size:12.5px;line-height:1.7;color:#cfcabb}.sw li b{font-weight:500;color:var(--amber)}.sw .w li b{color:var(--red)}
+.cmdl{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;border-bottom:1px dashed var(--amber-faint)}.cmdl code{font:500 18px "IBM Plex Mono";color:var(--amber)}.cmdl code:before{content:"$ ";color:var(--muted)}
+.rgrid{display:grid;grid-template-columns:1.3fr 1fr}.rgrid>div{padding:14px 22px}.rgrid>div:first-child{border-right:1px dashed var(--amber-faint)}
+.rgrid dl{display:grid;grid-template-columns:120px 1fr;row-gap:7px;font-size:12.5px}.rgrid dt{color:var(--muted);font-size:11px;letter-spacing:.14em}.rgrid dd.val{color:var(--amber)}
+.notes{padding:12px 22px 16px;border-top:1px dashed var(--amber-faint)}.notes li{list-style:none;font-size:12.5px;color:#cfcabb;padding:3px 0 3px 14px;position:relative}.notes li:before{content:"›";position:absolute;left:0;color:var(--amber)}
+.runs .cfg{font-size:12px;color:#cfcabb}.runs .who{color:var(--amber)}
+"""
+_RUN_CSS = """
+.sum{display:grid;grid-template-columns:repeat(6,1fr)}.sum>div{padding:16px 18px;border-right:1px dashed var(--amber-faint)}.sum>div:last-child{border-right:0}
+.sum b{display:block;font:300 34px "IBM Plex Mono";color:var(--amber);line-height:1.1}.sum b.w{color:var(--ink)}.sum span{font-size:11.5px;color:var(--muted)}
+.two{display:grid;grid-template-columns:430px minmax(0,1fr);gap:22px}
+.sys dl{display:grid;grid-template-columns:110px 1fr;row-gap:7px;font-size:12.5px;padding:18px 22px}.sys dt{color:var(--muted);font-size:11px;letter-spacing:.14em}.sys dd{word-break:break-word}.sys dd.todo{color:var(--red)}
+.argv{padding:16px 22px;font-size:12px;line-height:1.75;color:#cfcabb;word-break:break-word}.diff{padding:10px 22px 16px;border-top:1px dashed var(--amber-faint);font-size:12.5px}
+.tasks td{padding:7px 8px;font-size:12.5px}.tasks .tile{min-width:46px;font-size:13px;padding:3px 4px 2px}
+.tasks tr.grp td{background:rgba(255,176,0,.05);color:var(--amber);font-size:11px;letter-spacing:.18em;padding:9px 12px}
+"""
+_HW_CSS = """
+.adv{display:grid;grid-template-columns:repeat(3,1fr)}.adv>div{padding:18px 22px;border-right:1px dashed var(--amber-faint)}.adv>div:last-child{border-right:0}
+.adv h4{font:600 17px "IBM Plex Sans Condensed"}.adv .g{font:300 34px "IBM Plex Mono";color:var(--amber);margin:6px 0}.adv .g.no{color:var(--muted)}.adv p{font-size:12.5px;color:#cfcabb;line-height:1.55}
+.why{padding:14px 22px;font-size:12.5px;color:#cfcabb;line-height:1.6;border-top:1px dashed var(--amber-faint)}.why b{color:var(--amber);font-weight:500}
+.st{font-size:10.5px;letter-spacing:.12em;padding:2px 7px;border:1px solid}.st.meas{color:var(--amber);border-color:var(--amber-dim)}.st.h{color:#cfcabb;border-color:#45443a}.st.l{color:var(--faint);border-color:#2f2f28;border-style:dashed}
+.tile.pred{border-style:dashed;background:transparent;box-shadow:none}.youb{font-size:10px;letter-spacing:.14em;color:var(--bg);background:var(--amber);padding:1px 6px;margin-left:8px}
+"""
+_CMP_CSS = """
+.score2{display:flex;align-items:center;gap:18px}.score2 b{display:block;font:300 44px "IBM Plex Mono";color:var(--amber);text-align:center}.score2 span{font-size:11px;color:var(--muted)}.score2 .vs{font-size:30px;color:var(--muted)}
+.two2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px}.h2h td{font-size:15px}.h2h td.win{color:var(--amber);background:rgba(255,176,0,.06)}
+.pad0{padding:12px 16px}.pad0 svg{width:100%;height:auto}.only{display:grid;grid-template-columns:1fr 1fr;gap:18px}.only li{list-style:none;font-size:12.5px;color:#cfcabb;padding:3px 0}
+"""
+_HW_JS = r"""
+const $ = s => document.querySelector(s);
+const box = savedBox(DATA) || { name: "reference box", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
+if (savedBox(DATA)) $("#advbox").textContent = `FOR YOUR BOX: ${box.name} · ${Math.round(box.ram / 1024)} GB @ ${box.rambw} GB/s`;
+const cur = forBox(DATA.sh, box);
+const conf = hw => { const f = forBox(DATA.sh, hw); return f.gf > 0.6 ? "low" : "high"; };
+function card(title, hw, note) {
+  const f = forBox(DATA.sh, hw), g = f.t2 / cur.t2;
+  const txt = g > 1.05 ? `+${Math.round((g - 1) * 100)}%` : g < 0.95 ? `${Math.round((g - 1) * 100)}%` : "±0%";
+  return `<div><h4>${title}</h4><div class="g ${Math.abs(g - 1) < 0.05 ? "no" : ""}">${txt}</div><p>~${Math.round(f.t2)} tok/s, ${Math.round(f.gf * 100)}% of the experts on the GPU. ${note} <span class="st ${conf(hw) === "high" ? "h" : "l"}">${conf(hw).toUpperCase()} CONFIDENCE</span></p></div>`;
+}
+const faster = DATA.ramKinds.map(r => r[1]).filter(v => v >= box.rambw * 1.2)[0];   // a step worth buying
+const gp = n => { const g = DATA.gpus.find(x => x[0].startsWith(n)); return { gpu: n, vram: g[1], vrambw: g[2], ram: box.ram, rambw: box.rambw }; };
+$("#adv").innerHTML = (faster ? card(`Faster RAM (~${faster} GB/s)`, Object.assign({}, box, { rambw: faster }), "RAM bandwidth sets the pace while experts live in system RAM.") : "<div><h4>Faster RAM</h4><p class='q'>already at the fastest preset</p></div>")
+  + card("A 16 GB card (RTX 5070 Ti)", gp("RTX 5070 Ti"), "More experts fit on the GPU.")
+  + card("A 24 GB card (RTX 4090)", gp("RTX 4090"), "Most experts on the GPU.");
+const rows = [];
+const m = DATA.measured;
+rows.push({ name: `${m.gpu} · ${Math.round(m.ram / 1024)} GB · ${m.rambw} GB/s`, measured: true, t2: m.t2, td: m.td, f: forBox(DATA.sh, { gpu: m.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: m.ram, rambw: m.rambw }) });
+for (const g of DATA.gpus) for (const r of [DATA.ramKinds[1], DATA.ramKinds[2]]) {
+  const hw = { gpu: g[0], vram: g[1], vrambw: g[2], ram: 65536, rambw: r[1] }, f = forBox(DATA.sh, hw);
+  rows.push({ name: `${g[0]} · 64 GB ${r[0]}`, measured: false, t2: f.t2, td: f.td, f, conf: conf(hw) });
+}
+rows.sort((a, b) => b.t2 - a.t2);
+const T = (v, pred) => `<span class="tile ${v >= 50 ? "hi" : v >= 25 ? "mid" : "lo"}${pred ? " pred" : ""}">${pred ? "~" : ""}${Math.round(v)}</span>`;
+$("#boxes").innerHTML = `<tr><th class="l">BOX</th><th>STATUS</th><th>EXPERTS ON GPU</th><th>VRAM</th><th>RAM</th><th>TOK/S 2k</th><th>TOK/S DEEP</th><th>CONTEXT</th></tr>` +
+  rows.map(r => `<tr class="${r.measured ? "sel" : ""}"><td class="l"><span class="m">${r.name}</span>${r.measured ? " <span class=youb>MEASURED</span>" : ""}</td>` +
+    `<td>${r.measured ? '<span class="st meas">MEASURED · 1 RUN</span>' : `<span class="st ${r.conf === "high" ? "h" : "l"}">PREDICTED · ${r.conf.toUpperCase()}</span>`}</td>` +
+    `<td>${Math.round(r.f.gf * 100)}%</td><td>${(r.f.vram / 1024).toFixed(1)} GB</td><td>${(r.f.ramUsed / 1024).toFixed(1)} GB</td>` +
+    `<td>${T(r.t2, !r.measured)}</td><td>${r.td ? T(r.td, !r.measured) : "—"}</td><td>${r.f.fits ? "✓ " + Math.round(r.f.ctx / 1000) + "k" : "✗"}</td></tr>`).join("");
 """
