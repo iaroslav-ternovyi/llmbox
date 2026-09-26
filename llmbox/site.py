@@ -242,7 +242,7 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
 <div class="below">
  <section class="panel chart"><div class="lbl">Smarter vs faster</div><div id="scatter">{_scatter(local)}</div>
   <p class="legend"><svg width="12" height="16" viewBox="0 0 12 16"><g stroke="#FFB000" stroke-opacity=".6" stroke-width="1.5"><line x1="6" y1="1" x2="6" y2="15"/><line x1="1" y1="1" x2="11" y2="1"/><line x1="1" y1="15" x2="11" y2="15"/></g></svg>
-  where the score probably really is (95%). With ~30 tasks one task moves it a few points; when two ranges overlap, the difference is not settled yet. <a href="method.html">More</a></p></section>
+  <span>where the score probably really is (95%). With ~30 tasks one task moves it a few points; when two ranges overlap, the difference is not settled yet. <a href="method.html">More</a></span></p></section>
  <section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
 </div>
 <footer><span>Every number comes from a saved run. The score does not depend on the box; speed does. <a href="method.html">How scores work →</a></span><span>generated {time.strftime('%b %d, %Y %H:%M')}</span></footer>
