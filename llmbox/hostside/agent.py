@@ -103,7 +103,8 @@ def busy() -> dict:
         pass
     util = sh("nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits")
     load1 = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
-    servers = sh("pgrep -fa llama-server | grep -v pgrep | wc -l")
+    # by process name: a full-command-line match also caught this agent itself (a probe spec names the llama-server binary)
+    servers = sh("pgrep -xc llama-server || true")
     return {"llama_swap_running": running, "gpu": util, "load1": round(load1, 2),
             "llama_server_procs": int(servers or 0), "busy": bool(running) or int(servers or 0) > 0 or load1 > 2.0}
 
