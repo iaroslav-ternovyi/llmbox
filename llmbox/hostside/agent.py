@@ -34,6 +34,23 @@ def sh(cmd: str, timeout: int = 30) -> str:
         return ""
 
 
+def _physical_cores() -> int | None:
+    try:
+        pairs = set()
+        phys = core = None
+        for ln in open("/proc/cpuinfo"):
+            if ln.startswith("physical id"):
+                phys = ln.split(":")[1].strip()
+            elif ln.startswith("core id"):
+                core = ln.split(":")[1].strip()
+            elif not ln.strip() and core is not None:
+                pairs.add((phys, core))
+                phys = core = None
+        return len(pairs) or None
+    except OSError:
+        return None
+
+
 def hwinfo() -> dict:
     gpus = []
     q = sh("nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version,pcie.link.gen.max,pcie.link.width.max,"
@@ -70,7 +87,7 @@ def hwinfo() -> dict:
     du = shutil.disk_usage(os.path.expanduser("~"))
     return {
         "hostname": platform.node(), "os": platform.platform(), "python": sys.version.split()[0],
-        "cpu": {"model": cpu_model, "threads": os.cpu_count()},
+        "cpu": {"model": cpu_model, "threads": os.cpu_count(), "cores": _physical_cores()},
         "ram_mib": mem.get("MemTotal", 0), "ram_available_mib": mem.get("MemAvailable", 0),
         "gpus": gpus, "runtimes": runtimes, "llama_swap": swap,
         "disk_free_gib": round(du.free / 2**30, 1), "models_dir_guess": os.path.expanduser("~/models"),
