@@ -319,6 +319,11 @@ def cmd_traces(a) -> None:
                 print("      ..." + fired[0]["excerpt"][-300:].replace("\n", " / "))
 
 
+def cmd_site(a) -> None:
+    from . import site
+    print(site.home(os.path.expanduser(a.out), host=a.host, suite_version=a.suite_version, tier=a.tier))
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="llmbox", description="Get the most quality x speed out of local LLMs on your hardware.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -422,6 +427,13 @@ def main(argv: list[str] | None = None) -> None:
     tr.add_argument("--all", action="store_true", help="list every item")
     tr.add_argument("--excerpts", action="store_true", help="print the text before each detected loop")
     tr.set_defaults(fn=cmd_traces)
+
+    st = sub.add_parser("site", help="build the static site (home page for now) from saved results into a folder")
+    st.add_argument("--out", default="~/.llmbox/site")
+    st.add_argument("--host", default="box")
+    st.add_argument("--suite-version", default="0.9")
+    st.add_argument("--tier", default="quick")
+    st.set_defaults(fn=cmd_site)
 
     rp = sub.add_parser("report", help="leaderboard of saved suite results (terminal + optional static HTML)")
     rp.add_argument("--host")
