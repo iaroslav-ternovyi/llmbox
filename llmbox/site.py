@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 
 from . import report
+from . import suite as _suite
 from .hosts import HOME
 
 ASSETS = os.path.join(os.path.dirname(__file__), "site_assets")
@@ -25,21 +26,32 @@ LABEL = {"agentic": "AGENTIC", "code": "CODE", "tools": "TOOLS", "techhelp": "TE
          "explain": "EXPLAINING", "longctx": "LONG DOCS", "writing": "WRITING", "reasoning": "REASONING"}
 # hover text for each score: what it measures, its weight, example tasks (the suite's real task kinds)
 TIPS = {
-    "agentic": ("Agentic coding · 25% of the total", "Multi-turn work in a real repository: read, edit, run tests, keep up when the request changes mid-session.",
+    "agentic": ("Agentic coding", "Multi-turn work in a real repository: read, edit, run tests, keep up when the request changes mid-session.",
                 ["Fix the shipping-fee bug; hidden tests decide", "Cart: add discount codes, then change the rule"]),
-    "code": ("Code · 10%", "One function or module from a written spec. Graded only by hidden unit tests.",
+    "code": ("Code", "One function or module from a written spec. Graded only by hidden unit tests.",
              ["Expression evaluator, LRU cache, CSV parser", "Expert: cron schedule across DST changes"]),
-    "tools": ("Tools & automation · 20%", "Calling business tools correctly on messy data: a CRM, invoices, payments. Wrong or extra calls cost points.",
+    "tools": ("Tools & automation", "Calling business tools correctly on messy data: a CRM, invoices, payments. Wrong or extra calls cost points.",
               ["Payment reminders only to customers really overdue", "Expert: bulk discounts under an approval policy"]),
-    "longctx": ("Long documents · 15%", "Exact answers from 100k–200k-token documents: logs, contracts, reports.",
+    "longctx": ("Long documents", "Exact answers from 100k–200k-token documents: logs, contracts, reports.",
                 ["Which incident stayed open the longest?", "Count incidents matching three conditions"]),
-    "writing": ("Writing · 15%", "Text with hard constraints a checker can verify: length, required facts, glossary terms, plural rules.",
+    "writing": ("Writing", "Text with hard constraints a checker can verify: length, required facts, glossary terms, plural rules.",
                 ["Meeting minutes with owners and dates", "UI strings in Russian / Ukrainian with ICU plurals"]),
-    "reasoning": ("Reasoning · 15%", "Multi-step problems with one exact answer.",
+    "reasoning": ("Reasoning", "Multi-step problems with one exact answer.",
                   ["Order total with tiered discounts and tax", "Trace a function by hand; schedule jobs"]),
 }
-# ranking presets: block weights (the published suite weights first); the page recomputes the total and the order
-PRESETS = [("All work", {"agentic": 25, "code": 10, "tools": 20, "longctx": 15, "writing": 15, "reasoning": 15}),
+
+
+def share(b: str) -> float:
+    """A block's share of the site's total: the current suite weights over the blocks the ranked suite has."""
+    from . import suite
+    return suite.WEIGHTS[b] / sum(suite.WEIGHTS[x] for x in BLOCKS)
+
+
+for _b in TIPS:   # "Agentic coding · 31% of the total": from the code, not typed by hand
+    TIPS[_b] = (f"{TIPS[_b][0]} · {share(_b) * 100:.0f}% of the total",) + TIPS[_b][1:]
+
+# ranking presets: block weights (the current suite weights first); the page recomputes the total and the order
+PRESETS = [("All work", {b: round(share(b) * 100) for b in BLOCKS}),
            ("Coding", {"agentic": 50, "code": 30, "tools": 20}),
            ("Documents", {"longctx": 50, "writing": 25, "reasoning": 25}),
            ("Writing", {"writing": 70, "longctx": 15, "reasoning": 15})]
@@ -236,7 +248,7 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
  <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
  <span id="boxnote" class="q">speeds measured on this box</span></section>
 <section class="picks">{picks}</section>
-<section class="panel rankp"><div class="lbl">Ranking · suite v{esc(suite_version)}</div>
+<section class="panel rankp"><div class="lbl">Ranking · suite v{esc(suite_version)} tasks · v{esc(_suite.VERSION.split("-")[0])} weights</div>
  <div class="rhead"><div class="seg" role="group" aria-label="rank by"><span class="sc">Rank by</span>{presets}</div>
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
  <div class="tw"><table class="rank">{head}{''.join(body)}</table></div>{qline}</section>
@@ -470,6 +482,8 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
             su = rec.get("suite") or {}
             if rec.get("kind") != "suite" or su.get("version") != suite_version or su.get("tier") != tier or su.get("blocks"):
                 continue
+            from . import bench
+            rec = bench.rescore(rec)   # current suite weights: the task scores are the run's, the weighting is today's
             rec["_path"] = os.path.join(d, f)
             rid = (rec.get("recipe") or {}).get("id")
             if h == "cloud":
@@ -968,7 +982,7 @@ def method_page(ref: dict | None) -> str:
         per.setdefault(b, []).append(lvl)
     from .suite import sessions
     counts = {"sessions": sum(1 for b, k, _l in suite.QUICK_ITEMS if b == "agentic" and k in sessions.KINDS), "agentic": len(per.get("agentic", []))}
-    rows = "".join(f'<tr><td class="l"><span class="m2">{esc(TIPS[b][0].split(" ·")[0])}</span></td><td>{suite.WEIGHTS[b] * 100:.0f}%</td>'
+    rows = "".join(f'<tr><td class="l"><span class="m2">{esc(TIPS[b][0].split(" ·")[0])}</span></td><td>{share(b) * 100:.0f}%</td>'
                    f'<td>{len(per.get(b, []))}</td><td class="l q">{esc(_GRADING[b].format(**counts))}</td></tr>' for b in BLOCKS)
     n = len(suite.QUICK_ITEMS)
     n6 = sum(1 for *_x, lvl in suite.QUICK_ITEMS if lvl >= 6)
@@ -988,6 +1002,9 @@ Only the model differs.</p>
 
 <h2>The tasks</h2>
 <div class="tw"><table><tr><th class="l">BLOCK</th><th>WEIGHT</th><th>TASKS</th><th class="l">WHAT AND HOW IT IS GRADED</th></tr>{rows}</table></div>
+<p>The weights are those of suite v{esc(suite.VERSION.split("-")[0])}, set for people who download and run local models, mostly developers.
+Saved runs are re-weighted with them, and each task keeps the score it got. Three more blocks join with the v{esc(suite.VERSION.split("-")[0])} campaign:
+tech help for your own machine, knowledge with "I don't know", and explanations a reader can act on.</p>
 <p>Each kind of task has difficulty levels. The quick suite uses hard ones (level 5), a few normal ones (level 3) so that weak models
 still register, and {n6} expert tasks (level 6) that local models rarely solve, so the frontier has room above them.
 Tasks are generated from a seed: a new seed gives fresh tasks of the same difficulty, so a model cannot have seen the answers.</p>

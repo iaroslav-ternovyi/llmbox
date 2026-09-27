@@ -42,7 +42,8 @@ def _vkey(v) -> tuple:
 def rows(host: str | None = None, suite_version: str | None = None, tier: str | None = None) -> list[dict]:
     out = []
     recs = results.load_all(host) + (results.load_all("cloud") if host and host != "cloud" else [])
-    recs = [with_probe(x, recs) if x.get("kind") == "suite" else x for x in recs]
+    from . import bench
+    recs = [bench.rescore(with_probe(x, recs)) if x.get("kind") == "suite" else x for x in recs]   # current weights
     for rec in recs:
         if rec.get("kind") != "suite":
             continue

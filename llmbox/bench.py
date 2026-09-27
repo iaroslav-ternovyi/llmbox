@@ -133,6 +133,18 @@ def capability(rows: list[dict]) -> float:
     return 100 * sum(bs[b] * w[b] for b in bs) / tot if tot else 0.0
 
 
+def rescore(rec: dict) -> dict:
+    """A saved suite record scored with the current block weights (the weights change between suite versions; the
+    tasks and their scores do not). The number the run published is kept as summary.capability_published."""
+    rows = [r for r in rec.get("rows") or [] if not r.get("pending")]
+    s = rec.get("summary") or {}
+    if not rows or s.get("weights_used") == suite.WEIGHTS:
+        return rec
+    new = dict(s, capability=round(capability(rows), 1), capability_ci95=[round(x, 1) for x in capability_ci(rows)],
+               capability_published=s.get("capability_published", s.get("capability")), weights_used=dict(suite.WEIGHTS))
+    return dict(rec, summary=new)
+
+
 def capability_ci(rows: list[dict], n_boot: int = 2000, seed: int = 7) -> tuple[float, float]:
     """95% bootstrap CI, resampling items within each block (blocks keep their weights)."""
     r = random.Random(seed)
