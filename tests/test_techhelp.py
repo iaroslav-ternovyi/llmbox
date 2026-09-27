@@ -26,7 +26,7 @@ def oracle(it):
 
 n = 0
 for kind, gen in T.KINDS.items():
-    for level in range(1, 6):
+    for level in range(1, 7):
         for seed in range(1, 41):
             a, b = gen(seed, level), gen(seed, level)
             n += 1
@@ -48,6 +48,14 @@ for i, it in enumerate(cases_):
     mk = f"mkdir $D/{i}" if it.meta["is_dir"] else f"touch $D/{i}"
     script.append(f"{mk}; $C {it.meta['start']} $D/{i}; " + "; ".join(f"$C {shlex.quote(s)} $D/{i}" for s in it.meta["steps"])
                   + f"; echo {i} $(stat -c %a $D/{i})")
+# level 6: clauses without who letters under a umask (umask set per case in a subshell)
+ucases = [T.chmod_seq(seed, 6) for seed in range(1, 120)]
+for j, it in enumerate(ucases):
+    i = len(cases_) + j
+    # GNU chmod warns and exits 1 when the umask blocked part of a clause ("new permissions are ..., not ..."): expected
+    script.append(f"( set +e; umask {it.meta['umask']}; touch $D/{i}; $C {it.meta['start']} $D/{i}; " + "; ".join(
+        f"$C {shlex.quote(s)} $D/{i} 2>/dev/null" for s in it.meta["steps"]) + f"; echo {i} $(stat -c %a $D/{i}) )")
+cases_ = cases_ + ucases
 script.append("rm -rf $D; echo chmod-binary $C")
 try:
     out = subprocess.run(["ssh", "-o", "ConnectTimeout=10", "user@gpu-box", "bash -s"], input="\n".join(script),

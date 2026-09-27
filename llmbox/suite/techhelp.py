@@ -51,7 +51,9 @@ def _num_check(expected: float):
 def compose_port(seed: int, level: int = 3) -> Item:
     """docker compose port publishing. Short and long syntax, IP bindings, `expose` (not published), a bare container
     port (random host port), ${VAR:-default} with a .env file, a second -f file (ports lists concatenate), port ranges,
-    network_mode: host."""
+    network_mode: host. Level 6: compose_expert."""
+    if level >= 6:
+        return compose_expert(seed, level)
     r = rng(BLOCK, f"compose{level}", seed)
     target_svc = r.choice(["web", "api", "grafana", "auth", "search", "app"])
     names = [target_svc] + r.sample([n for n in CONVENTIONAL if n != target_svc], 1 + level)
@@ -158,6 +160,8 @@ def _nginx_match(locs: list[tuple[str, str, str]], uri: str) -> str:
 
 
 def nginx_route(seed: int, level: int = 3) -> Item:
+    if level >= 6:
+        return nginx_expert(seed, level)
     r = rng(BLOCK, f"nginx{level}", seed)
     ups = [f"{c}_pool" for c in r.sample(["blue", "green", "amber", "violet", "teal", "coral", "slate", "olive", "ruby", "indigo"], 9)]   # neutral: the name must not give the answer away
     locs = [("", "/", ups[0]), ("", "/api/", ups[1])]
@@ -201,6 +205,8 @@ def _naive(locs, uri):
 # ---- networking: hosts, broadcast, routing, summarisation ------------------------------------------------------------
 
 def subnet(seed: int, level: int = 3) -> Item:
+    if level >= 6:
+        return routing_expert(seed, level)
     r = rng(BLOCK, f"subnet{level}", seed)
     base = ipaddress.ip_address(f"{r.choice([10, 172, 192])}.{r.randint(0, 31) if level > 1 else 168}.{r.randint(0, 255)}.{r.randint(0, 255)}")
     if level == 1:
@@ -250,11 +256,29 @@ def subnet(seed: int, level: int = 3) -> Item:
 _WHO = {"u": (0o4700, 6), "g": (0o2070, 3), "o": (0o1007, 0)}
 
 
-def chmod_apply(mode: int, spec: str, is_dir: bool = False) -> int:
-    """GNU/BSD symbolic or octal chmod on a mode (who always given, so umask does not apply)."""
+def chmod_apply(mode: int, spec: str, is_dir: bool = False, umask: int = 0o022) -> int:
+    """GNU symbolic or octal chmod on a mode. With no who letters the umask filters the bits: `+w` / `-w` leave the bits
+    the umask covers alone, while `=rw` sets the whole mode to rw minus the umask (the umask bits end up cleared). Checked
+    against GNU chmod on the box (tests/test_techhelp.py); GNU also warns and exits 1 when the umask blocked a change."""
     if re.fullmatch(r"[0-7]{3,4}", spec):
         return int(spec, 8)
     for clause in spec.split(","):
+        bare = re.fullmatch(r"([+=-])([rwxXst]*)", clause)
+        if bare:   # files only (on directories GNU also keeps setuid/setgid unless mentioned)
+            op, perms = bare.groups()
+            val = 0
+            for p in perms:
+                val |= {"r": 0o444, "w": 0o222, "x": 0o111, "s": 0o6000, "t": 0o1000}.get(p, 0)
+                if p == "X" and (is_dir or mode & 0o111):
+                    val |= 0o111
+            val &= ~umask
+            if op == "+":
+                mode |= val
+            elif op == "-":
+                mode &= ~val
+            else:   # '=' sets every class: the umask bits end up cleared, not kept (checked against GNU chmod)
+                mode = val
+            continue
         m = re.fullmatch(r"([ugoa]+)([+=-])([rwxXst]*)", clause)
         who = "ugo" if "a" in m.group(1) else m.group(1)
         op, perms = m.group(2), m.group(3)
@@ -284,6 +308,8 @@ def chmod_apply(mode: int, spec: str, is_dir: bool = False) -> int:
 
 
 def chmod_seq(seed: int, level: int = 3) -> Item:
+    if level >= 6:
+        return chmod_expert(seed, level)
     r = rng(BLOCK, f"chmod{level}", seed)
     is_dir = level == 4 and r.random() < 0.5   # special bits (level 5) only on files: GNU and BSD differ on directories
     start = r.choice([0o644, 0o600, 0o640, 0o755, 0o664, 0o700, 0o750]) if not is_dir else r.choice([0o755, 0o750, 0o700, 0o775])
@@ -321,7 +347,7 @@ def log_root(seed: int, level: int = 3) -> Item:
     svcs = ["postgres", "redis", "api", "worker", "nginx", "minio", "keycloak", "grafana"]
     chain = r.sample(svcs, 4)   # root -> dependents
     root, deps = chain[0], chain[1:]
-    pid = {s: r.randint(200, 9000) for s in svcs}
+    pid = {s: r.randint(200, 9000) for s in svcs + ["chronyd"]}
     causes = {
         "port": (f"could not bind to 0.0.0.0:{CONVENTIONAL.get(root, 8080)}: Address already in use", "EADDRINUSE"),
         "disk": ("could not write to /var/lib/data: No space left on device", "ENOSPC"),
@@ -352,16 +378,23 @@ def log_root(seed: int, level: int = 3) -> Item:
         remote_tz = timezone(timedelta(hours=r.choice([-7, -5, 2, 3, 9])))
         moved = set(deps[-2:])
         ev = [(tt, "box-b" if s in moved else host, s, lvl, msg) for tt, host, s, lvl, msg in ev]
+    skew = None
+    if level >= 6:   # the first dependent logs on box-c, whose clock is behind: by raw timestamps it looks like the root cause
+        skew = timedelta(seconds=r.randint(40, 200) + r.random())
+        ev = [(tt, "box-c" if (s == deps[0] and host == "box-a") else host, s, lvl, msg) for tt, host, s, lvl, msg in ev]
+        ev.append((t0 + timedelta(seconds=r.randint(240, 400)), "box-c", "chronyd", "warn",
+                   f"System clock is {skew.total_seconds():.1f} seconds behind NTP time, stepping the clock forward"))
     ev.sort(key=lambda e: e[0])
     lines = []
     for tt, host, s, lvl, msg in ev:
         shown = tt.astimezone(remote_tz) if (remote_tz and host == "box-b") else tt
+        if skew is not None and host == "box-c":
+            shown = tt - skew
         stamp = shown.strftime("%Y-%m-%dT%H:%M:%S%z") if level >= 4 else shown.strftime("%b %d %H:%M:%S")
         lines.append(f"{stamp} {host} {s}[{pid[s]}]: {lvl.upper()} {msg}")
-    if level >= 4:   # two separate log files as they would be collected
-        a = [l for l in lines if " box-a " in l]
-        b = [l for l in lines if " box-b " in l]
-        logs = f"box-a (journalctl):\n```\n" + "\n".join(a) + "\n```\n\nbox-b (journalctl):\n```\n" + "\n".join(b) + "\n```"
+    if level >= 4:   # separate log files as they would be collected
+        logs = "\n\n".join(f"{hname} (journalctl):\n```\n" + "\n".join(l for l in lines if f" {hname} " in l) + "\n```"
+                             for hname in ("box-a", "box-b", "box-c") if any(f" {hname} " in l for l in lines))
     else:
         logs = "```\n" + "\n".join(lines) + "\n```"
     prompt = (f"My stack stopped working. Here are the logs:\n\n{logs}\n\nWhich service is the root cause - the one that failed "
@@ -370,5 +403,177 @@ def log_root(seed: int, level: int = 3) -> Item:
                 max_tokens=16000, meta={"expected": root, "cause": cause, "level": level})
 
 
+# ---- level 6: expert traps (headroom above strong local models; frontier models should miss some) -------------------
+
+def compose_expert(seed: int, level: int = 6) -> Item:
+    """Compose v2 rules people rarely know by heart: a variable set in the shell beats the same one in .env;
+    compose.override.yaml is merged automatically when no -f is given, and its ports list is appended - unless it is
+    tagged !override (replaces) or !reset (empties); a service with `profiles:` is not started without its profile."""
+    r = rng(BLOCK, f"compose{level}", seed)
+    svc = r.choice(["web", "api", "grafana", "auth", "search", "app"])
+    others = r.sample([n for n in CONVENTIONAL if n != svc], 3)
+    tport = r.choice([80, 3000, 8000, 8080])
+    var = f"{svc.upper()}_PORT"
+    default, envval, shellval = r.choice([8080, 8090]), r.choice([18080, 8443, 28080]), r.choice([9090, 19090, 7080])
+    fixed = r.choice([9443, 7443, 10443]) if r.random() < 0.6 else None
+    in_env = r.random() < 0.75
+    shell = r.random() < 0.5
+    profile = r.random() < 0.4
+    enable = r.choice(["flag", "env", None]) if profile else None
+    mode = r.choice(["merge", "override", "reset", "merge"])
+    extra = r.choice([7000, 17000, 6443])
+    hostport = str(shellval if shell else envval if in_env else default)
+    base = {hostport} | ({str(fixed)} if fixed else set())
+    ports = {"merge": base | {str(extra)}, "override": {str(extra)}, "reset": set()}[mode]
+    published = ports if (not profile or enable) else set()
+    lines = ["services:", f"  {svc}:", f"    image: example/{svc}:2", "    ports:", f'      - "${{{var}:-{default}}}:{tport}"']
+    if fixed:
+        lines.append(f'      - "{fixed}:{tport}"')
+    if profile:
+        lines += ["    profiles:", '      - "debug"']
+    for o in others:
+        lines += [f"  {o}:", f"    image: example/{o}:2"]
+        if r.random() < 0.6:
+            lines += ["    ports:", f'      - "{CONVENTIONAL.get(o, 8081)}:{CONVENTIONAL.get(o, 8081)}"']
+    over = [f"services:", f"  {svc}:", "    environment:", "      - LOG_LEVEL=debug"]
+    over += {"merge": ["    ports:", f'      - "{extra}:{tport}"'], "override": ["    ports: !override", f'      - "{extra}:{tport}"'],
+             "reset": ["    ports: !reset []"]}[mode]
+    files = [("compose.yaml", "\n".join(lines) + "\n"), ("compose.override.yaml", "\n".join(over) + "\n")]
+    envf = (f"{var}={envval}\n" if in_env else "") + "COMPOSE_PROJECT_NAME=stack\n"
+    files.append((".env", envf))
+    prefix = (f"{var}={shellval} " if shell else "") + ("COMPOSE_PROFILES=debug " if enable == "env" else "")
+    cmd = f"{prefix}docker compose {'--profile debug ' if enable == 'flag' else ''}up -d"
+    body = "\n\n".join(f"`{n}`:\n```{'yaml' if n != '.env' else ''}\n{t}```" for n, t in files)
+    prompt = (f"A directory contains these files:\n\n{body}\n\nWith Docker Compose v2.29 I run `{cmd}` in it (bash). On which host "
+              f"port(s) can I reach container port {tport} of the `{svc}` service from the host machine? If it is not reachable "
+              "from the host at a fixed port, or not running at all, answer NONE. If there are several ports, list them all." + INSTR)
+    return Item(f"{BLOCK}.compose_port.L{level}.{seed}", BLOCK, "compose_port", [{"role": "user", "content": prompt}],
+                _set_check(published), max_tokens=16000,
+                meta={"expected": sorted(published) or ["NONE"], "level": level, "mode": mode, "shell": shell, "profile": profile, "enable": enable})
+
+
+def _nginx_select(locs: list[tuple], uri: str) -> tuple | None:
+    """The location nginx picks (same rules as _nginx_match, returning the whole entry)."""
+    for loc in locs:
+        if loc[0] == "=" and uri == loc[1]:
+            return loc
+    prefixes = [loc for loc in locs if loc[0] in ("", "^~") and uri.startswith(loc[1])]
+    best = max(prefixes, key=lambda x: len(x[1]), default=None)
+    if best and best[0] == "^~":
+        return best
+    for loc in locs:
+        if (loc[0] == "~" and re.search(loc[1], uri)) or (loc[0] == "~*" and re.search(loc[1], uri, re.I)):
+            return loc
+    return best
+
+
+def nginx_rewrite(locs: list[tuple], uri: str) -> tuple[str, list[str]]:
+    """Follow `rewrite ... last` (the new URI goes through location selection again, at most 10 times)."""
+    trail = [uri]
+    for _ in range(10):
+        loc = _nginx_select(locs, uri)
+        if loc is None:
+            return "404", trail
+        rw = loc[3]
+        if rw and re.search(rw[0], uri):
+            uri = re.sub(rw[0], rw[1].replace("$", "\\"), uri, count=1)
+            trail.append(uri)
+            continue
+        return loc[2] or "404", trail
+    return "500", trail
+
+
+def nginx_expert(seed: int, level: int = 6) -> Item:
+    r = rng(BLOCK, f"nginx{level}", seed)
+    ups = [f"{c}_pool" for c in r.sample(["blue", "green", "amber", "violet", "teal", "coral", "slate", "olive", "ruby", "indigo"], 8)]
+    locs = [("", "/", ups[0], None), ("", "/api/", ups[1], None), ("^~", "/assets/", ups[2], None), ("~", r"\.php$", ups[3], None),
+            ("~*", r"\.(png|jpe?g)$", ups[4], None), ("=", "/", ups[5], None), ("", "/api/v2/", ups[6], None),
+            ("", "/old/", None, (r"^/old/(.*)$", r"/api/$1")), ("~", r"^/legacy/(\w+)$", None, (r"^/legacy/(\w+)$", r"/assets/$1.png")),
+            ("", "/v2/", None, (r"^/v2/(.*)$", r"/api/v2/$1"))]
+    r.shuffle(locs)
+    uris = ["/old/users", "/old/v2/orders", "/legacy/logo", "/v2/items.php", "/old/avatar.PNG", "/v2/x", "/legacy/a/b", "/old/",
+            "/assets/app.php", "/api/v2/me.jpg"]
+    cand = [u for u in uris if len(nginx_rewrite(locs, u)[1]) > 1] or uris
+    uri = r.choice(cand)
+    expected, trail = nginx_rewrite(locs, uri)
+    conf = ["server {", "    listen 80;", "    server_name example.lan;"]
+    for mod, pat, tgt, rw in locs:
+        inner = f"rewrite {rw[0]} {rw[1]} last;" if rw else f"proxy_pass http://{tgt};"
+        conf.append(f"    location {mod + ' ' if mod else ''}{pat} {{\n        {inner}\n    }}")
+    conf.append("}")
+    prompt = ("Here is an nginx server block:\n\n```nginx\n" + "\n".join(conf) + "\n```\n\n"
+              f"A client requests `GET {uri}` for Host example.lan. Which upstream finally handles it? Answer with the upstream name "
+              "(the part after http://), or 404 if none does." + INSTR)
+    return Item(f"{BLOCK}.nginx_route.L{level}.{seed}", BLOCK, "nginx_route", [{"role": "user", "content": prompt}],
+                _word_check(expected), max_tokens=16000, meta={"expected": expected, "uri": uri, "trail": trail, "level": level})
+
+
+def route_lookup(rules: list[tuple], tables: dict, src, dst) -> str | None:
+    """Linux policy routing: rules by priority; a matching rule's table is searched (most specific route, then the
+    lowest metric); if the table has no route for the destination, the next rule is tried."""
+    for _prio, frm, to, table in sorted(rules):
+        if frm and src not in ipaddress.ip_network(frm):
+            continue
+        if to and dst not in ipaddress.ip_network(to):
+            continue
+        hits = [(ipaddress.ip_network(n), d, m) for n, d, m in tables.get(table, []) if dst in ipaddress.ip_network(n)]
+        if hits:
+            return max(hits, key=lambda x: (x[0].prefixlen, -x[2]))[1]
+    return None
+
+
+def routing_expert(seed: int, level: int = 6) -> Item:
+    r = rng(BLOCK, f"subnet{level}", seed)
+    lan = ipaddress.ip_network(f"192.168.{r.randint(1, 250)}.0/24")
+    vpn = ipaddress.ip_network(f"10.{r.randint(1, 250)}.0.0/24")
+    far = ipaddress.ip_network(f"172.{r.randint(16, 31)}.{r.randint(0, 250)}.0/24")
+    far_sup = far.supernet(new_prefix=16)
+    tables = {"main": [("0.0.0.0/0", "wan0", 100), (str(lan), "lan0", 0), (str(far_sup), "eth1", 50)],
+              "100": [(str(far), "wg0", 10)] + ([("0.0.0.0/0", "wg0", 10)] if r.random() < 0.5 else []),
+              "200": [(str(far_sup), "tun0", 20), (str(far), "tun1", 5)]}
+    if r.random() < 0.5:
+        tables["main"].append((str(far), "eth2", 30))
+    rules = [(0, None, None, "local"), (r.choice([90, 110]), str(vpn), None, "100"), (100, None, str(far_sup), "200"),
+             (32766, None, None, "main"), (32767, None, None, "default")]
+    src = ipaddress.ip_address(int(r.choice([vpn, lan]).network_address) + r.randint(2, 200))
+    dst = ipaddress.ip_address(int(r.choice([far, far_sup, far]).network_address) + r.randint(2, 200) * (1 if r.random() < 0.6 else 256))
+    if dst not in far_sup:
+        dst = ipaddress.ip_address(int(far.network_address) + 7)
+    expected = route_lookup([x for x in rules if x[3] != "local"], tables, src, dst) or "none"
+    rl = "\n".join(f"{p}:\tfrom {frm or 'all'}{' to ' + to if to else ''} lookup {t}" for p, frm, to, t in sorted(rules))
+    tl = "\n\n".join(f"$ ip route show table {t}\n" + "\n".join(f"{n} dev {d} metric {m}" if n != "0.0.0.0/0" else f"default dev {d} metric {m}"
+                                                                  for n, d, m in routes) for t, routes in tables.items())
+    prompt = (f"A Linux router has these policy routing rules and tables:\n\n```\n$ ip rule show\n{rl}\n\n{tl}\n```\n\n"
+              f"A packet arrives from {src} for {dst}. Through which interface does the router send it?" + INSTR)
+    return Item(f"{BLOCK}.subnet.L{level}.{seed}", BLOCK, "subnet", [{"role": "user", "content": prompt}], _word_check(expected),
+                max_tokens=16000, meta={"expected": expected, "src": str(src), "dst": str(dst), "level": level})
+
+
+def chmod_expert(seed: int, level: int = 6) -> Item:
+    """Symbolic modes without who letters, where the umask decides which bits change (`chmod +w` with umask 022 adds
+    write for the owner only; `chmod =r` with umask 027 gives 0440), mixed with explicit ones."""
+    r = rng(BLOCK, f"chmod{level}", seed)
+    um = r.choice([0o022, 0o027, 0o077, 0o002])
+    start = r.choice([0o644, 0o600, 0o664, 0o755, 0o640, 0o666])
+    pool = ["+x", "+w", "-w", "=r", "=rw", "+rX", "-rwx", "u+x", "g=u", "o-r", "a+r", "+s", "g+s", "=rwx", "go-w"]
+    steps = [r.choice(pool) for _ in range(4)]
+    mode = start
+    for st in steps:
+        # g=u copies the owner's rwx to the group; like any '=' for g it also clears setgid (GNU)
+        mode = (mode & ~0o2070) | ((mode & 0o700) >> 3) if st == "g=u" else chmod_apply(mode, st, False, um)
+    cmds = "\n".join(f"chmod {st} run.sh" for st in steps)
+    prompt = (f"On Linux (GNU coreutils chmod, run as the owner) the shell's umask is {um:04o}. The file `run.sh` has mode "
+              f"{start:04o}. These commands run in order:\n\n```\n{cmds}\n```\n\nWhat is its mode afterwards, as four octal digits "
+              "(e.g. 0755)?" + INSTR)
+
+    def check(text: str, _t=None, want=mode) -> float:
+        a = re.findall(r"[0-7]{3,4}", final_answer(text) or "")
+        return 1.0 if a and int(a[-1], 8) == want else 0.0
+    return Item(f"{BLOCK}.chmod_seq.L{level}.{seed}", BLOCK, "chmod_seq", [{"role": "user", "content": prompt}], check,
+                max_tokens=16000, meta={"expected": f"{mode:04o}", "steps": steps, "start": f"{start:04o}", "umask": f"{um:04o}",
+                                        "is_dir": False, "level": level})
+
+
 KINDS = {"compose_port": compose_port, "nginx_route": nginx_route, "subnet": subnet, "chmod_seq": chmod_seq, "log_root": log_root}
 QUICK = list(KINDS)
+MAX_LEVEL = 6

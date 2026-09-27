@@ -275,6 +275,7 @@ def oracle(it: Item) -> str:
 
 
 KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes")}
+MAX_LEVEL = 6   # 6 = expert: implementation-specific behaviour even frontier models get wrong (headroom above them)
 QUICK = list(KINDS)
 
 
@@ -410,7 +411,8 @@ def _build_python(entries: list[dict], host: str, log) -> list[dict]:
             elif any(r.get("exc") for r in rs):
                 if not all(r.get("exc") and r["exc"][0] == a.get("exc", [None])[0] for r in rs):
                     why = f"versions disagree: {[r.get('exc', r.get('repr')) for r in rs]}"
-                elif a["exc"][0] in ("AttributeError", "NameError"):
+                elif a["exc"][0] == "AttributeError" or (a["exc"][0] == "NameError" and "\n" not in e["text"]):
+                    # a one-liner raising these is a typo; a multi-line snippet may raise NameError on purpose (scoping)
                     why = "raises AttributeError/NameError: a real question must use things that exist"
                 acc = {"exc": a.get("exc")}
             elif len({r["repr"] for r in rs}) > 1:
@@ -692,7 +694,7 @@ def build(host: str = HOST, out_path: str = BANK, log=print) -> dict:
         k = (q["kind"], q["level"], q["fake"])
         counts[k] = counts.get(k, 0) + 1
     for kind in ("python", "shell", "codes"):
-        log(f"{kind:7s} " + "  ".join(f"L{l}: {counts.get((kind, l, False), 0)}+{counts.get((kind, l, True), 0)} fake" for l in range(1, 6)))
+        log(f"{kind:7s} " + "  ".join(f"L{l}: {counts.get((kind, l, False), 0)}+{counts.get((kind, l, True), 0)} fake" for l in range(1, 7)))
     log(f"{len(qs)} questions -> {out_path}")
     return b
 
