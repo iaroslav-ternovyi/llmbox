@@ -592,7 +592,7 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("model", help="model id at the endpoint (e.g. a llama-swap id)")
     b.add_argument("--endpoint", default="http://192.0.2.10:8080",
                    help="OpenAI-compatible base URL, or claude-code[:effort] for a frontier reference via the Claude subscription")
-    b.add_argument("--tier", default="quick", choices=["quick", "medium", "deep"])
+    b.add_argument("--tier", default="quick", choices=["quick", "medium", "deep", "ladder"])
     b.add_argument("--seed", type=int, default=0, help="item set; a new seed gives fresh items of equal difficulty")
     b.add_argument("--block", action="append", help="only these blocks (repeatable)")
     b.add_argument("--host", help="host profile to attach to the saved result")

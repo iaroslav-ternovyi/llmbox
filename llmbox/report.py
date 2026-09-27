@@ -32,6 +32,13 @@ def with_probe(rec: dict, recs: list[dict]) -> dict:
     return out
 
 
+def _vkey(v) -> tuple:
+    """'0.9.2' < '0.10-dev' < '0.10': numbers compare as numbers, a -dev version sorts before its release."""
+    import re as _re
+    nums = tuple(int(x) for x in _re.findall(r"\d+", str(v or "0").split("-")[0]))
+    return nums + ((0,) if "-" in str(v) else (1,))
+
+
 def rows(host: str | None = None, suite_version: str | None = None, tier: str | None = None) -> list[dict]:
     out = []
     recs = results.load_all(host) + (results.load_all("cloud") if host and host != "cloud" else [])
@@ -57,7 +64,7 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
             "recipe": {k: r.get(k) for k in ("placement", "speculative", "sampling", "chat", "antiloop") if k in r},
         })
     if suite_version is None and out:  # default: only the newest suite version, results of older versions are not comparable
-        newest = max(out, key=lambda x: tuple(int(p) for p in str(x["suite"].get("version", "0")).split(".")))["suite"].get("version")
+        newest = max(out, key=lambda x: _vkey(x["suite"].get("version")))["suite"].get("version")
         out = [x for x in out if x["suite"].get("version") == newest]
     # newest result per (recipe id, host, suite version, tier)
     best: dict = {}

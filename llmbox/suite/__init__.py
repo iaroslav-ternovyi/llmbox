@@ -29,12 +29,13 @@ MODULES = {"agentic": agentic, "code": code, "tools": tools, "techhelp": techhel
            "longctx": longctx, "writing": writing, "reasoning": reasoning}
 BLOCKS = {b: m.KINDS for b, m in MODULES.items()}
 BLOCKS["agentic"] = {**agentic.KINDS, **sessions.KINDS}   # multi-turn sessions are agentic coding too
-LEVELS = {"quick": [3, 5], "medium": [2, 3, 4, 4, 5, 5, 5], "deep": [2, 3, 4, 4, 5, 5, 5] * 2}
+# ladder: one item at every level - where a model breaks, and whether a new block's levels are spaced right
+LEVELS = {"quick": [3, 5], "medium": [2, 3, 4, 4, 5, 5, 5], "deep": [2, 3, 4, 4, 5, 5, 5] * 2, "ladder": [1, 2, 3, 4, 5]}
 # agentic tasks take minutes each: fewer, but spread over all projects
-AGENTIC_LEVELS = {"quick": [5], "medium": [4, 5], "deep": [3, 4, 5, 5]}
+AGENTIC_LEVELS = {"quick": [5], "medium": [4, 5], "deep": [3, 4, 5, 5], "ladder": [3, 4, 5]}
 # which agentic projects each tier uses: from-scratch implementations discriminate best, bug hunts add breadth
 # v0.7: half of the quick agentic items are multi-turn sessions (how people actually work with a coding assistant)
-AGENTIC_PROJECTS = {"quick": ["tmpl", "shipping", "spend", "fetch", "cart", "todo"], "medium": None, "deep": None}
+AGENTIC_PROJECTS = {"quick": ["tmpl", "shipping", "spend", "fetch", "cart", "todo"], "medium": None, "deep": None, "ladder": None}
 
 
 def _level_for(block: str, kind: str, level: int) -> int:
