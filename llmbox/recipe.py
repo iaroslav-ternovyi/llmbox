@@ -20,7 +20,7 @@ DEFAULTS = {
     "runtime": {"server": "llama-server", "cpu_affinity": "", "threads": 0},
     "placement": {"ctx": 0, "kv_type": "q8_0", "fit": True, "fit_target_mib": 256, "flash_attn": True, "load_mode": "none",
                   "batch": 2048, "ubatch": 2048, "slots": 1, "kv_unified": False, "cache_ram": "auto",
-                  "cache_ram_headroom_mib": 4096, "cache_reuse": 256},
+                  "cache_ram_headroom_mib": 4096, "cache_reuse": 256, "kv_offload": True},
     "speculative": {"type": "", "draft_max": 0},
     "sampling": {},
     "chat": {"template_kwargs": {}, "jinja": True},
@@ -74,6 +74,8 @@ def server_args(r: dict, port: str = "$PORT") -> list[str]:
     a += ["-c", str(p["ctx"]), "-b", str(p["batch"]), "-ub", str(p["ubatch"]), "--parallel", str(p["slots"])]
     if p["kv_unified"] != "auto":   # "auto" = leave it to the server default
         a.append("--kv-unified" if p["kv_unified"] else "--no-kv-unified")
+    if not p.get("kv_offload", True):   # KV cache in system RAM: the whole card for weights, attention on the CPU
+        a.append("--no-kv-offload")
     if r["runtime"]["threads"]:
         a += ["--threads", str(r["runtime"]["threads"])]
     for k, flag in SAMPLING_FLAGS.items():
@@ -166,7 +168,7 @@ def _isnum(t: str) -> bool:
 
 
 REPEATABLE = {"--logit-bias", "-ot", "--override-tensor", "--lora", "--dry-sequence-breaker"}
-_NEGATED = {"--no-kv-unified": "--kv-unified", "--no-jinja": "--jinja", "--no-mmap": "--mmap", "--no-cont-batching": "--cont-batching"}
+_NEGATED = {"--no-kv-unified": "--kv-unified", "--no-kv-offload": "--kv-offload", "--no-jinja": "--jinja", "--no-mmap": "--mmap", "--no-cont-batching": "--cont-batching"}
 
 
 def _flags(args: list[str]) -> dict:

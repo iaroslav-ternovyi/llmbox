@@ -46,6 +46,10 @@ def variants(r: dict, shape) -> list[tuple[str, list[str], bool]]:
     ctx = pl["ctx"] or shape.context_length
     if ctx and ctx > 131072:
         out.append((f"context {131072 // 1024}k (fast profile)", ["placement.ctx=131072"], False))
+    if shape.is_moe and pl.get("kv_offload", True):
+        # KV cache in system RAM: frees the card for experts (faster short answers) but the CPU does the attention, so
+        # long prompts get slower; measured at the usual depth only, so reported for a decision, never chosen
+        out.append(("KV cache in RAM (--no-kv-offload)", ["placement.kv_offload=false"], False))
     return out
 
 
@@ -140,10 +144,16 @@ FLAG = {"speculative.type": "--spec-type", "speculative.draft_max": "--spec-draf
         "placement.ubatch": "-ub", "placement.batch": "-b", "placement.ctx": "-c"}
 
 
+SWITCH = {"placement.kv_offload": ("--kv-offload", "--no-kv-offload")}   # boolean settings: a flag without a value
+
+
 def flags_of(overrides: list[str]) -> list[str]:
     out = []
     for o in overrides:
         k, v = o.split("=", 1)
+        if k in SWITCH:
+            out.append(SWITCH[k][0] if v.lower() == "true" else SWITCH[k][1])
+            continue
         out += [FLAG[k], json.loads(v) if v.startswith('"') else v]
     return [str(x) for x in out]
 
@@ -153,11 +163,18 @@ def new_cmd_line(line: str, add: list[str], drop: list[str]) -> str:
     (llama.cpp takes the last value of a repeated flag, so appended flags win over the launcher's)."""
     head, _, rest = line.partition("cmd:")
     toks = rest.split()
-    for i in range(0, len(drop) - 1, 2):   # drop flag/value pairs applied before
+    i = 0
+    while i < len(drop):   # drop the flags a previous tune applied: flag/value pairs, or a lone switch
+        if drop[i] in {f for pair in SWITCH.values() for f in pair}:
+            if drop[i] in toks:
+                toks.remove(drop[i])
+            i += 1
+            continue
         for j in range(len(toks) - 1):
-            if toks[j] == drop[i] and toks[j + 1] == drop[i + 1]:
+            if i + 1 < len(drop) and toks[j] == drop[i] and toks[j + 1] == drop[i + 1]:
                 del toks[j:j + 2]
                 break
+        i += 2
     return f"{head}cmd: {' '.join(toks + add)}"
 
 

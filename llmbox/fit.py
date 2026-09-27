@@ -28,7 +28,7 @@ PORTABLE = ("description", "notes", "model.hf_repo", "model.file", "model.sha256
             "placement.kv_type")
 HARDWARE = ("model.path", "runtime", "placement.ctx", "placement.fit", "placement.fit_target_mib", "placement.flash_attn",
             "placement.load_mode", "placement.batch", "placement.ubatch", "placement.slots", "placement.kv_unified",
-            "placement.cache_ram", "placement.cache_ram_headroom_mib", "placement.cache_reuse",
+            "placement.cache_ram", "placement.cache_ram_headroom_mib", "placement.cache_reuse", "placement.kv_offload",
             "speculative", "serve", "extra")   # speculative decoding is lossless: whether it pays is a speed question
 MIN_CTX = 8192
 LONGDOC_TOKENS = 200_000      # the suite's longest documents (long-document block, suite v0.9)
