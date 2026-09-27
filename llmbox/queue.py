@@ -113,8 +113,10 @@ def gpu_ok(host: str) -> bool:
 
 
 def _other_bench_running() -> bool:
-    out = subprocess.run(["pgrep", "-f", "llmbox.cli bench|probe_update.py|speed_probe"], capture_output=True, text=True).stdout.split()
-    return any(int(p) != os.getpid() for p in out)
+    """Another benchmark on the box from this machine. Frontier reference runs (--endpoint claude-code...) do not touch
+    the box and do not count."""
+    out = subprocess.run(["pgrep", "-fl", "llmbox.cli bench|probe_update.py|speed_probe"], capture_output=True, text=True).stdout
+    return any(int(line.split()[0]) != os.getpid() and "claude-code" not in line for line in out.splitlines() if line.strip())
 
 
 DENSE_POWER_LIMIT_W = 180   # gpu-box: four Xid 79 crashes, all with a dense model near 250 W (2026-09-14..26)
