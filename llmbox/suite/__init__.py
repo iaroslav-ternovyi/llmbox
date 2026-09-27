@@ -15,7 +15,7 @@ from __future__ import annotations
 from . import agentic, code, explain, knowledge, longctx, reasoning, sessions, techhelp, tools, writing
 from .common import Item
 
-VERSION = "0.10-dev3"
+VERSION = "0.10-dev4"
 # v0.10: weights for people who download and run local models (developers and enthusiasts; docs/usage-research.md):
 # coding 30 (agentic 20 + single-file functions 10), agents/tools 15, tech help for their own machines 15 ("homelab" is the
 # third-largest local use), knowledge and "I don't know" 10 and explanations 10 (information seeking and advice are the
@@ -48,22 +48,24 @@ def _level_for(block: str, kind: str, level: int) -> int:
 # separated the local models, one easy anchor per block (so weak models still register) and a few items every local model
 # failed but the frontier solved (headroom). 35 of the 54 v0.7 quick items gave all three local models the same score.
 # Recalibrate with IRT once more models have run (tinyBenchmarks / metabench / MINCE style item selection).
-# v0.10-dev3 quick: one run in ~35-40 min on a 60 tok/s model (v0.9 quick took 1.5-3 h). Picked from the v0.9 item data
+# v0.10-dev4 quick: one run in ~40-45 min on a 60 tok/s thinking model (v0.9 quick took 1.5-3 h). Picked from the v0.9 item data
 # (9 models) by information per minute: out went items every model solves (code.expr/csv L3, agentic.fetch, writing.proofread,
 # techhelp L4), items every local model fails at 6 min each (longctx.audit L6, tools.outreach L6) and the slowest ones
 # (agentic.shipping 10 min, code.cron 8 min, reasoning.schedule 8 min, longctx L5 at 165k tokens). The four 0/1 blocks
 # now give partial credit (longctx and reasoning: 2-4 questions per item; code: share of hidden tests; tools: per action).
+# dev4, after the first dev3 run (Tiel, 61 min of items): out longctx.latest (7.5 min) and tools.dunning (7.3 min),
+# reasoning.code_trace L4 -> L3 (4.4 min), techhelp.log_root L6 -> L5.
 QUICK_ITEMS = [
     ("agentic", "spend", 5), ("agentic", "cart", 5),
     ("code", "rooms", 5), ("code", "lru", 5), ("code", "csv", 5),
-    ("tools", "conditional", 5), ("tools", "reminders", 4), ("tools", "dunning", 5), ("tools", "dedupe", 6), ("tools", "bulk_discount", 6),
-    ("techhelp", "compose_port", 5), ("techhelp", "compose_port", 6), ("techhelp", "nginx_route", 6), ("techhelp", "log_root", 6),
+    ("tools", "conditional", 5), ("tools", "reminders", 4), ("tools", "dedupe", 6), ("tools", "bulk_discount", 6),
+    ("techhelp", "compose_port", 5), ("techhelp", "compose_port", 6), ("techhelp", "nginx_route", 6), ("techhelp", "log_root", 5),
     ("techhelp", "subnet", 6), ("techhelp", "chmod_seq", 5),
     ("knowledge", "python", 5), ("knowledge", "shell", 5), ("knowledge", "codes", 5),   # 8 questions each, 1-3 made up
     ("explain", "config", 5), ("explain", "billing", 4), ("explain", "access", 5),      # graded by the reader model
-    ("longctx", "lookup", 3), ("longctx", "multihop", 3), ("longctx", "latest", 3),     # one ~80k-token document, 3 questions each
+    ("longctx", "lookup", 3), ("longctx", "multihop", 3),     # one ~80k-token document, 3 questions each
     ("writing", "constrained", 5), ("writing", "rewrite", 5), ("writing", "minutes", 5), ("writing", "i18n", 5),
-    ("reasoning", "arith", 5), ("reasoning", "code_trace", 4),
+    ("reasoning", "arith", 5), ("reasoning", "code_trace", 3),
 ]
 
 
