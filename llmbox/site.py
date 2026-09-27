@@ -21,23 +21,29 @@ from . import suite as _suite
 from .hosts import HOME
 
 ASSETS = os.path.join(os.path.dirname(__file__), "site_assets")
-BLOCKS = ["agentic", "code", "tools", "longctx", "writing", "reasoning"]
+BLOCKS = ["agentic", "code", "tools", "techhelp", "knowledge", "explain", "longctx", "writing", "reasoning"]
 LABEL = {"agentic": "AGENTIC", "code": "CODE", "tools": "TOOLS", "techhelp": "TECH HELP", "knowledge": "KNOWLEDGE",
          "explain": "EXPLAINING", "longctx": "LONG DOCS", "writing": "WRITING", "reasoning": "REASONING"}
 # hover text for each score: what it measures, its weight, example tasks (the suite's real task kinds)
 TIPS = {
-    "agentic": ("Agentic coding", "Multi-turn work in a real repository: read, edit, run tests, keep up when the request changes mid-session.",
-                ["Fix the shipping-fee bug; hidden tests decide", "Cart: add discount codes, then change the rule"]),
+    "agentic": ("Agentic coding", "Work in a real repository: find and fix the bugs the README contradicts, or keep up with a request that changes mid-session. Hidden tests decide.",
+                ["Ledger, inventory, shipping: 4-5 hidden bugs each", "Cart: add discount codes, then change the rule"]),
     "code": ("Code", "One function or module from a written spec. Graded only by hidden unit tests.",
              ["Expression evaluator, LRU cache, CSV parser", "Expert: cron schedule across DST changes"]),
     "tools": ("Tools & automation", "Calling business tools correctly on messy data: a CRM, invoices, payments. Wrong or extra calls cost points.",
               ["Payment reminders only to customers really overdue", "Expert: bulk discounts under an approval policy"]),
-    "longctx": ("Long documents", "Exact answers from 100k–200k-token documents: logs, contracts, reports.",
-                ["Which incident stayed open the longest?", "Count incidents matching three conditions"]),
+    "longctx": ("Long documents", "Exact answers from a long incident log and org chart (~80k tokens in the quick test): five questions per task.",
+                ["Final root-cause code after later corrections", "Office of the manager of the engineer on an incident"]),
     "writing": ("Writing", "Text with hard constraints a checker can verify: length, required facts, glossary terms, plural rules.",
                 ["Meeting minutes with owners and dates", "UI strings in Russian / Ukrainian with ICU plurals"]),
-    "reasoning": ("Reasoning", "Multi-step problems with one exact answer.",
+    "reasoning": ("Reasoning", "Multi-step problems with exact answers, several per problem.",
                   ["Order total with tiered discounts and tax", "Trace a function by hand; schedule jobs"]),
+    "techhelp": ("Tech help", "Questions about your own machines, answered from configs and logs: 3-5 per machine, every answer computed.",
+                 ["Which host ports does docker compose publish?", "Which interface does this packet leave through?"]),
+    "knowledge": ("Knowledge & \"I don't know\"", "Exact facts developers look up (Python, shell, error codes); two questions per task ask about things that do not exist.",
+                  ["What does this one-liner print?", "Invented flags and functions: saying UNKNOWN scores"]),
+    "explain": ("Explaining", "Explain a made-up system in 130-190 words; a fixed reader model must then work out 8 cases from the explanation alone.",
+                ["How a CLI decides each setting", "What a month of an API costs"]),
 }
 
 
@@ -578,7 +584,7 @@ def _star(blocks: dict, ref_blocks: dict, lost: dict, W: int = 400) -> str:
         title, text, _ = TIPS[b]
         ls = "".join(f"<li>Lost: {esc(n)}</li>" for n in lost.get(b, [])) or "<li>no task lost here</li>"
         left = x / W * 100
-        labels.append(f'<div class="ax tip" style="left:calc({left:.1f}% - 40px);top:{y - 14:.0f}px">{LABEL[b]}<b class="{"r" if v is not None and v < 50 else ""}">{v:.0f}</b>'
+        labels.append(f'<div class="ax tip" style="left:calc({left:.1f}% - 40px);top:{y - 14:.0f}px">{LABEL[b]}<b class="{"r" if v is not None and v < 50 else ""}">{"–" if v is None else f"{v:.0f}"}</b>'
                       f'<span class="pop"><b>{esc(title)}</b>{esc(text)}<ul>{ls}</ul></span></div>')
     return f'<div class="starw">{svg}{"".join(labels)}<div class="lgd"><span class="amb">━</span> this recipe &nbsp; <span>┅</span> frontier reference</div></div>'
 
@@ -833,10 +839,18 @@ _GRADING = {   # how each block is graded (from the suite modules' own descripti
     "code": "One function or module from a written spec, in Python or JavaScript. Hidden unit tests from a reference implementation decide.",
     "tools": "Function calls against a simulated CRM with fresh customers and invoices. Graded on the final state of that world: "
              "a wrong or extra email, discount or payment costs points.",
-    "longctx": "Questions on documents of about 30k to 200k tokens, with later corrections that override earlier facts. Exact answers.",
+    "techhelp": "Generated configs and logs of a machine (docker compose, nginx, routing tables, chmod chains, journal logs) with 3-5 "
+                "questions each; every answer is computed from the config (chmod checked against GNU chmod). Credit per question.",
+    "knowledge": "8 short questions per task on Python, shell and error codes, answers taken from running the real thing; two per task "
+                 "ask about something that does not exist. Right 1, UNKNOWN 1/3 (made-up: 1), invented 0.",
+    "explain": "The model explains a made-up system within a word limit; a fixed reader model (gpt-oss-20b, greedy) then works out 8 "
+               "cases from the explanation alone. The score is the share it gets right.",
+    "longctx": "Five questions per task on a long incident log (~80k tokens in the quick test), with later corrections that override "
+               "earlier facts. Exact answers, credit per question.",
     "writing": "Minutes, rewrites, proofreading, UI strings with plural rules. Every constraint (length, facts, glossary terms) is checked by a program; "
                "the score is the share of constraints met.",
-    "reasoning": "Multi-step problems with one exact answer: tiered prices and taxes, tracing code by hand, scheduling.",
+    "reasoning": "Multi-step problems with exact answers, several per problem (subtotal, tax, total; every printed line of a traced "
+                 "program). Credit per answer.",
 }
 
 
