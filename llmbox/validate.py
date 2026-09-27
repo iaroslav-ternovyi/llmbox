@@ -182,9 +182,8 @@ def oracle(it: Item) -> str | None:
     if it.block == "knowledge":
         from .suite import knowledge
         return knowledge.oracle(it)
-    if it.block == "techhelp":   # exact answers; a set of ports is listed comma-separated
-        e = it.meta.get("expected")
-        return "ANSWER: " + (", ".join(e) if isinstance(e, list) else str(e))
+    if it.block == "techhelp":   # several questions per machine (v0.10-dev5): one numbered line each
+        return _answer_oracle(it)
     if (it.block, it.kind) in ANSWER_KINDS and it.block != "tools":
         return _answer_oracle(it)
     if it.block == "tools":

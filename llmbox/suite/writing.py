@@ -35,6 +35,12 @@ def _has_num(t: str, n) -> bool:
     return any(v in t for v in variants)
 
 
+def _share(results: list, gate: bool) -> float:
+    """v0.10: the share of the constraints met (was all-or-nothing). Only a real attempt earns it: an empty or off-topic
+    reply meets every "do not ..." rule, so the gate (right language, enough text, the facts kept) comes first."""
+    return sum(bool(x) for x in results) / len(results) if gate and results else 0.0
+
+
 def constrained(seed: int, level: int = 3) -> Item:
     r = rng(BLOCK, f"constrained{level}", seed)
     lang = r.choice(list(LANGS))
@@ -70,7 +76,7 @@ def constrained(seed: int, level: int = 3) -> Item:
 
     def check(text: str, _t=None) -> float:
         t = strip_think(text)
-        return 1.0 if all(bool(f(t)) for f in tests) else 0.0   # strict: every constraint
+        return _share([f(t) for f in tests], detect_lang(t) == lang and len(words(t)) >= lo // 2)
     return Item(f"{BLOCK}.constrained.L{level}.{seed}", BLOCK, "constrained", [{"role": "user", "content": prompt}], check,
                 lang=lang, meta={"level": level})
 
@@ -111,7 +117,7 @@ def translate(seed: int, level: int = 3) -> Item:
             tests.append(len([l for l in t.splitlines() if l.strip().startswith(("- ", "* "))]) == len(src_lines))
         if gl_word:
             tests.append(gl_word.lower() in t.lower())
-        return 1.0 if all(tests) else 0.0   # strict: every constraint
+        return _share(tests, detect_lang(t) == target and 0.3 <= len(t) / len(src) <= 3)
     return Item(f"{BLOCK}.translate.L{level}.{seed}", BLOCK, "translate", [{"role": "user", "content": prompt}], check,
                 lang=target, meta={"level": level})
 
@@ -148,7 +154,7 @@ def summarize(seed: int, level: int = 3) -> Item:
         tests = [len(bullets) == n_b, bool(bullets) and all(len(words(b)) <= 21 for b in bullets),
                  re.search(rf"\b{final_day}\b", t) is not None, _has_num(t, budgets[-1]), owners[-1].split()[1] in t,
                  detect_lang(t) == lang]
-        return 1.0 if all(tests) else 0.0   # strict: every constraint
+        return _share(tests, bool(bullets) and detect_lang(t) == lang)
     return Item(f"{BLOCK}.summarize.L{level}.{seed}", BLOCK, "summarize", [{"role": "user", "content": prompt}], check,
                 lang=lang, meta={"level": level, "expected": f"{final_day} {final_month} / {budgets[-1]} / {owners[-1]}"})
 
@@ -195,7 +201,7 @@ def extract(seed: int, level: int = 3) -> Item:
             tests += [g.get("sku") == o["sku"], g.get("quantity") == o["quantity"],
                       isinstance(g.get("unit_price"), (int, float)) and abs(g["unit_price"] - o["unit_price"]) < 0.005,
                       g.get("express") is o["express"]]
-        return 1.0 if all(tests) else 0.0   # strict: every constraint
+        return _share(tests, True)   # per field of every order line, plus the number of lines
     return Item(f"{BLOCK}.extract.L{level}.{seed}", BLOCK, "extract", [{"role": "user", "content": prompt}], check,
                 meta={"level": level, "expected": orders})
 
@@ -224,7 +230,7 @@ def rewrite(seed: int, level: int = 3) -> Item:
 
     def check(text: str, _t=None) -> float:
         t = strip_think(text)
-        return 1.0 if all(bool(f(t)) for f in tests) else 0.0   # strict: every constraint
+        return _share([f(t) for f in tests], str(n1) in t and str(n2) in t and len(words(t)) >= 10)
     return Item(f"{BLOCK}.rewrite.L{level}.{seed}", BLOCK, "rewrite", [{"role": "user", "content": prompt}], check,
                 meta={"level": level})
 

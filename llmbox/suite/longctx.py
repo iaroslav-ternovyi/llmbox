@@ -22,7 +22,7 @@ LAST = ["Alvarez", "Bauer", "Costa", "Dimitrov", "Eriksen", "Farah", "Gomez", "H
 INSTR = "\n\nAnswer from the document only. Finish with a final line exactly in the form:\nANSWER: <answer>"
 # v0.10: several questions of one kind per item, credit per question (one 0/1 question per item made this block the
 # noisiest per minute; the document is prefilled once either way)
-QUESTIONS = 3
+QUESTIONS = 5   # dev5: 3 -> 5 (the document is cached; each question is a few seconds of reading)
 # level 5 stays ~200k real tokens so a 262k-context model keeps ~60k for reasoning (190k here measured 231k with a Qwen tokenizer)
 TOKENS = {1: 24_000, 2: 48_000, 3: 80_000, 4: 130_000, 5: 165_000}
 

@@ -86,5 +86,17 @@ unpaid = [i for i, v in w.invoices.items() if v["status"] == "unpaid" and i not 
 it.tool_impl("apply_discount", {"invoice_id": unpaid[0], "percent": 25})
 check("bulk 25% applied", it.check("NOT DISCOUNTED: none") == 0.0)
 
+# writing: the share of constraints (6 rules at level 3), and only for a real attempt (an empty reply meets every "do not ..." rule)
+from llmbox.suite import writing as W  # noqa: E402
+it = W.rewrite(1, 3)
+import re as _re
+nums = _re.findall(r"like (\d+) days behind\. we'll give you (\d+)%", it.messages[0]["content"])[0]
+good = (f"Dear customer, the delivery is delayed by {nums[0]} days because the supplier's truck broke down. We offer a "
+        f"{nums[1]}% discount on your next order. We are taking steps so that this does not happen again.")
+check("rewrite all rules", near(it.check(good), 1.0), it.check(good))
+check("rewrite one rule broken", near(it.check(good.replace("again.", "again!")), 5 / 6), it.check(good.replace("again.", "again!")))
+check("rewrite empty", it.check("") == 0.0)
+check("rewrite without the facts", it.check("Dear customer, we are sorry for the delay and we will fix it soon.") == 0.0)
+
 print("all passed" if not failed else f"{failed} failed")
 sys.exit(1 if failed else 0)
