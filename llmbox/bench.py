@@ -404,7 +404,7 @@ def speed_probe(base_url: str, model: str, depths: tuple = (2000, 32000, 96000),
             "method": PROBE_METHOD}
 
 
-def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, target: float = 5.0, prior: tuple = (0.0, 1.5),
+def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, target: float = 5.0, prior: tuple | None = None,
                  seed0: int = 7000, api_key: str | None = None, progress=print, jsonl_path: str | None = None,
                  min_per_block: int = 1, max_per_family: int = 3) -> dict:
     """Adaptive run (llmbox/irt.py): after every task, the family with the most information per expected second at the
@@ -468,7 +468,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
     s = summarize(rows, time.time() - t0) if rows else {}
     s.update({"capability": round(cap, 1), "capability_ci95": [round(lo, 1), round(hi, 1)],
               "blocks": {b: round(100 * v["score"], 1) for b, v in est["blocks"].items()},
-              "irt": {"theta": round(est["theta"], 3), "sd": round(est["theta_sd"], 3), "prior": list(prior), "items": len(rows),
+              "irt": {"theta": round(est["theta"], 3), "sd": round(est["theta_sd"], 3), "prior": list(prior or bank.prior), "items": len(rows),
                       "families": per_fam, "block_n": {b: v["n"] for b, v in est["blocks"].items()}}})
     return {"suite": {"version": suite.VERSION, "tier": "adaptive", "seed0": seed0, "content_hash": suite.content_hash(),
                       "weights": suite.WEIGHTS, "budget_min": budget_min, "target": target}, "summary": s, "rows": rows}

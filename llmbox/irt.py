@@ -82,13 +82,18 @@ class Bank:
     weights: dict = field(default_factory=dict)    # block -> weight (for the capability scale)
     tau: float = 1.0                                # sd of a model's per-block deviation from its theta
     dev: dict = field(default_factory=dict)        # calibration models -> {block: deviation}
+    neff: dict = field(default_factory=dict)       # family -> effective number of independent answers in one task
+    prior: tuple = PRIOR                            # theta prior: the calibration models' mean and sd
+
+    def n(self, fam: str) -> float:
+        return self.neff.get(fam, 1.0)
 
     def p(self, fam: str, th: float) -> float:
         return _sig(self.a[fam] * (th - self.b[fam]))
 
     def info(self, fam: str, th: float) -> float:
         p = self.p(fam, th)
-        return self.a[fam] ** 2 * p * (1 - p)
+        return self.n(fam) * self.a[fam] ** 2 * p * (1 - p)
 
     def capability(self, th: float, ref: list[str] | None = None) -> float:
         """Expected weighted score (0-100) of the reference families at theta: the suite's usual number."""
@@ -178,7 +183,35 @@ def calibrate_blocks(resp: list[Resp], weights: dict, iters: int = 6000, lr: flo
         rs = [r for r in resp if r.family == f]
         bank.seconds[f] = statistics.median(r.seconds for r in rs)
         bank.block[f] = f.split(".")[0]
+    bank.neff = effective_n(bank, resp)
+    ths = list(th.values())
+    if len(ths) >= 3:
+        bank.prior = (statistics.mean(ths), max(1.5, statistics.stdev(ths) * 2))   # wide: new models may be outside
     return bank
+
+
+def effective_n(bank: Bank, resp: list[Resp], cap: float = 6.0) -> dict:
+    """How many independent answers one task of a family is worth: the Bernoulli variance p(1-p) over the observed
+    squared residual (a 5-question task whose questions moved independently would be worth 5; ours move together more
+    often than not). Shrunk toward 1 with a pseudo-count, per block first, capped: residuals include misfit, so this
+    errs low."""
+    def resid(rs):
+        num = den = 0.0
+        for r in rs:
+            eta = bank.theta.get(r.model, 0.0) + bank.dev.get(r.model, {}).get(r.family.split(".")[0], 0.0)
+            p = bank.p(r.family, eta)
+            num += p * (1 - p)
+            den += (r.score - p) ** 2
+        return num, den
+    out, k = {}, 4.0   # pseudo-observations of a Bernoulli task (n = 1)
+    blocks = {f.split(".")[0] for f in bank.a}
+    for blk in blocks:
+        num, den = resid([r for r in resp if r.family.split(".")[0] == blk])
+        nb = max(1.0, min(cap, (num + k * 0.25) / (den + k * 0.25)))
+        for f in [f for f in bank.a if bank.block.get(f) == blk]:
+            n2, d2 = resid([r for r in resp if r.family == f])
+            out[f] = round(max(1.0, min(cap, (n2 + k * 0.25 * nb) / (d2 + k * 0.25))), 2)
+    return out
 
 
 def _loglik(bank: Bank, rs: list[Resp]) -> float:
@@ -217,15 +250,15 @@ def choose_tau(resp: list[Resp], weights: dict, taus: tuple = (0.3, 0.5, 0.7, 1.
     return max(score, key=score.get), score
 
 
-def posterior(bank: Bank, obs: list[tuple[str, float]], prior: tuple = PRIOR) -> tuple[float, float, list[float]]:
+def posterior(bank: Bank, obs: list[tuple[str, float]], prior: tuple | None = None) -> tuple[float, float, list[float]]:
     """EAP theta and its sd from (family, score) observations, on a grid."""
-    mu, sd = prior
+    mu, sd = prior or bank.prior
     logw = []
     for t in GRID:
         lw = -0.5 * ((t - mu) / sd) ** 2
         for f, x in obs:
             p = bank.p(f, t)
-            lw += x * math.log(max(p, 1e-12)) + (1 - x) * math.log(max(1 - p, 1e-12))
+            lw += bank.n(f) * (x * math.log(max(p, 1e-12)) + (1 - x) * math.log(max(1 - p, 1e-12)))
         logw.append(lw)
     mx = max(logw)
     w = [math.exp(v - mx) for v in logw]
@@ -296,7 +329,8 @@ def save(bank: Bank, content_hash: str, n_models: int) -> str:
     p = bank_path(content_hash)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     json.dump({"content_hash": content_hash, "n_models": n_models, "a": bank.a, "b": bank.b, "seconds": bank.seconds,
-               "block": bank.block, "theta": bank.theta, "weights": bank.weights, "tau": bank.tau, "dev": bank.dev},
+               "block": bank.block, "theta": bank.theta, "weights": bank.weights, "tau": bank.tau, "dev": bank.dev,
+               "neff": bank.neff, "prior": list(bank.prior)},
               open(p, "w"), indent=1)
     return p
 
@@ -307,7 +341,7 @@ def load(content_hash: str) -> Bank | None:
         return None
     d = json.load(open(p))
     return Bank(a=d["a"], b=d["b"], seconds=d["seconds"], block=d["block"], theta=d["theta"], weights=d["weights"],
-                tau=d.get("tau", TAU), dev=d.get("dev", {}))
+                tau=d.get("tau", TAU), dev=d.get("dev", {}), neff=d.get("neff", {}), prior=tuple(d.get("prior", PRIOR)))
 
 
 # ---- block offsets: one capability plus a shrunk per-block deviation ---------------------------------------------------
@@ -326,7 +360,7 @@ def _grid_post(bank: Bank, obs: list[tuple[str, float]], mu: float, sd: float) -
         lw = -0.5 * ((t - mu) / sd) ** 2
         for f, x in obs:
             p = bank.p(f, t)
-            lw += x * math.log(max(p, 1e-12)) + (1 - x) * math.log(max(1 - p, 1e-12))
+            lw += bank.n(f) * (x * math.log(max(p, 1e-12)) + (1 - x) * math.log(max(1 - p, 1e-12)))
         logw.append(lw)
     mx = max(logw)
     w = [math.exp(v - mx) for v in logw]
@@ -334,7 +368,7 @@ def _grid_post(bank: Bank, obs: list[tuple[str, float]], mu: float, sd: float) -
     return [v / s for v in w]
 
 
-def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple = PRIOR, tau: float | None = None, draws: int = 60) -> dict:
+def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple | None = None, tau: float | None = None, draws: int = 60) -> dict:
     """Posterior of the weighted capability under theta + per-block offsets, by drawing theta from its posterior and,
     for each draw, eta_b = theta + d_b from its block posterior (prior N(theta, tau^2), the block's own answers).
     Blocks share theta, so their errors are correlated exactly as much as the data say. Returns per block the
@@ -362,7 +396,7 @@ def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple = PRIO
                 v = -0.5 * ((e - t) / tau) ** 2
                 for f, x in mine[blk]:
                     p = bank.p(f, e)
-                    v += x * math.log(max(p, 1e-12)) + (1 - x) * math.log(max(1 - p, 1e-12))
+                    v += bank.n(f) * (x * math.log(max(p, 1e-12)) + (1 - x) * math.log(max(1 - p, 1e-12)))
                 lw.append(v)
             mx = max(lw)
             ww = [math.exp(v - mx) for v in lw]

@@ -244,8 +244,8 @@ def cmd_bench(a: argparse.Namespace) -> None:
         bank = irt.load(_suite.content_hash()) or irt.load(a.bank or "")
         if not bank:
             raise SystemExit("no calibrated task bank for this suite: run `llmbox irt calibrate` (or pass --bank <content hash>)")
-        mu, sd = (float(x) for x in a.prior.split(",")) if a.prior else irt.PRIOR
-        res = bench.run_adaptive(a.endpoint, a.model, bank, budget_min=a.budget, target=a.target, prior=(mu, sd),
+        pr = tuple(float(x) for x in a.prior.split(",")) if a.prior else None   # default: the bank's population prior
+        res = bench.run_adaptive(a.endpoint, a.model, bank, budget_min=a.budget, target=a.target, prior=pr,
                                  api_key=None, progress=lambda m: print(m, flush=True), jsonl_path=jl)
     else:
         res = bench.run(a.endpoint, a.model, tier=a.tier, seed0=a.seed, blocks=a.block, jsonl_path=jl,
