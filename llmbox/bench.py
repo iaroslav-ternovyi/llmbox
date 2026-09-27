@@ -325,33 +325,68 @@ def _run_parallel(base_url: str, model: str, items: list, done: dict, api_key, n
     return [rows[it.id] for it in items]
 
 
-def speed_probe(base_url: str, model: str, depths: tuple = (2000, 32000, 96000), api_key: str | None = None) -> dict:
-    """Single-stream speed at several context depths (unique prompts, so no cache hits): what one user feels.
-    Content is real code (this package's own sources) and the answer is code, so speculative decoding (MTP) sees
-    realistic text - random words made MTP models look ~35% slower than on real tasks (Tiel 42.8 vs ~64 tok/s)."""
-    import pathlib
-    src = "\n\n".join(p.read_text() for p in sorted(pathlib.Path(__file__).resolve().parent.rglob("*.py")))
+# Probe context: this package's sources frozen on 2026-09-27 (the live sources changed the prompt with every commit).
+PROBE_CORPUS = os.path.join(os.path.dirname(__file__), "probe_corpus.txt.gz")
+PROBE_METHOD = "single-stream probe v2: frozen corpus, 3 seeded code tasks per depth, median decode"
+# Code tasks with long answers (> 512 tokens), so every sample is a full-length decode; fixed seeds keep the sampled
+# text, and with it the speculative acceptance, close from run to run.
+PROBE_TASKS = [
+    ("Rewrite this function with full type hints, a docstring, input validation and clear error messages. "
+     "Output only the code.\n\n```python\ndef merge_intervals(xs):\n    xs = sorted(xs)\n    out = []\n    for a, b in xs:\n"
+     "        if out and a <= out[-1][1]:\n            out[-1][1] = max(out[-1][1], b)\n        else:\n            out.append([a, b])\n"
+     "    return out\n```", 11),
+    ("Write thorough pytest unit tests for this function: normal cases, edge cases and errors, one test per behaviour. "
+     "Output only the code.\n\n```python\ndef parse_duration(s):\n    units = {'ms': 0.001, 's': 1, 'm': 60, 'h': 3600, 'd': 86400}\n"
+     "    total, num = 0.0, ''\n    for ch in s.replace(' ', ''):\n        if ch.isdigit() or ch == '.':\n            num += ch\n"
+     "        else:\n            total += float(num) * units[ch]\n            num = ''\n    return total\n```", 22),
+    ("Refactor this class into a small module: split the responsibilities into helpers, add type hints and docstrings, "
+     "and keep the behaviour. Output only the code.\n\n```python\nclass Cache:\n    def __init__(self, n, ttl):\n"
+     "        self.n, self.ttl, self.d = n, ttl, {}\n    def get(self, k, now):\n        v = self.d.get(k)\n"
+     "        if v is None or now - v[1] > self.ttl:\n            self.d.pop(k, None)\n            return None\n        return v[0]\n"
+     "    def put(self, k, v, now):\n        if len(self.d) >= self.n:\n            self.d.pop(min(self.d, key=lambda x: self.d[x][1]))\n"
+     "        self.d[k] = (v, now)\n```", 33),
+]
+
+
+def speed_probe(base_url: str, model: str, depths: tuple = (2000, 32000, 96000), api_key: str | None = None,
+                repeats: int = 3, gen_tokens: int = 512) -> dict:
+    """Single-stream speed at several context depths: what one user feels. Content is real code and the answer is
+    code, so speculative decoding (MTP) sees realistic text - random words made MTP models look ~35% slower than on
+    real tasks (Tiel 42.8 vs ~64 tok/s). Sampling stays the recipe's (greedy flatters MTP), so one sample of a few
+    hundred tokens swung +-15%; now each depth decodes `repeats` seeded tasks and reports the median. The first request
+    of a depth has a unique prefix (a real prefill, measured); the others reuse it from the prompt cache."""
+    src = gzip.open(PROBE_CORPUS, "rt").read()
+    run_id = f"{time.time():.0f}"
     res = {}
     client.run_chat(base_url, model, [{"role": "user", "content": "Say OK."}], max_tokens=8, api_key=api_key,
                     extra={"chat_template_kwargs": {"enable_thinking": False}})   # load / warm up
     for d in depths:
-        body = (src * (1 + (d * 4) // max(1, len(src))))[: d * 3]   # ~3 chars per code token
-        text = f"# probe {d} {time.time()}\n" + body
-        out = client.run_chat(base_url, model, [{"role": "user", "content": text + "\n\nRewrite the function `speed` above with type hints and a "
-                                                 "docstring. Output only the code."}],
-                              max_tokens=384, api_key=api_key, extra={"chat_template_kwargs": {"enable_thinking": False}})
-        t = (out.get("timings") or [{}])[-1]
-        res[d] = {"ctx": t.get("ctx"), "prefill_tps": round(t.get("prompt_per_second") or 0, 1),
-                  "decode_tps": round(t.get("predicted_per_second") or 0, 1)}
+        body = (src * (1 + (d * 4) // len(src)))[: d * 3]   # ~3 chars per code token
+        prefix = f"# probe {d} {run_id}\n" + body + "\n\n"
+        runs = []
+        for i in range(repeats):
+            task, seed = PROBE_TASKS[i % len(PROBE_TASKS)]
+            out = client.run_chat(base_url, model, [{"role": "user", "content": prefix + task}], max_tokens=gen_tokens, api_key=api_key,
+                                  extra={"chat_template_kwargs": {"enable_thinking": False}, "seed": seed})
+            t = (out.get("timings") or [{}])[-1]
+            runs.append(t)
+        first = runs[0]
+        # a sample that stopped early is too short to time (and has no speculative steady state)
+        dec = [t["predicted_per_second"] for t in runs if t.get("predicted_per_second") and (t.get("predicted_n") or 0) >= gen_tokens // 4]
+        fresh = (first.get("prompt_n") or 0) >= 0.9 * (first.get("ctx") or 1)   # a cache hit would flatter the prefill
+        med = statistics.median(dec) if dec else 0
+        res[d] = {"ctx": first.get("ctx"), "prefill_tps": round(first.get("prompt_per_second") or 0, 1) if fresh else 0,
+                  "decode_tps": round(med, 1), "decode_runs": [round(x, 1) for x in dec],
+                  "spread_pct": round(100 * (max(dec) - min(dec)) / med, 1) if len(dec) > 1 and med else None}
     shallow, mid = res[depths[0]], res[depths[min(1, len(depths) - 1)]]
     step = TYPICAL_STEP["new_prompt_tokens"] / mid["prefill_tps"] + TYPICAL_STEP["output_tokens"] / shallow["decode_tps"] \
         if mid["prefill_tps"] and shallow["decode_tps"] else None
     dec = shallow["decode_tps"]
     return {"decode_tps": dec, "prefill_tps": mid["prefill_tps"], "typical_agent_step_s": round(step, 1) if step else None,
             "label": None if not dec else ("fast" if dec >= 50 else "comfortable" if dec >= 25 else "slow"),
-            "by_depth": {f"{v['ctx'] // 1000 if v['ctx'] else d // 1000}k": {"decode_tps": v["decode_tps"], "prefill_tps": v["prefill_tps"]}
+            "by_depth": {f"{v['ctx'] // 1000 if v['ctx'] else d // 1000}k": {k: v[k] for k in ("decode_tps", "prefill_tps", "decode_runs", "spread_pct")}
                          for d, v in res.items()},
-            "method": "single-stream probe"}
+            "method": PROBE_METHOD}
 
 
 def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, target: float = 5.0, prior: tuple = (0.0, 1.5),
