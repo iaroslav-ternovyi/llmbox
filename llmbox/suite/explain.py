@@ -626,7 +626,7 @@ def billing(seed: int, level: int = 3) -> Item:
                "fee": "What plan fee is charged for that month, in euros?",
                "total": "What is that month's bill in euros?"}[part]
         q = (f"{who[0].upper()}{who[1:]}, made {req:,} requests in {month} 2026" + (f", {err:,} of which failed with HTTP 5xx errors" if err else "")
-             + f". {ask}")
+             + f". Uptime was 99.9% that month. {ask}")   # every condition a rule of the page could depend on is given
         quiz.append((q, str(parts[part]) if part == "blocks" else f"{parts[part]:.2f}", "num"))
     return _item("billing", level, seed, _bill_doc(r, ru, svc, level), f"work out what a month of {svc} costs a customer",
                  svc, f"how {svc} bills its customers each month", "", quiz, "Give amounts in euros with cents and block counts as whole numbers.", _bill_oracle(ru))

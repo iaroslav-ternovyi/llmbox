@@ -271,19 +271,31 @@ def run(base_url: str, model: str, tier: str = "quick", seed0: int = 0, blocks: 
                       "weights": suite.WEIGHTS, "blocks": sorted(blocks) if blocks else None}, "summary": s, "rows": rows}
 
 
-def regrade(rec: dict) -> tuple[dict, list[str]]:
+def regrade(rec: dict, reader_url: str | None = None) -> tuple[dict, list[str]]:
     """Re-score the text-graded rows of a saved suite result with the current graders (after a grader fix).
-    Rows that depend on a tool world or a workspace are kept (they need a re-run). Returns (new record, changes)."""
+    Rows that depend on a tool world or a workspace are kept (they need a re-run). With reader_url, explanations are
+    graded again by the reader too (their quiz lives on the reader's side; the model's explanation stands).
+    Returns (new record, changes)."""
     su = rec["suite"]
-    items = {it.id: it for it in suite.build(su["tier"], su.get("seed0", 0), blocks=sorted(TEXT_GRADED))}
+    blocks = sorted(TEXT_GRADED | ({"explain"} if reader_url else set()))
+    if reader_url:
+        from . import reader
+        reader.configure(reader_url)
+    items = {it.id: it for it in suite.build(su["tier"], su.get("seed0", 0), blocks=blocks)}
     rows, changes = [], []
     for r in rec["rows"]:
         it = items.get(r["id"])
         if it is not None and r.get("final") is not None and not r.get("error"):
-            ns = round(float(it.check(r["final"], r)), 4)
+            try:
+                ns = round(float(it.check(r["final"], r)), 4)
+            except Exception as e:   # a reader failure: keep the old score and say so
+                changes.append(f"{r['id']}: kept {r['score']} ({type(e).__name__}: {str(e)[:80]})")
+                rows.append(r)
+                continue
             if ns != r["score"]:
                 changes.append(f"{r['id']}: {r['score']} -> {ns}")
                 r = dict(r, score=ns, regraded_from=r["score"])
+            r = {k: v for k, v in r.items() if k != "pending"}
         rows.append(r)
     wall = rec["summary"].get("wall_minutes", 0) * 60
     new = dict(rec, rows=rows, summary=summarize(rows, wall))

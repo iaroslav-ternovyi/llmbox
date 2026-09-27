@@ -398,7 +398,7 @@ def cmd_regrade(a: argparse.Namespace) -> None:
         if rec.get("suite", {}).get("version") != _suite.VERSION:   # items of other versions differ: never cross-grade
             print(f"{os.path.basename(path)}: suite v{rec.get('suite', {}).get('version')} != current v{_suite.VERSION}, skipped")
             continue
-        new, changes = bench.regrade(rec)
+        new, changes = bench.regrade(rec, reader_url=a.reader)
         print(f"{os.path.basename(path)}: capability {rec['summary']['capability']} -> {new['summary']['capability']}")
         for c in changes:
             print("   ", c)
@@ -641,6 +641,8 @@ def main(argv: list[str] | None = None) -> None:
     rg = sub.add_parser("regrade", help="re-score text-graded items of saved results with the current graders")
     rg.add_argument("results", nargs="+", help="result json files (~/.llmbox/results/<host>/*.json)")
     rg.add_argument("--dry-run", action="store_true")
+    rg.add_argument("--reader", nargs="?", const="http://gpu-box:8080", default=None,
+                    help="also grade the explanations again with the reader model at this endpoint (default: the box)")
     rg.set_defaults(fn=cmd_regrade)
 
     rc_ = sub.add_parser("recipe", help="recipes: list / show / render a launcher / check the host runs what the recipe says")
