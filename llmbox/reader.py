@@ -20,7 +20,7 @@ from . import client
 
 MODEL = os.environ.get("LLMBOX_READER_MODEL", "llmbox-reader")
 # what the entry serves; part of the cache key, so a different reader never reuses another reader's answers
-READER_ID = "gpt-oss-20b UD-Q4_K_XL, reasoning medium, greedy"
+READER_ID = "gpt-oss-20b UD-Q4_K_XL, reasoning medium, greedy, loop detector 24"
 CACHE = os.path.join(os.path.expanduser("~"), ".llmbox", "reader-cache.jsonl")
 URL: str | None = os.environ.get("LLMBOX_READER_URL")   # set by bench from the run's endpoint when not given
 MAX_TOKENS = 16000   # the reader reasons; the hardest access cases need ~5k tokens

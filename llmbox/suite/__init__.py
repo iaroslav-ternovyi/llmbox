@@ -30,7 +30,7 @@ MODULES = {"agentic": agentic, "code": code, "tools": tools, "techhelp": techhel
 BLOCKS = {b: m.KINDS for b, m in MODULES.items()}
 BLOCKS["agentic"] = {**agentic.KINDS, **sessions.KINDS}   # multi-turn sessions are agentic coding too
 # ladder: one item at every level - where a model breaks, and whether a new block's levels are spaced right
-LEVELS = {"quick": [3, 5], "medium": [2, 3, 4, 4, 5, 5, 5], "deep": [2, 3, 4, 4, 5, 5, 5] * 2, "ladder": [1, 2, 3, 4, 5]}
+LEVELS = {"quick": [3, 5], "medium": [2, 3, 4, 4, 5, 5, 5], "deep": [2, 3, 4, 4, 5, 5, 5] * 2, "ladder": [1, 2, 3, 4, 5, 6]}
 # agentic tasks take minutes each: fewer, but spread over all projects
 AGENTIC_LEVELS = {"quick": [5], "medium": [4, 5], "deep": [3, 4, 5, 5], "ladder": [3, 4, 5]}
 # which agentic projects each tier uses: from-scratch implementations discriminate best, bug hunts add breadth
@@ -85,6 +85,8 @@ def build(tier: str = "quick", seed0: int = 0, blocks: list[str] | None = None) 
             for i, lvl in enumerate(AGENTIC_LEVELS[tier] if b == "agentic" else LEVELS[tier]):
                 if b == "code" and kind in code.SIMPLE and lvl >= 3:
                     continue   # trivial single functions only belong to the lowest levels
+                if lvl > getattr(MODULES[b], "MAX_LEVEL", 5) and tier == "ladder":
+                    continue   # the ladder climbs only as high as a block has levels
                 items.append(gen(seed0 * 1000 + i + 1, _level_for(b, kind, lvl)))
     # questions on the same long document back to back, so the prompt cache holds it (v0.8: one document per level)
     lc = sorted((it for it in items if it.block == "longctx"), key=lambda it: (it.meta.get("level", 0), it.id.split(".")[-1]))

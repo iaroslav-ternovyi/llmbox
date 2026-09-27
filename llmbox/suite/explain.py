@@ -788,6 +788,7 @@ def access(seed: int, level: int = 3) -> Item:
 
 KINDS = {"config": config, "billing": billing, "access": access}
 QUICK = list(KINDS)
+MAX_LEVEL = 5
 
 
 def oracle(it: Item) -> str:
