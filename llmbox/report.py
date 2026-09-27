@@ -11,7 +11,8 @@ import json
 from . import results
 
 BLOCK_NAMES = {"agentic": "Agentic coding", "code": "Code", "tools": "Tools & automation", "techhelp": "Tech help",
-               "knowledge": "Knowledge", "longctx": "Long documents", "writing": "Writing", "reasoning": "Reasoning"}
+               "knowledge": "Knowledge", "explain": "Explanations", "longctx": "Long documents", "writing": "Writing",
+               "reasoning": "Reasoning"}
 
 
 def latest_probe(recs: list[dict], rid: str, after: str = "") -> dict | None:

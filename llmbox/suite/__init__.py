@@ -12,20 +12,21 @@ Target: a strong 35B-A3B local model scores ~50-60, leaving room above and below
 """
 from __future__ import annotations
 
-from . import agentic, code, knowledge, longctx, reasoning, sessions, techhelp, tools, writing
+from . import agentic, code, explain, knowledge, longctx, reasoning, sessions, techhelp, tools, writing
 from .common import Item
 
 VERSION = "0.10-dev"
 # v0.10: weights for people who download and run local models (developers and enthusiasts; docs/usage-research.md):
 # coding 30 (agentic 20 + single-file functions 10), agents/tools 15, tech help for their own machines 15 ("homelab" is the
-# third-largest local use), knowledge and "I don't know" 10 (information seeking is the largest use of assistants; the
-# costly failure is a confident invented answer), writing/editing/translation 15, long documents 10 (real prompts are
-# ~6k tokens; 200k documents are rare and the costliest to prefill locally), exact reasoning 5.
+# third-largest local use), knowledge and "I don't know" 10 and explanations 10 (information seeking and advice are the
+# largest uses of assistants: a confident invented answer and an explanation nobody can act on are the costly failures),
+# writing/editing/translation 10, long documents 5 (real prompts are ~6k tokens; 200k documents are rare and the costliest
+# to prefill locally), exact reasoning 5.
 # v0.9 was agentic 25, code 10, tools 20, longctx 15, writing 15, reasoning 15.
-WEIGHTS = {"agentic": 0.20, "code": 0.10, "tools": 0.15, "techhelp": 0.15, "knowledge": 0.10, "longctx": 0.10, "writing": 0.15,
-           "reasoning": 0.05}
-MODULES = {"agentic": agentic, "code": code, "tools": tools, "techhelp": techhelp, "knowledge": knowledge, "longctx": longctx,
-           "writing": writing, "reasoning": reasoning}
+WEIGHTS = {"agentic": 0.20, "code": 0.10, "tools": 0.15, "techhelp": 0.15, "knowledge": 0.10, "explain": 0.10, "longctx": 0.05,
+           "writing": 0.10, "reasoning": 0.05}
+MODULES = {"agentic": agentic, "code": code, "tools": tools, "techhelp": techhelp, "knowledge": knowledge, "explain": explain,
+           "longctx": longctx, "writing": writing, "reasoning": reasoning}
 BLOCKS = {b: m.KINDS for b, m in MODULES.items()}
 BLOCKS["agentic"] = {**agentic.KINDS, **sessions.KINDS}   # multi-turn sessions are agentic coding too
 LEVELS = {"quick": [3, 5], "medium": [2, 3, 4, 4, 5, 5, 5], "deep": [2, 3, 4, 4, 5, 5, 5] * 2}
@@ -60,6 +61,7 @@ QUICK_ITEMS = [
     ("techhelp", "compose_port", 4), ("techhelp", "nginx_route", 4), ("techhelp", "log_root", 4), ("techhelp", "subnet", 4),
     ("techhelp", "chmod_seq", 5),
     ("knowledge", "python", 4), ("knowledge", "shell", 4), ("knowledge", "codes", 4),   # 8 questions each, 1-3 made up
+    ("explain", "config", 4), ("explain", "billing", 4), ("explain", "access", 4),      # graded by the reader model
 ]
 
 

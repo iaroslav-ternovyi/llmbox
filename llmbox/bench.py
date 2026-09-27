@@ -44,7 +44,8 @@ def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, de
             res = client.run_chat(base_url, model, it.messages, tools=it.tools, tool_impl=it.tool_impl,
                                   max_tokens=it.max_tokens, max_steps=it.meta.get("max_steps", 16), api_key=api_key,
                                   deadline_s=deadline, followups=it.meta.get("followups"))
-        score = float(it.check(res["final"], res))
+        # deferred items (explanations) are graded by the reader model after the whole run, in one go: grade_deferred
+        score = 0.0 if it.meta.get("deferred") else float(it.check(res["final"], res))
         err = None
     except Exception as e:  # a crash/timeout of one item scores 0 and is reported, it does not stop the run
         res, score, err = {"timings": [], "usage": {}, "seconds": round(time.time() - t0, 1), "finish_reason": None,
@@ -53,6 +54,7 @@ def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, de
     if trace_dir and thinking:
         _save_trace(trace_dir, it.id, thinking, res)
     return {"id": it.id, "block": it.block, "kind": it.kind, "lang": it.lang, "score": round(score, 4), "error": err,
+            **({"pending": it.meta["deferred"]} if it.meta.get("deferred") and not err else {}),
             "seconds": res["seconds"], "steps": res.get("steps"), "finish_reason": res.get("finish_reason"),
             "usage": res.get("usage"), "timings": res.get("timings"), "final": res.get("final") or "",
             "final_tail": (res.get("final") or "")[-300:], "reasoning_tail": _reasoning_tail(res), "expected": it.meta.get("expected"),
@@ -60,6 +62,32 @@ def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, de
             "max_reply_tokens": max([t.get("predicted_n") or 0 for t in res.get("timings") or []] or [0]),
             "tool_calls": [{"name": c.get("name"), "args": _clip(c.get("args")), "result": _clip(c.get("result"), 300)}
                            for c in (res.get("tool_calls") or [])][:400]}
+
+
+def grade_deferred(base_url: str, items: list, rows: list[dict], out=None, progress=print) -> None:
+    """Score the rows whose grading needs the reader model (suite/explain.py), in place. Run after all other items so
+    the served model is swapped for the reader once. A reader failure leaves the row pending with an error; a resumed
+    run grades it without re-running the item."""
+    from . import reader
+    reader.configure(base_url)
+    by_id = {it.id: it for it in items}
+    todo = [r for r in rows if r.get("pending") and r["id"] in by_id]
+    if todo:
+        progress(f"  grading {len(todo)} explanation(s) with the reader model {reader.MODEL}")
+    for r in todo:
+        it = by_id[r["id"]]
+        try:
+            r["score"] = round(float(it.check(r["final"], r)), 4)
+            r.pop("pending", None)
+            r.pop("reader_error", None)
+        except Exception as e:
+            r["reader_error"] = str(e)[:300]
+            progress(f"  reader failed on {it.id}: {r['reader_error'][:120]}")
+            continue
+        if out:
+            out.write(json.dumps(r, ensure_ascii=False) + "\n")
+            out.flush()
+        progress(f"  [reader] {r['score']:4.2f}  {it.id}")
 
 
 def _clip(v, n: int = 2000):
@@ -220,6 +248,7 @@ def run(base_url: str, model: str, tier: str = "quick", seed0: int = 0, blocks: 
             out.flush()
         progress(f"  [{i:3d}/{len(items)}] {row['score']:4.2f}  {row['seconds']:6.1f}s  {it.id}"
                  + (f"  ERROR {row['error'][:80]}" if row["error"] else ""))
+    grade_deferred(base_url, suite.build(tier, seed0, blocks), rows, out, progress)
     s = summarize(rows, time.time() - t0)
     if parallel > 1:   # per-request speeds were measured under contention: the caller replaces them with a 1-stream probe
         s["parallel"] = parallel
@@ -350,7 +379,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
             out.flush()
         per_fam[fam] = per_fam.get(fam, 0) + 1
         counts[blk] = counts.get(blk, 0) + 1
-        if not row.get("error"):
+        if not row.get("error") and not row.get("pending"):   # explanations are scored by the reader after the loop
             obs.append((fam, max(0.0, min(1.0, float(row["score"])))))
         ratios = [r["seconds"] / bank.seconds[r["family"]] for r in rows if bank.seconds.get(r["family"])]
         slowness = statistics.median(ratios) if ratios else 1.0
@@ -358,6 +387,13 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         cap, lo, hi = est["capability"], est["lo"], est["hi"]
         progress(f"  [{n:3d}] {row['score']:.2f} {row['seconds']:6.1f}s  {fam:26s} -> {cap:5.1f} ({lo:.0f}-{hi:.0f})  "
                  f"{(time.time() - t0) / 60:5.1f} min")
+    pend = [r for r in rows if r.get("pending")]
+    if pend:
+        items = [suite.BLOCKS[r["family"].split(".")[0]][r["family"].split(".")[1]](int(r["id"].rsplit(".", 1)[1]), int(r["family"].split(".")[2][1:])) for r in pend]
+        grade_deferred(base_url, items, rows, out, progress)
+        obs += [(r["family"], max(0.0, min(1.0, float(r["score"])))) for r in pend if not r.get("pending")]
+        est = irt.block_estimate(bank, obs, prior)
+        cap, lo, hi = est["capability"], est["lo"], est["hi"]
     if out:
         out.close()
     s = summarize(rows, time.time() - t0) if rows else {}

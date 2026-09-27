@@ -174,6 +174,9 @@ def _writing_oracle(it: Item) -> str | None:
 
 
 def oracle(it: Item) -> str | None:
+    if it.block == "explain":   # the reference explanation written from the rules; the reader model grades it
+        from .suite import explain
+        return explain.oracle(it)
     if it.block == "knowledge":
         from .suite import knowledge
         return knowledge.oracle(it)
@@ -240,7 +243,14 @@ def check_kind(b: str, k: str, lvl: int, seeds=(1, 2, 3), frontier: str | None =
             from . import bench
             f_ = gen(sd, lvl)
             row = bench.run_item(frontier, "claude-opus-5-5", f_)
+            if row.get("pending"):
+                bench.grade_deferred(frontier, [f_], [row], progress=lambda *_: None)
             res["frontier"].append(row["score"])
+    if b == "explain":   # a model reads the explanation: the reference explanation must work, silence must not
+        ok = res["determinism"] and sum(res["oracle"]) / len(res["oracle"]) >= 0.8 and sum(res["null"]) / len(res["null"]) <= 0.35
+        res["ok"] = ok
+        res["review"] = [s for s in res["frontier"] if s < 0.8]
+        return res
     ok = res["determinism"] and all(x >= 0.999 for x in res["oracle"]) and all(x <= 0.25 for x in res["null"]) \
         and all(x >= 0.999 for x in res["format"])
     res["ok"] = ok
