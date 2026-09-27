@@ -161,7 +161,7 @@ def new_cmd_line(line: str, add: list[str], drop: list[str]) -> str:
     return f"{head}cmd: {' '.join(toks + add)}"
 
 
-def apply(host: str, rid: str, out=print, overrides: list[str] | None = None) -> bool:
+def apply(host: str, rid: str, out=print, overrides: list[str] | None = None, unload: bool = True) -> bool:
     """Write the tuned overrides into the recipe file and the host's llama-swap entry, then verify with recipe check.
     The host must be idle (a config change makes llama-swap reload). Backups: config.yaml.bak-<ts>, <id>.toml.bak-<ts>."""
     import shlex
@@ -175,7 +175,10 @@ def apply(host: str, rid: str, out=print, overrides: list[str] | None = None) ->
         return True
     prof = hosts.load(host)
     h = hosts.host_of(prof)
-    if h.agent("busy", timeout=60).get("busy"):
+    # right after a tune the box still holds what the measurements left loaded: unload it and wait for the probe
+    # servers to exit before deciding the host is busy (2026-09-27: cyber-tiel's -9% was refused as "host busy")
+    busy = hosts.free_up(h) if unload else h.agent("busy", timeout=60)
+    if busy.get("busy"):
         out(f"{rid}: host busy - not touching the llama-swap config")
         return False
     add, drop = flags_of(ov), res.get("applied_flags") or []
