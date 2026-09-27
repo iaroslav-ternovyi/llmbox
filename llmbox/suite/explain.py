@@ -392,7 +392,7 @@ def _cfg_doc(r, ru, t, level) -> str:
                      + ([("cache.dir", DEFAULTS["cache.dir"], "cache location (in the `[cache]` table: `dir`)")] if ru["nested"] else [])
                      + ([("color", "true", "coloured output")] if ru["bools"] else [])),
          f"## Environment variables and flags\n\nA setting `name` is read from the variable `{T}_NAME` (upper case) and from "
-         f"the flag `--name=value`" + (f"; in a nested setting like `cache.dir` the dot becomes a double underscore in the variable "
+         f"the flag `--name=value`, where an underscore in the name is written as a dash (`log_level` is `--log-level`)" + (f"; in a nested setting like `cache.dir` the dot becomes a double underscore in the variable "
                                        f"(`{T}_CACHE__DIR`) and a dash in the flag (`--cache-dir`). Variables spelled any other way "
                                        f"are ignored" if ru["nested"] else "") + "."
          + (f" Booleans: `--color` / `--no-color`; in a variable, `1/true/yes/on` and `0/false/no/off`." if ru["bools"] else "")]
@@ -440,7 +440,7 @@ def _cfg_oracle(ru, t) -> str:
          f"Defaults: jobs 4, region eu-west, log_level info" + (f", cache.dir ~/.cache/{t}" if ru["nested"] else "")
          + (", plugins empty" if ru["lists"] else "") + (", color true" if ru["bools"] else "") + ".",
          f"Variables: {T}_ plus the name in capitals" + (", a dot becomes __ (cache.dir is " + T + "_CACHE__DIR); other spellings are ignored" if ru["nested"] else "")
-         + f". Flags: --name=value" + (", dot becomes a dash (--cache-dir)" if ru["nested"] else "") + "."]
+         + f". Flags: --name=value, _ becomes - (--log-level)" + (", and so does a dot (--cache-dir)" if ru["nested"] else "") + "."]
     if ru["lists"]:
         s.append("Lists (plugins) are combined, not replaced: weakest source's items first, then stronger ones; skip items "
                  "already present." + (" A list starting with \"!\" drops everything from weaker sources." if ru["reset"] else "")

@@ -3,8 +3,11 @@ made-up system and has only the tested model's explanation to go on. It is not a
 answers quiz questions with exact answers, and those are graded by code. What it measures is the explanation's use to
 someone who has to act on it (teacher-student simulatability: Pruthi et al., TACL 2022).
 
-The reader is fixed across all runs (Phi-4-mini-instruct Q8_0: MIT, ungated, 3.8B, not a family the ranking tests),
-greedy (temperature 0), served as the llama-swap entry `llmbox-reader` next to the tested model. Its answers are cached
+The reader is fixed across all runs: gpt-oss-20b (reasoning medium, greedy), served as the llama-swap entry
+`llmbox-reader` next to the tested model, with its own pinned recipe. A reader must follow what it reads even where it
+contradicts habit: Phi-4-mini (the first choice: small, MIT, a family the ranking does not test) answered from habit
+instead - the reference explanation got 0.08-0.3 of the cases right - while gpt-oss-20b gets 0.93-0.97 with it and
+0.0-0.13 without any explanation (2026-09-27). gpt-oss-20b is itself scored, so only that one model shares its idioms. Its answers are cached
 by prompt, so a re-grade or a resumed run does not ask again and gets the same answer.
 """
 from __future__ import annotations
@@ -16,9 +19,11 @@ import os
 from . import client
 
 MODEL = os.environ.get("LLMBOX_READER_MODEL", "llmbox-reader")
+# what the entry serves; part of the cache key, so a different reader never reuses another reader's answers
+READER_ID = "gpt-oss-20b UD-Q4_K_XL, reasoning medium, greedy"
 CACHE = os.path.join(os.path.expanduser("~"), ".llmbox", "reader-cache.jsonl")
 URL: str | None = os.environ.get("LLMBOX_READER_URL")   # set by bench from the run's endpoint when not given
-MAX_TOKENS = 3000
+MAX_TOKENS = 16000   # the reader reasons; the hardest access cases need ~5k tokens
 
 _cache: dict | None = None
 
@@ -57,7 +62,7 @@ def _load() -> dict:
 
 
 def ask(prompt: str) -> str:
-    key = hashlib.sha256(f"{MODEL}\n{prompt}".encode()).hexdigest()
+    key = hashlib.sha256(f"{READER_ID}\n{prompt}".encode()).hexdigest()
     c = _load()
     if key in c:
         return c[key]
@@ -71,5 +76,5 @@ def ask(prompt: str) -> str:
     c[key] = text
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     with open(CACHE, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"key": key, "model": MODEL, "text": text}, ensure_ascii=False) + "\n")
+        f.write(json.dumps({"key": key, "reader": READER_ID, "text": text}, ensure_ascii=False) + "\n")
     return text
