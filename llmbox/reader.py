@@ -61,6 +61,22 @@ def _load() -> dict:
     return _cache
 
 
+TRACES = os.path.join(os.path.expanduser("~"), ".llmbox", "reader-traces")
+
+
+def _trace(key: str, res: dict) -> None:
+    """The reader's reasoning for every answer, so a long or empty one can be audited (loop or honest deliberation)."""
+    import gzip
+    try:
+        os.makedirs(TRACES, exist_ok=True)
+        think = [m.get("reasoning_content") for m in res.get("messages") or [] if m.get("role") == "assistant" and m.get("reasoning_content")]
+        with gzip.open(os.path.join(TRACES, f"{key[:16]}.json.gz"), "wt", encoding="utf-8") as f:
+            json.dump({"reader": READER_ID, "finish": res.get("finish_reason"), "usage": res.get("usage"), "final": res.get("final"),
+                       "reasoning": think}, f, ensure_ascii=False)
+    except OSError:
+        pass
+
+
 def ask(prompt: str) -> str:
     key = hashlib.sha256(f"{READER_ID}\n{prompt}".encode()).hexdigest()
     c = _load()
@@ -73,6 +89,11 @@ def ask(prompt: str) -> str:
     res = client.run_chat(URL, MODEL, [{"role": "user", "content": prompt}], max_tokens=MAX_TOKENS, max_steps=1, timeout=900,
                           extra={"temperature": 0, "top_k": 1, "seed": 1})
     text = res["final"]
+    _trace(key, res)
+    if not (text or "").strip() or res.get("finish_reason") == "length":
+        # the reader ran out of tokens before answering: a failure of the reader, not a wrong answer of the explanation
+        # (2026-09-27: two good Tiel explanations scored 0 this way). Not cached; the row stays pending for a regrade.
+        raise RuntimeError(f"reader gave no answer (finish {res.get('finish_reason')}, {len(text or '')} chars)")
     c[key] = text
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     with open(CACHE, "a", encoding="utf-8") as f:
