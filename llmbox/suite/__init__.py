@@ -15,7 +15,7 @@ from __future__ import annotations
 from . import agentic, code, explain, knowledge, longctx, reasoning, sessions, techhelp, tools, writing
 from .common import Item
 
-VERSION = "0.10-dev"
+VERSION = "0.10-dev3"
 # v0.10: weights for people who download and run local models (developers and enthusiasts; docs/usage-research.md):
 # coding 30 (agentic 20 + single-file functions 10), agents/tools 15, tech help for their own machines 15 ("homelab" is the
 # third-largest local use), knowledge and "I don't know" 10 and explanations 10 (information seeking and advice are the
@@ -48,21 +48,22 @@ def _level_for(block: str, kind: str, level: int) -> int:
 # separated the local models, one easy anchor per block (so weak models still register) and a few items every local model
 # failed but the frontier solved (headroom). 35 of the 54 v0.7 quick items gave all three local models the same score.
 # Recalibrate with IRT once more models have run (tinyBenchmarks / metabench / MINCE style item selection).
+# v0.10-dev3 quick: one run in ~35-40 min on a 60 tok/s model (v0.9 quick took 1.5-3 h). Picked from the v0.9 item data
+# (9 models) by information per minute: out went items every model solves (code.expr/csv L3, agentic.fetch, writing.proofread,
+# techhelp L4), items every local model fails at 6 min each (longctx.audit L6, tools.outreach L6) and the slowest ones
+# (agentic.shipping 10 min, code.cron 8 min, reasoning.schedule 8 min, longctx L5 at 165k tokens). The four 0/1 blocks
+# now give partial credit (longctx and reasoning: 2-4 questions per item; code: share of hidden tests; tools: per action).
 QUICK_ITEMS = [
-    ("agentic", "shipping", 5), ("agentic", "spend", 5), ("agentic", "fetch", 5), ("agentic", "cart", 5),
-    ("code", "expr", 3), ("code", "rooms", 5), ("code", "lru", 5), ("code", "csv", 3),
-    ("tools", "total", 5), ("tools", "conditional", 5), ("tools", "dunning", 5), ("tools", "reconcile", 5), ("tools", "reminders", 3),
-    ("longctx", "lookup", 5), ("longctx", "multihop", 5), ("longctx", "latest", 5), ("longctx", "count", 5),
-    ("writing", "constrained", 5), ("writing", "rewrite", 5), ("writing", "proofread", 5), ("writing", "minutes", 5), ("writing", "i18n", 5),
-    ("reasoning", "arith", 5), ("reasoning", "code_trace", 5), ("reasoning", "arith", 3), ("reasoning", "schedule", 5),
-    # v0.9 expert layer (level 6, strict), calibrated on Opus 5.5 2026-09-26: outreach 2/3 (the only reliable frontier
-    # headroom - judgment on messy data), audit 3/3, cron 3/3, bulk_discount 3/3, dedupe 3/3 (hard for local models)
-    ("tools", "bulk_discount", 6), ("tools", "dedupe", 6), ("longctx", "audit", 6), ("code", "cron", 6),
-    # v0.10: tools.outreach L6 out of quick (0 for every local model, 455 s; the adaptive run can still pick it); tech help in
-    ("techhelp", "compose_port", 4), ("techhelp", "nginx_route", 4), ("techhelp", "log_root", 4), ("techhelp", "subnet", 4),
-    ("techhelp", "chmod_seq", 5),
-    ("knowledge", "python", 4), ("knowledge", "shell", 4), ("knowledge", "codes", 4),   # 8 questions each, 1-3 made up
-    ("explain", "config", 4), ("explain", "billing", 4), ("explain", "access", 4),      # graded by the reader model
+    ("agentic", "spend", 5), ("agentic", "cart", 5),
+    ("code", "rooms", 5), ("code", "lru", 5), ("code", "csv", 5),
+    ("tools", "conditional", 5), ("tools", "reminders", 4), ("tools", "dunning", 5), ("tools", "dedupe", 6), ("tools", "bulk_discount", 6),
+    ("techhelp", "compose_port", 5), ("techhelp", "compose_port", 6), ("techhelp", "nginx_route", 6), ("techhelp", "log_root", 6),
+    ("techhelp", "subnet", 6), ("techhelp", "chmod_seq", 5),
+    ("knowledge", "python", 5), ("knowledge", "shell", 5), ("knowledge", "codes", 5),   # 8 questions each, 1-3 made up
+    ("explain", "config", 5), ("explain", "billing", 4), ("explain", "access", 5),      # graded by the reader model
+    ("longctx", "lookup", 3), ("longctx", "multihop", 3), ("longctx", "latest", 3),     # one ~80k-token document, 3 questions each
+    ("writing", "constrained", 5), ("writing", "rewrite", 5), ("writing", "minutes", 5), ("writing", "i18n", 5),
+    ("reasoning", "arith", 5), ("reasoning", "code_trace", 4),
 ]
 
 

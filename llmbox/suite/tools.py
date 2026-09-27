@@ -155,6 +155,14 @@ def _side_effect_free(w: World) -> bool:
     return not (w.emails or w.tasks or w.discounts or w.payments)
 
 
+def _credit(right: int, n_expected: int, wrong: int) -> float:
+    """v0.10 partial credit: the share of the expected actions done right, and every wrong or extra action cancels one
+    right one (an agent that also emails the wrong people is not half right). Nothing expected: 1 only if nothing done."""
+    if not n_expected:
+        return 1.0 if not wrong else 0.0
+    return max(0.0, (right - wrong) / n_expected)
+
+
 def _team(task: dict) -> str:
     """'Billing Team', 'billing', 'account management' -> canonical team id (the request names the team in prose)."""
     t = re.sub(r"\bteam\b", "", str(task.get("team", "")).lower())
@@ -186,13 +194,14 @@ def reminders(seed: int, level: int = 3) -> Item:
             + (" Skip customers who already received ANY email in the last 7 days (check their email log)." if level >= 4 else ""))
 
     def check(_text, _t=None) -> float:
-        got = set()
+        hit, wrong = set(), len(w.tasks) + len(w.discounts) + len(w.payments)
         for e in w.emails:
-            for iid in w.invoices:
-                if iid in (e["subject"] or ""):
-                    got.add((e["to"], iid))
-        tp, fp = len(got & exp), len(w.emails) - len(got & exp)
-        return 1.0 if got == exp and len(w.emails) == len(exp) and not w.tasks and not w.discounts else 0.0
+            pair = next(((e["to"], iid) for iid in re.findall(r"INV-\d+", e["subject"] or "") if (e["to"], iid) in exp), None)
+            if pair and pair not in hit:
+                hit.add(pair)
+            else:
+                wrong += 1     # wrong recipient or invoice, or a second email for the same invoice
+        return _credit(len(hit), len(exp), wrong)
     return _item("reminders", seed, user, check, w, {"expected": sorted(exp), "level": level})
 
 
@@ -210,15 +219,16 @@ def followup(seed: int, level: int = 3) -> Item:
             f"the {team} team, due {due}, whose title contains the customer's full name and the invoice id.")
 
     def check(_text, _t=None) -> float:
-        if len(w.tasks) != len(invs) or w.emails or w.discounts:
-            return 0.0
-        score = 0.0
+        right, used = 0, set()
         for inv in invs:
             name = w.customers[inv["customer_id"]]["name"]
-            t = next((t for t in w.tasks if inv["id"] in (t.get("title") or "")), None)
-            if t:
-                score += 1.0 if (name in (t.get("title") or "") and t.get("due_date") == due and _team(t) == team) else 0.0
-        return 1.0 if score == len(invs) else 0.0
+            k = next((k for k, t in enumerate(w.tasks) if k not in used and inv["id"] in (t.get("title") or "")), None)
+            if k is not None:
+                used.add(k)
+                t = w.tasks[k]
+                right += name in (t.get("title") or "") and t.get("due_date") == due and _team(t) == team
+        wrong = (len(w.tasks) - len(used)) + len(used) - right + len(w.emails) + len(w.discounts) + len(w.payments)
+        return _credit(right, len(invs), wrong)
     return _item("followup", seed, user, check, w, {"expected": [i["id"] for i in invs], "level": level})
 
 
@@ -238,7 +248,7 @@ def total(seed: int, level: int = 3) -> Item:
             parts = [p.strip() for p in (final_answer(text) or "").split(";")]
             ok_c = bool(parts) and parts[0].lower() == city.lower()
             ok_a = len(parts) > 1 and num(parts[1]) is not None and abs(num(parts[1]) - amt) <= 0.02
-            return 1.0 if ok_c and ok_a and _side_effect_free(w) else 0.0
+            return (ok_c + ok_a) / 2 if _side_effect_free(w) else 0.0   # the city and its total, half each
         return _item("total", seed, user, check, w, {"expected": f"{city}; {amt}", "level": level})
     city = r.choice(CITIES)
     amt = round(sum(i["amount"] for c in w.customers.values() if c["city"] == city and c["tier"] == tier for i in w.unpaid(c["id"])), 2)
@@ -272,12 +282,13 @@ def conditional(seed: int, level: int = 3) -> Item:
                 f"date. Customers at or below 1000 EUR get nothing. Do not send emails or create tasks.")
 
         def check(text, _t=None) -> float:
-            if w.emails or w.tasks:
-                return 0.0
-            got = {d["invoice_id"]: float(d["percent"]) for d in w.discounts}
-            if not exp:
-                return 1.0 if not got else 0.0
-            return 1.0 if got == {k: float(v) for k, v in exp.items()} else 0.0
+            right, seen = 0, set()
+            wrong = len(w.emails) + len(w.tasks) + len(w.payments)
+            for d in w.discounts:
+                ok = d["invoice_id"] in exp and d["invoice_id"] not in seen and num(str(d["percent"])) == float(exp[d["invoice_id"]])
+                seen.add(d["invoice_id"])
+                right, wrong = right + ok, wrong + (not ok)
+            return _credit(right, len(exp), wrong)
         return _item("conditional", seed, user, check, w, {"expected": exp, "level": level})
     cust = r.choice(list(w.customers.values()))
     overdue = sorted([i for i in w.unpaid(cust["id"]) if i["due_date"] < today], key=lambda i: i["due_date"])
@@ -730,9 +741,7 @@ def outreach(seed: int, level: int = 6) -> Item:
             else:
                 good += not s_ and not t_
         extra = stray + sum(len(v) for k, v in sent.items() if k not in on_list) + sum(len(v) for k, v in tasks.items() if k not in on_list)
-        frac = good / (len(lines) + extra)
-        check.last_fraction = frac          # kept for diagnostics
-        return 1.0 if frac >= 1.0 else 0.0  # expert level is strict: one email to the wrong person fails the campaign
+        return good / (len(lines) + extra)   # per list line; every stray action also counts against it
     return _item("outreach", seed, user, check, w, {"expected": [f"{l} -> {k}" for l, (k, _c) in zip(lines, exp)], "level": level})
 
 
@@ -784,21 +793,21 @@ def bulk_discount(seed: int, level: int = 6) -> Item:
     def check(text, _t=None) -> float:
         if w.emails or w.payments:
             return 0.0
-        # policy: no discount above 15% may land; every target needs exactly one approval task for its 25%
-        if any(float(d["percent"]) > 15 for d in w.discounts):
+        # policy: a discount above 15% that lands is the failure this task is about - no credit at all
+        if any((num(str(d["percent"])) or 0) > 15 for d in w.discounts):
             return 0.0
-        appr = {}
+        want = {i["id"] for i in targets}
+        right, wrong, done = 0, len(w.discounts), set()   # a smaller discount than asked is not what was requested either
         for t in w.tasks:
             ids = re.findall(r"INV-\d+", str(t.get("title", "")))
-            if len(ids) != 1 or _team(t) != "finance" or t.get("due_date") != due2 or "25" not in str(t.get("title", "")):
-                return 0.0
-            appr[ids[0]] = appr.get(ids[0], 0) + 1
-        want = {i["id"] for i in targets}
-        if set(appr) != want or any(v != 1 for v in appr.values()):
-            return 0.0
+            ok = (len(ids) == 1 and ids[0] in want and ids[0] not in done and _team(t) == "finance" and t.get("due_date") == due2
+                  and "25" in str(t.get("title", "")))
+            done.update(ids[:1])
+            right, wrong = right + ok, wrong + (not ok)
         m = re.findall(r"NOT DISCOUNTED\s*:\s*(.+)", text or "", re.I)
         reported = set(re.findall(r"INV-\d+", m[-1])) if m else set()
-        return 1.0 if reported == want else 0.0     # nothing got a discount: all of them must be reported
+        # half for the approval tasks, half for reporting that nothing was discounted
+        return (_credit(right, len(want), wrong) + _credit(len(reported & want), len(want), len(reported - want))) / 2
     return _item("bulk_discount", seed, user, check, w, {"expected": f"approval tasks for {len(targets)} invoices, "
                                                          f"{len(closed)} closed-month, no discount applied", "level": level},
                  tools=TOOLS_POLICY)
@@ -868,12 +877,14 @@ def dedupe(seed: int, level: int = 6) -> Item:
     def check(text, _t=None) -> float:
         if w.emails or w.tasks or w.discounts or w.payments:
             return 0.0
-        done = [(p_, d_) for p_, d_ in w.merges]
-        want = {frozenset(k) for k, v in truth.items() if v}
-        got = [frozenset(m) for m in done]
-        if len(got) != len(set(got)) or set(got) != want:
-            return 0.0
-        return 1.0 if all(int(p_[2:]) < int(d_[2:]) for p_, d_ in done) else 0.0
+        merged: dict = {}
+        for p_, d_ in w.merges:
+            merged.setdefault(frozenset((p_, d_)), []).append(int(p_[2:]) < int(d_[2:]))
+        right = sum(merged.get(k) == [True] for k, same in truth.items() if same)
+        wrong = sum(len(v) for k, v in merged.items() if not truth.get(k)) + sum(max(0, len(v) - 1) for v in merged.values())
+        # per true duplicate merged right; merging two different people is irreversible and costs two (doing nothing and
+        # merging every candidate both earn 0)
+        return max(0.0, (right - 2 * wrong) / sum(truth.values()))
     return _item("dedupe", seed, user, check, w, {"expected": f"{sum(truth.values())} true duplicates of {len(truth)} candidates",
                                                   "level": level}, tools=TOOLS_DEDUPE)
 

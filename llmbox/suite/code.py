@@ -417,8 +417,9 @@ def make(kind: str):
                   f"code block containing the complete function" + (" (export it with module.exports)." if lang != "python" else "."))
 
         def check(text, _t=None, lang=lang, fn=fn, tests=tests) -> float:
-            frac = _run(lang, fn, _extract_code(text, lang), tests)
-            return 1.0 if frac >= 1.0 else 0.0   # strict: a function is correct only if every hidden test passes
+            # v0.10: the share of hidden tests passed (v0.5-0.9 strict all-or-nothing: 0/1 items made the block the
+            # noisiest per minute of the suite; levels, not strictness, now keep strong models off the ceiling)
+            return _run(lang, fn, _extract_code(text, lang), tests)
         return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind, [{"role": "user", "content": prompt}], check, lang=lang,
                     meta={"fn": fn, "lang": lang, "tests": len(tests), "level": level})
     return gen
@@ -487,7 +488,7 @@ _CRON_CASES = [
 
 
 def cron(seed: int, level: int = 6) -> Item:
-    """Expert: next run times of a 5-field cron schedule in an IANA time zone, across DST changes. Strict (every case)."""
+    """Expert: next run times of a 5-field cron schedule in an IANA time zone, across DST changes. Credit per case."""
     r = rng(BLOCK, f"cron{level}", seed)
     cases = r.sample(_CRON_CASES, 10)
     tests = [[[e, tz, st, 5], _ref_cron(e, tz, st, 5)] for e, tz, st in cases]
@@ -504,8 +505,7 @@ def cron(seed: int, level: int = 6) -> Item:
               "Use only the standard library. Reply with a single ```python``` code block containing the complete function.")
 
     def check(text, _t=None, tests=tests) -> float:
-        frac = _run("python", "next_runs", _extract_code(text, "python"), tests, timeout=120)
-        return 1.0 if frac >= 1.0 else 0.0
+        return _run("python", "next_runs", _extract_code(text, "python"), tests, timeout=120)   # share of the 10 cases
     return Item(f"{BLOCK}.cron.L{level}.{seed}", BLOCK, "cron", [{"role": "user", "content": prompt}], check, lang="python",
                 meta={"fn": "next_runs", "lang": "python", "tests": len(tests), "level": level,
                       "expected": [t[1][0] for t in tests]})

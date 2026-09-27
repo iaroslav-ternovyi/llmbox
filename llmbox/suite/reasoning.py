@@ -10,10 +10,17 @@ import io
 import itertools
 import re
 
-from .common import Item, final_answer, num, rng
+from .common import Item, final_answer, multi_check, num, rng
 
 BLOCK = "reasoning"
 INSTR = "\n\nThink it through, then finish with a final line exactly in the form:\nANSWER: <answer>"
+# v0.10: the kinds in the quick tier ask for several results of the same problem (intermediate and final), credit per
+# result - one 0/1 answer per item made reasoning the noisiest block per minute.
+
+
+def _instr(n: int) -> str:
+    return ("\n\nThink it through, then finish with one final line per question, exactly in the form:\n"
+            + "\n".join(f"ANSWER {i + 1}: <answer>" for i in range(n)))
 
 
 def _num_check(expected: float, tol: float = 0.01):
@@ -74,19 +81,23 @@ def arith(seed: int, level: int = 3) -> Item:
                 amt *= (1 - rule[2] / 100)
         line[n] = amt
     goods = sum(line.values())
+    lines_total = goods
     if coupon:
         goods -= coupon
     taxed = sum(v for n, v in line.items() if n != exempt) - (coupon or 0)
     total = taxed * (1 + tax / 100) + (line[exempt] if exempt else 0) + (0 if goods >= ship_thr else ship_fee)
-    expected = round(total, 2)
+    tax_amt = taxed * tax / 100
+    expected = [round(lines_total, 2), round(tax_amt, 2), round(total, 2)]
     lst = "\n".join(f"- {qty[n]} {n} at ${price[n]:.2f} each" for n in items)
     prompt = (f"An office orders:\n{lst}\nRules, applied per product line in this order: " + "; ".join(texts) + ". "
               + (f"After that, a ${coupon} coupon is subtracted from the order (it reduces the taxable amount). " if coupon else "")
               + f"Sales tax is {tax}%" + (f", but {exempt} are tax-exempt" if exempt else "") + ". "
               f"Shipping costs ${ship_fee} unless the goods total (after discounts{' and coupon' if coupon else ''}, before tax) is at least ${ship_thr}; "
-              f"shipping is not taxed. What is the final amount to pay, rounded to cents?" + INSTR)
-    return Item(f"{BLOCK}.arith.L{level}.{seed}", BLOCK, "arith", [{"role": "user", "content": prompt}], _num_check(expected, 0.011),
-                meta={"expected": expected, "level": level})
+              f"shipping is not taxed.\n1. What is the total of the product lines after their discounts (before "
+              + ("the coupon, " if coupon else "") + "tax and shipping)?\n2. How much sales tax is charged?\n"
+              "3. What is the final amount to pay?\nRound each to cents." + _instr(3))
+    return Item(f"{BLOCK}.arith.L{level}.{seed}", BLOCK, "arith", [{"role": "user", "content": prompt}],
+                multi_check([_num_check(e, 0.011) for e in expected]), meta={"expected": expected, "level": level})
 
 
 def dates(seed: int, level: int = 3) -> Item:
@@ -191,20 +202,23 @@ def logic(seed: int, level: int = 3) -> Item:
             sols = new
     if len(sols) != 1:
         return logic(seed + 10_000, level)
-    if positional:
-        target = r.choice(people)
-        answer = str(truth[target][2] + 1)
-        q = f"In which house number does the person who drinks {truth[target][0]} live?"
-    else:
-        td = r.choice(drinks)
-        answer = next(p for p, v in truth.items() if v[0] == td)
-        q = f"Who drinks {td}? Answer with the name only."
+    qs, answers, checks = [], [], []
+    for td in r.sample(drinks, 3):
+        if positional:
+            ans = str(next(v[2] for v in truth.values() if v[0] == td) + 1)
+            qs.append(f"In which house number does the person who drinks {td} live?")
+            checks.append(_num_check(int(ans), 0))   # "House 2" / "2" are the same answer
+        else:
+            ans = next(p for p, v in truth.items() if v[0] == td)
+            qs.append(f"Who drinks {td}? Answer with the name only.")
+            checks.append(_str_check(ans))
+        answers.append(ans)
     intro = (f"{n} friends ({', '.join(people)}) each drink a different beverage ({', '.join(drinks)}) and live in a different "
              f"city ({', '.join(cities)})" + (f"; they also live in {n} houses in a row, one per house." if positional else "."))
-    prompt = intro + " Clues:\n" + "\n".join(f"{i+1}. {c}" for i, c in enumerate(chosen)) + f"\n{q}" + INSTR
-    chk = _num_check(int(answer), 0) if positional else _str_check(answer)   # "House 2" / "2" are the same answer
-    return Item(f"{BLOCK}.logic.L{level}.{seed}", BLOCK, "logic", [{"role": "user", "content": prompt}], chk,
-                meta={"expected": answer, "clues": len(chosen), "level": level})
+    prompt = (intro + " Clues:\n" + "\n".join(f"{i+1}. {c}" for i, c in enumerate(chosen)) + "\nQuestions:\n"
+              + "\n".join(f"{i + 1}. {q}" for i, q in enumerate(qs)) + _instr(len(qs)))
+    return Item(f"{BLOCK}.logic.L{level}.{seed}", BLOCK, "logic", [{"role": "user", "content": prompt}], multi_check(checks),
+                meta={"expected": answers, "clues": len(chosen), "level": level})
 
 
 def code_trace(seed: int, level: int = 3) -> Item:
@@ -221,23 +235,28 @@ def code_trace(seed: int, level: int = 3) -> Item:
             f"            acc -= x // 2" + ("" if level < 2 else "\n            stack.append(x)"),
             f"        else:",
             f"            acc += 1" + ("" if level < 3 else "\n            if stack:\n                acc += stack.pop() % 7"),
+            f"    print(acc)",
+            f"    print(sum(seen.values()))",
             ]
     if level >= 4:
         body += [f"    for key in sorted(seen, reverse=True)[:{r.randint(2, 3)}]:",
-                 f"        acc ^= key * (seen[key] + 1)"]
+                 f"        acc ^= key * (seen[key] + 1)",
+                 f"    print(acc)"]
     if level >= 5:
         body += ["    def g(n, depth=0):",
                  "        return n if n < 10 or depth > 5 else g(sum(int(c) for c in str(n)) + depth, depth + 1)",
                  "    acc = acc * 3 + g(abs(acc))"]
-    body += ["    return acc", "", f"print(f({data}))"]
+    # below level 5 the return value equals the last printed line: not printed again
+    body += ["    return acc", "", f"print(f({data}))" if level >= 5 else f"f({data})"]
     src = "\n".join(body) + "\n"
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         exec(src, {})  # our own generated code, not model output
-    expected = int(buf.getvalue().strip())
-    prompt = f"What does this Python program print? Trace it carefully.\n\n```python\n{src}```" + INSTR
+    expected = [int(x) for x in buf.getvalue().split()]
+    prompt = (f"What does this Python program print? It prints {len(expected)} lines; trace it carefully and give every line."
+              f"\n\n```python\n{src}```" + _instr(len(expected)).replace("per question", "per printed line, in order"))
     return Item(f"{BLOCK}.code_trace.L{level}.{seed}", BLOCK, "code_trace", [{"role": "user", "content": prompt}],
-                _num_check(expected, 0.0), meta={"expected": expected, "level": level})
+                multi_check([_num_check(e, 0.0) for e in expected]), meta={"expected": expected, "level": level})
 
 
 def table(seed: int, level: int = 3) -> Item:
@@ -295,40 +314,44 @@ def schedule(seed: int, level: int = 3) -> Item:
     clash = tuple(r.sample([t for t in names if not pre[t]] + names[-3:], 2)) if level >= 5 else None
     if clash and (clash[0] in pre[clash[1]] or clash[1] in pre[clash[0]] or clash[0] == clash[1]):
         return schedule(seed + 10_000, level)
-    best = [sum(dur.values()) + 1]
+    def makespan(w: int) -> int:
+        best = [sum(dur.values()) + 1]
 
-    def dfs(done: dict, free: list):
-        span = max(list(done.values()) + [0])
-        if span >= best[0]:
-            return
-        if len(done) == n:
-            best[0] = span
-            return
-        for t in names:
-            if t in done or any(p not in done for p in pre[t]):
-                continue
-            ready = max([done[p] for p in pre[t]] + [0])
-            if clash and t in clash:
-                other = clash[1] if t == clash[0] else clash[0]
-                if other in done:
-                    ready = max(ready, done[other])
-            k = min(range(w), key=lambda i: free[i])
-            start = max(ready, free[k])
-            nf = list(free)
-            nf[k] = start + dur[t]
-            done[t] = start + dur[t]
-            dfs(done, sorted(nf))
-            del done[t]
-    dfs({}, [0] * w)
-    answer = best[0]
+        def dfs(done: dict, free: list):
+            span = max(list(done.values()) + [0])
+            if span >= best[0]:
+                return
+            if len(done) == n:
+                best[0] = span
+                return
+            for t in names:
+                if t in done or any(p not in done for p in pre[t]):
+                    continue
+                ready = max([done[p] for p in pre[t]] + [0])
+                if clash and t in clash:
+                    other = clash[1] if t == clash[0] else clash[0]
+                    if other in done:
+                        ready = max(ready, done[other])
+                k = min(range(w), key=lambda i: free[i])
+                start = max(ready, free[k])
+                nf = list(free)
+                nf[k] = start + dur[t]
+                done[t] = start + dur[t]
+                dfs(done, sorted(nf))
+                del done[t]
+        dfs({}, [0] * w)
+        return best[0]
+    # the critical path (as many people as tasks) first, then the team's minimum: partial credit for the first
+    expected = [makespan(n), makespan(w)]
     lines = [f"- {t}: {dur[t]} day{'s' if dur[t] > 1 else ''}" + (f", after {' and '.join(pre[t])}" if pre[t] else "") for t in r.sample(names, n)]
     prompt = (f"A team of {w} people must complete these tasks:\n" + "\n".join(lines) + "\n\nEach task is done by one person from "
               "start to finish, takes the given number of full days and cannot be split or shared. A task can start only when "
               "all tasks it comes after are finished. A person works on one task at a time."
               + (f" The {clash[0]} and {clash[1]} tasks need the same test lab, so they cannot be worked on at the same time." if clash else "")
-              + " What is the minimum number of days needed to finish all tasks?" + INSTR)
-    return Item(f"{BLOCK}.schedule.L{level}.{seed}", BLOCK, "schedule", [{"role": "user", "content": prompt}], _num_check(answer, 0),
-                meta={"expected": answer, "level": level})
+              + "\n1. With enough people to staff every task at once, what is the minimum number of days needed to finish all tasks?"
+              f"\n2. With the team of {w}, what is the minimum number of days?" + _instr(2))
+    return Item(f"{BLOCK}.schedule.L{level}.{seed}", BLOCK, "schedule", [{"role": "user", "content": prompt}],
+                multi_check([_num_check(e, 0) for e in expected]), meta={"expected": expected, "level": level})
 
 
 def budget(seed: int, level: int = 3) -> Item:

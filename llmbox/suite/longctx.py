@@ -8,7 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from .common import Item, final_answer, num, rng
+from .common import Item, final_answer, multi_check, num, rng
 
 BLOCK = "longctx"
 SERVICES = ["billing", "search", "checkout", "auth", "notifications", "inventory", "payments", "reporting"]
@@ -20,6 +20,9 @@ FIRST = ["Ana", "Bruno", "Chiara", "Daniel", "Eva", "Fatima", "Gustavo", "Hana",
 LAST = ["Alvarez", "Bauer", "Costa", "Dimitrov", "Eriksen", "Farah", "Gomez", "Hoffmann", "Ito", "Jovanovic", "Klein",
         "Lopes", "Moreau", "Nowak", "Okafor", "Petrov"]
 INSTR = "\n\nAnswer from the document only. Finish with a final line exactly in the form:\nANSWER: <answer>"
+# v0.10: several questions of one kind per item, credit per question (one 0/1 question per item made this block the
+# noisiest per minute; the document is prefilled once either way)
+QUESTIONS = 3
 # level 5 stays ~200k real tokens so a 262k-context model keeps ~60k for reasoning (190k here measured 231k with a Qwen tokenizer)
 TOKENS = {1: 24_000, 2: 48_000, 3: 80_000, 4: 130_000, 5: 165_000}
 
@@ -86,12 +89,21 @@ def _item(kind: str, seed: int, level: int, build) -> Item:
     wr = rng(BLOCK, f"doc{level}", seed)
     staff, mgr_info, incidents = _world(wr, TOKENS[level], corrections=0 if level < 3 else 1 if level == 3 else 2)
     doc = _render(staff, mgr_info, incidents)
-    r = rng(BLOCK, f"{kind}{level}", seed)
-    question, check, expected = build(r, staff, mgr_info, incidents, level)
+    qs = []
+    for j in range(40):   # distinct questions; the first is the one the single-question item (v0.9) asked
+        q = build(rng(BLOCK, f"{kind}{level}" + (f"q{j}" if j else ""), seed), staff, mgr_info, incidents, level)
+        if all(q[0] != x[0] for x in qs):
+            qs.append(q)
+        if len(qs) == QUESTIONS:
+            break
     note = "\nLater updates in the log override earlier facts." if level >= 3 else ""
+    ask = "Answer each of these questions:\n" + "\n".join(f"{i + 1}. {q[0]}" for i, q in enumerate(qs))
+    fin = ("\n\nAnswer from the document only. Finish with one final line per question, exactly in the form:\n"
+           + "\n".join(f"ANSWER {i + 1}: <answer>" for i in range(len(qs))))
     return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind,
-                [{"role": "user", "content": doc + "\n\n---\n" + question + note + INSTR}], check, max_tokens=32000,
-                meta={"expected": expected, "doc_tokens_est": len(doc) // 4, "level": level})
+                [{"role": "user", "content": doc + "\n\n---\n" + ask + note + fin}], multi_check([q[1] for q in qs]),
+                max_tokens=32000, meta={"expected": [q[2] for q in qs], "doc_tokens_est": len(doc) // 4, "level": level,
+                                        "questions": len(qs)})
 
 
 _FILLER = {"the", "office", "based", "in", "director", "incident", "code", "root-cause", "root", "cause", "is", "mr", "ms"}
@@ -188,7 +200,7 @@ def total(seed: int, level: int = 3) -> Item:
 def audit(seed: int, level: int = 6) -> Item:
     """Expert: fact-check a draft monthly report (40 lines) against the incident log - the log is the source of truth and
     later updates override earlier facts. Errors are subtle: a pre-correction severity or root-cause code, two swapped
-    digits in the user count, a duration off by an hour, a wrong service. Strict: the exact set of wrong lines."""
+    digits in the user count, a duration off by an hour, a wrong service. Credit per error found, minus false alarms."""
     r = rng(BLOCK, f"audit{level}", seed)
     staff, mgr_info, incidents = _world(r, TOKENS[4], corrections=2)
     doc = _render(staff, mgr_info, incidents)
@@ -237,8 +249,8 @@ def audit(seed: int, level: int = 6) -> Item:
     fin = "\n\nAnswer from the documents only. Finish with a final line exactly in the form:\nANSWER: <comma-separated incident ids, or none>"
 
     def check(t, _t=None, exp=tuple(exp)) -> float:
-        got = re.findall(r"INC-\d+", final_answer(t) or "")
-        return 1.0 if set(got) == set(exp) and len(got) == len(set(got)) else 0.0
+        got = set(re.findall(r"INC-\d+", final_answer(t) or ""))
+        return max(0.0, (len(got & set(exp)) - len(got - set(exp))) / len(exp))   # per error found; a false alarm cancels one
     return Item(f"{BLOCK}.audit.L{level}.{seed}", BLOCK, "audit",
                 [{"role": "user", "content": doc + "\n\n---\n" + report + "\n\n---\n" + question + fin}], check, max_tokens=32000,
                 meta={"expected": ", ".join(exp), "doc_tokens_est": (len(doc) + len(report)) // 4, "level": level, "wrong": len(exp)})

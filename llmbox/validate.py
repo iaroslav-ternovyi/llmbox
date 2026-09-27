@@ -43,6 +43,8 @@ def _call(w, name: str, a: dict):
 
 def _answer_oracle(it: Item) -> str:
     exp = it.meta.get("expected")
+    if isinstance(exp, list):   # multi-question items (v0.10): one numbered line per question
+        return "\n".join(f"ANSWER {i + 1}: {e}" for i, e in enumerate(exp))
     return f"ANSWER: {exp}"
 
 
@@ -195,11 +197,13 @@ def oracle(it: Item) -> str | None:
 
 
 def _variants(text: str) -> list[str]:
-    m = re.search(r"ANSWER:\s*(.+)$", text)
-    if not m:
+    """The oracle's answer lines in other common shapes; every 'ANSWER[ n]: x' line is reshaped the same way."""
+    if not re.search(r"(?m)^ANSWER(?: \d+)?:\s*.+$", text):
         return []
-    x = m.group(1)
-    return [f"Some reasoning.\nANSWER: **{x}**", f"ANSWER: {x}.", f"Answer: {x}", f"ANSWER: `{x}`"]
+    shapes = [lambda t, x: f"{t}: **{x}**", lambda t, x: f"{t}: {x}.", lambda t, x: f"{t.title()}: {x}", lambda t, x: f"{t}: `{x}`"]
+    out = [re.sub(r"(?m)^(ANSWER(?: \d+)?):\s*(.+)$", lambda m, f=f: f(m.group(1), m.group(2)), text) for f in shapes]
+    out[0] = "Some reasoning.\n" + out[0]
+    return out
 
 
 # ---- the run -------------------------------------------------------------------------------------------------------

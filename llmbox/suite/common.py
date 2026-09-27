@@ -39,6 +39,30 @@ def final_answer(text: str) -> str | None:
     return m[-1].strip().strip("`*").strip() if m else None
 
 
+_NUMBERED = re.compile(r"ANSWER\s*#?\s*(\d+)\s*[:：.)]\s*(.+?)\s*$", re.I | re.M)
+
+
+def numbered_answers(text: str, n: int) -> list[str | None]:
+    """Answers of a multi-question item: 'ANSWER 1: ...' lines (the last one per number wins); a model that wrote n
+    plain 'ANSWER:' lines instead gets them in order."""
+    got: dict[int, str] = {}
+    for k, v in _NUMBERED.findall(text or ""):
+        got[int(k)] = v.strip().strip("`*").strip()
+    if not got:
+        plain = [m.strip().strip("`*").strip() for m in _ANSWER.findall(text or "")]
+        if len(plain) >= n:
+            return plain[-n:]
+    return [got.get(i + 1) for i in range(n)]
+
+
+def multi_check(checks: list, n_answers: int | None = None):
+    """Score = the share of sub-questions answered right; each sub-check sees its own answer as 'ANSWER: <value>'."""
+    def check(text: str, _t=None) -> float:
+        ans = numbered_answers(strip_think(text), len(checks))
+        return sum(c(f"ANSWER: {a}") for c, a in zip(checks, ans) if a is not None) / len(checks)
+    return check
+
+
 def num(s: str | None) -> float | None:
     if s is None:
         return None
