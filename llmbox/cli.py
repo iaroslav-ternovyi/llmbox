@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -343,8 +344,11 @@ def cmd_queue(a: argparse.Namespace) -> None:
         q.run(until_empty=a.until_empty)
     elif a.action == "cancel":
         for i in a.ids:
+            running = any(r["id"] == int(i) and r["status"] == "running" for r in q.jobs())
             q.set_status(int(i), "cancelled")
-            print(f"job {i} cancelled (a running job keeps running; stop it with: pkill -f 'job-{i}.jsonl')")
+            if running:   # the worker sees the cancelled status when the run exits and does not retry it
+                subprocess.run(["pkill", "-TERM", "-f", f"job-{int(i)}.jsonl"])
+            print(f"job {i} cancelled" + (" and stopped" if running else ""))
     elif a.action == "retry":
         for i in a.ids:
             q.set_status(int(i), "queued", attempts=0)

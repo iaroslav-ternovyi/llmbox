@@ -203,7 +203,11 @@ def _run_job(job: sqlite3.Row) -> None:
     rc = p.wait()
     text = open(log).read()
     saved = re.findall(r"saved (\S+\.json)", text)
-    if lost.is_set():
+    with _db() as c:
+        cancelled = (c.execute("SELECT status FROM jobs WHERE id=?", (jid,)).fetchone() or {"status": ""})["status"] == "cancelled"
+    if cancelled and not (rc == 0 and saved):   # `queue cancel` + kill: a stopped job must not come back as a retry
+        event(f"job {jid} {job['model']} stopped (cancelled)")
+    elif lost.is_set():
         set_status(jid, "interrupted", note="GPU lost; resumes when the GPU is back")
     elif rc == 0 and saved:
         summary = next((l.strip() for l in reversed(text.splitlines()) if "capability" in l), "")
