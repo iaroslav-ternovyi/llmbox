@@ -20,8 +20,11 @@ TYPICAL_STEP = {"new_prompt_tokens": 3000, "output_tokens": 600}   # one agent t
 # blocks whose grade depends only on the final answer text: a saved run can be re-graded after a grader fix
 TEXT_GRADED = {"longctx", "writing", "reasoning", "code", "techhelp", "knowledge"}
 
-# wall-clock limit per item (seconds): a model that needs longer is graded on what it reached (v0.7; v0.6 had none)
-DEADLINE_S = {"agentic": 2700}
+# wall-clock per item (v0.7; v0.6 had none): after it no new request starts and the item is graded on the state
+# reached. dev7: agentic 15 min
+# (was 45): a quick run is 30-40 min, and one 36-min bug hunt made a run take 82 (a time budget, not a token cap -
+# reasoning loops are caught by content)
+DEADLINE_S = {"agentic": 900}
 
 # full thinking of every step, one gzip file per item (~/.llmbox/traces/<run>/<item>.json.gz): for loop / budget audits
 TRACES = os.path.join(os.path.expanduser("~"), ".llmbox", "traces")

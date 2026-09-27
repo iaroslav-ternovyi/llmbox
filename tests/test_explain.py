@@ -104,8 +104,10 @@ asked = []
 
 
 def perfect(prompt):
+    """Answers the questions this prompt asks (the reader gets the quiz in batches)."""
     asked.append(prompt)
-    return "ANSWERS\n" + "\n".join(f"{i}. {e or 'empty'}" for i, e in enumerate(it.meta["expected"], 1))
+    here = [q for q in it.meta["quiz"] if q[0] in prompt]
+    return "ANSWERS\n" + "\n".join(f"{i}. {q[1] or 'empty'}" for i, q in enumerate(here, 1))
 
 
 real_ask = reader.ask

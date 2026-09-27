@@ -98,7 +98,7 @@ def _gen(kind: str):
             got = answers(text, len(qs))
             return sum(credit(q, got.get(i)) for i, q in enumerate(qs, 1)) / len(qs)
         return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind, [{"role": "user", "content": prompt}], check,
-                    max_tokens=16000, meta={"level": level, "questions": qs, "expected": [oracle_answer(q) for q in qs]})
+                    max_tokens=32000, meta={"level": level, "questions": qs, "expected": [oracle_answer(q) for q in qs]})
     return gen
 
 

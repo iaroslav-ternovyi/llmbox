@@ -50,13 +50,15 @@ def _answers(text: str, n: int) -> dict[int, str]:
 # dev6: 8 questions per explanation (4-5 before): the model writes the same explanation; only the reader answers more,
 # and each question checks one more case the explanation had to cover.
 QUIZ = 8
+READER_BATCH = 4
 
 
 def reader_prompt(topic: str, explanation: str, setup: str, questions: list[str], fmt: str) -> str:
     body = "\n\n".join(f"{i}. {q}" for i, q in enumerate(questions, 1))
     return (f"A colleague wrote you this explanation of {topic}. You have never seen it before and have nothing else to go on.\n\n"
             f"--- explanation ---\n{explanation.strip() or '(empty)'}\n--- end of explanation ---\n\n"
-            f"Use the explanation to answer the questions below. {fmt}\n\n" + (f"{setup}\n\n" if setup else "") + body +
+            f"Use the explanation to answer the questions below. {fmt} If the explanation does not give what a question needs, "
+            "answer UNKNOWN for it - do not guess or reconstruct missing facts.\n\n" + (f"{setup}\n\n" if setup else "") + body +
             "\n\nWork through each case briefly, then finish with exactly:\nANSWERS\n" + "\n".join(f"{i}. <answer>" for i in range(1, len(questions) + 1)))
 
 
@@ -70,9 +72,13 @@ def _item(kind: str, level: int, seed: int, doc: str, goal: str, thing: str, top
     def check(text: str, _t=None) -> float:
         from .. import reader
         expl = cut(strip_think(text), n)
-        got = _answers(reader.ask(reader_prompt(topic, expl, setup, [x[0] for x in quiz], fmt)), len(quiz))
+        got = {}
+        for k in range(0, len(quiz), READER_BATCH):   # the reader answers 4 questions per call (8 tangled access cases
+            part = quiz[k:k + READER_BATCH]             # in one call ran past its 16k-token reply)
+            ans = _answers(reader.ask(reader_prompt(topic, expl, setup, [x[0] for x in part], fmt)), len(part))
+            got.update({k + i: v for i, v in ans.items()})
         return sum(match(q[1], got.get(i), q[2], q[3] if len(q) > 3 else None) for i, q in enumerate(quiz, 1)) / len(quiz)
-    return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind, [{"role": "user", "content": prompt}], check, max_tokens=16000,
+    return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind, [{"role": "user", "content": prompt}], check, max_tokens=32000,
                 meta={"level": level, "deferred": "reader", "limit": n, "topic": topic, "setup": setup, "fmt": fmt,
                       "quiz": [list(x) for x in quiz], "expected": [x[1] for x in quiz], "oracle": oracle,
                       "doc_words": len(words(doc))})
@@ -508,6 +514,12 @@ MONTHS = ["January", "February", "March", "April", "May", "June", "July", "Augus
 
 
 def bill(ru: dict, plan: str, month: str, requests: int, errors: int, annual: bool, nonprofit: bool) -> float:
+    return bill_parts(ru, plan, month, requests, errors, annual, nonprofit)["total"]
+
+
+def bill_parts(ru: dict, plan: str, month: str, requests: int, errors: int, annual: bool, nonprofit: bool) -> dict:
+    """blocks: billed blocks of 1,000 extra requests; extra: their charge before any discount; fee: the plan fee charged
+    (annual discount applied; the non-profit discount is on the whole bill); total: the bill."""
     p = ru["plans"][plan]
     inc = p["inc"]
     if ru["change"] and plan == ru["change"]["plan"] and MONTHS.index(month) >= MONTHS.index(ru["change"]["month"]):
@@ -523,12 +535,11 @@ def bill(ru: dict, plan: str, month: str, requests: int, errors: int, annual: bo
     else:
         over = units * p["rate"]
     fee = p["fee"]
-    opts = [fee + over]
-    if annual and ru["annual"]:
-        opts = [fee * (1 - ru["annual"] / 100) + over]
+    fee_charged = fee * (1 - ru["annual"] / 100) if annual and ru["annual"] else fee
+    opts = [fee_charged + over]
     if nonprofit and ru["nonprofit"]:
         opts.append((fee + over) * (1 - ru["nonprofit"] / 100))   # never both: the larger saving applies
-    return round(min(opts) + 1e-9, 2)
+    return {"blocks": units, "extra": round(over + 1e-9, 2), "fee": round(fee_charged + 1e-9, 2), "total": round(min(opts) + 1e-9, 2)}
 
 
 def _eur(x: float) -> str:
@@ -597,21 +608,28 @@ def billing(seed: int, level: int = 3) -> Item:
     svc = r.choice(SERVICES)
     ru = _bill_rules(r, level)
     quiz = []
-    for _ in range(QUIZ):
+    # dev6: the parts of a bill in turn (blocks, extra charge, plan fee, total): a bill needs every rule, so eight
+    # totals made one missing number (a plan fee) cost all eight answers; each part checks its own rules
+    for k in range(QUIZ):
+        part = ["blocks", "extra", "fee", "total"][k % 4]
         plan = r.choice(list(ru["plans"]))
         month = r.choice(MONTHS[1:8])
         inc = ru["plans"][plan]["inc"]
         req = r.randrange(int(inc * 0.9), int(inc * 3.5), 250) + r.choice([0, 17, 480, 999])
         err = r.randrange(0, max(1, req // 25), 10) if ru["errors_free"] else 0
         annual = bool(ru["annual"]) and r.random() < 0.5
-        npf = bool(ru["nonprofit"]) and r.random() < 0.5
-        total = bill(ru, plan, month, req, err, annual, npf)
+        npf = bool(ru["nonprofit"]) and r.random() < 0.5 and part == "total"
+        parts = bill_parts(ru, plan, month, req, err, annual, npf)
         who = ("a registered non-profit " if npf else "a customer ") + f"on the {plan} plan, " + ("billed yearly" if annual else "billed monthly")
+        ask = {"blocks": "How many blocks of 1,000 extra requests are billed that month?",
+               "extra": "What do that month's extra requests cost in euros, before any discount?",
+               "fee": "What plan fee is charged for that month, in euros?",
+               "total": "What is that month's bill in euros?"}[part]
         q = (f"{who[0].upper()}{who[1:]}, made {req:,} requests in {month} 2026" + (f", {err:,} of which failed with HTTP 5xx errors" if err else "")
-             + ". What is that month's bill in euros?")
-        quiz.append((q, f"{total:.2f}", "num"))
+             + f". {ask}")
+        quiz.append((q, str(parts[part]) if part == "blocks" else f"{parts[part]:.2f}", "num"))
     return _item("billing", level, seed, _bill_doc(r, ru, svc, level), f"work out what a month of {svc} costs a customer",
-                 svc, f"how {svc} bills its customers each month", "", quiz, "Give each bill in euros with cents.", _bill_oracle(ru))
+                 svc, f"how {svc} bills its customers each month", "", quiz, "Give amounts in euros with cents and block counts as whole numbers.", _bill_oracle(ru))
 
 
 # ---- 3. access: who may do what in a shared workspace ----------------------------------------------------------------

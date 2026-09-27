@@ -168,7 +168,7 @@ def compose_port(seed: int, level: int = 3) -> Item:
               + _ask(qs) + "\nIf a service is not reachable from the host at a fixed port, answer NONE for it; if there are several "
               "ports, list them all." + _instr(3))
     return Item(f"{BLOCK}.compose_port.L{level}.{seed}", BLOCK, "compose_port", [{"role": "user", "content": prompt}],
-                multi_check([_set_check(published[t]) for t in targets]), max_tokens=16000,
+                multi_check([_set_check(published[t]) for t in targets]), max_tokens=32000,
                 meta={"expected": [", ".join(sorted(published[t])) or "NONE" for t in targets], "modes": modes, "level": level})
 
 
@@ -229,7 +229,7 @@ def nginx_route(seed: int, level: int = 3) -> Item:
               "A client sends these requests for Host example.lan. Which upstream handles each? Answer with the upstream name "
               "(the part after http://).\n" + _ask([f"GET {u}" for u in picked]) + _instr(4))
     return Item(f"{BLOCK}.nginx_route.L{level}.{seed}", BLOCK, "nginx_route", [{"role": "user", "content": prompt}],
-                multi_check([_word_check(e) for e in expected]), max_tokens=16000,
+                multi_check([_word_check(e) for e in expected]), max_tokens=32000,
                 meta={"expected": expected, "uris": picked, "level": level})
 
 
@@ -301,7 +301,7 @@ def subnet(seed: int, level: int = 3) -> Item:
         prompt = (f"A Linux router has this routing table:\n\n```\n{table}\n```\n\nThe kernel picks the most specific route; "
                   "among equally specific ones, the lowest metric.\n" + _ask(qs) + _instr(len(qs)))
     return Item(f"{BLOCK}.subnet.L{level}.{seed}", BLOCK, "subnet", [{"role": "user", "content": prompt}], multi_check(checks),
-                max_tokens=16000, meta={"expected": exp, "level": level})
+                max_tokens=32000, meta={"expected": exp, "level": level})
 
 
 # ---- file permissions: what a chain of chmod leaves ------------------------------------------------------------------
@@ -396,7 +396,7 @@ def chmod_seq(seed: int, level: int = 3) -> Item:
               + "\n\n".join(blocks) + "\n\nWhat is each one's mode afterwards, as four octal digits (e.g. 0755)?\n"
               + _ask([f"{w[0].upper() + w[1:]}" for w, _d in paths]) + _instr(3))
     return Item(f"{BLOCK}.chmod_seq.L{level}.{seed}", BLOCK, "chmod_seq", [{"role": "user", "content": prompt}],
-                multi_check([_octal_check(m) for m in exp]), max_tokens=16000,
+                multi_check([_octal_check(m) for m in exp]), max_tokens=32000,
                 meta={"expected": [f"{m:04o}" for m in exp], "files": files, "level": level})
 
 
@@ -466,7 +466,7 @@ def log_root(seed: int, level: int = 3) -> Item:
     prompt = (f"My stack stopped working. Here are the logs:\n\n{logs}\n\nAnswer each with the service name only.\n" + _ask(qs)
               + _instr(3))
     return Item(f"{BLOCK}.log_root.L{level}.{seed}", BLOCK, "log_root", [{"role": "user", "content": prompt}],
-                multi_check([_word_check(e) for e in exp]), max_tokens=16000, meta={"expected": exp, "cause": cause, "level": level})
+                multi_check([_word_check(e) for e in exp]), max_tokens=32000, meta={"expected": exp, "cause": cause, "level": level})
 
 
 # ---- level 6: expert traps (headroom above strong local models; frontier models should miss some) -------------------
@@ -522,7 +522,7 @@ def compose_expert(seed: int, level: int = 6) -> Item:
               + "\nIf it is not reachable from the host at a fixed port, or not running at all, answer NONE; if there are several "
               "ports, list them all." + _instr(3))
     return Item(f"{BLOCK}.compose_port.L{level}.{seed}", BLOCK, "compose_port", [{"role": "user", "content": prompt}],
-                multi_check([_set_check(w) for w in want]), max_tokens=16000,
+                multi_check([_set_check(w) for w in want]), max_tokens=32000,
                 meta={"expected": [", ".join(sorted(w)) or "NONE" for w in want], "level": level, "mode": mode,
                       "profile": profile, "commands": cmds})
 
@@ -582,7 +582,7 @@ def nginx_expert(seed: int, level: int = 6) -> Item:
               "A client sends these requests for Host example.lan. Which upstream finally handles each? Answer with the upstream "
               "name (the part after http://), or 404 if none does.\n" + _ask([f"GET {u}" for u in picked]) + _instr(4))
     return Item(f"{BLOCK}.nginx_route.L{level}.{seed}", BLOCK, "nginx_route", [{"role": "user", "content": prompt}],
-                multi_check([_word_check(e) for e in expected]), max_tokens=16000,
+                multi_check([_word_check(e) for e in expected]), max_tokens=32000,
                 meta={"expected": expected, "uris": picked, "level": level})
 
 
@@ -636,7 +636,7 @@ def routing_expert(seed: int, level: int = 6) -> Item:
               "Through which interface does the router send each of these packets?\n"
               + _ask([f"A packet from {s_} for {d_}" for s_, d_ in packets]) + _instr(4))
     return Item(f"{BLOCK}.subnet.L{level}.{seed}", BLOCK, "subnet", [{"role": "user", "content": prompt}],
-                multi_check([_word_check(e) for e in expected]), max_tokens=16000,
+                multi_check([_word_check(e) for e in expected]), max_tokens=32000,
                 meta={"expected": expected, "packets": [f"{a} -> {b}" for a, b in packets], "level": level})
 
 
@@ -664,7 +664,7 @@ def chmod_expert(seed: int, level: int = 6) -> Item:
               "on its own file:\n\n" + "\n\n".join(blocks) + "\n\nWhat is each file's mode afterwards, as four octal digits "
               "(e.g. 0755)?\n" + _ask([f"`{p}`" for p in names]) + _instr(3))
     return Item(f"{BLOCK}.chmod_seq.L{level}.{seed}", BLOCK, "chmod_seq", [{"role": "user", "content": prompt}],
-                multi_check([_octal_check(m) for m in exp]), max_tokens=16000,
+                multi_check([_octal_check(m) for m in exp]), max_tokens=32000,
                 meta={"expected": [f"{m:04o}" for m in exp], "files": files, "umask": f"{um:04o}", "level": level})
 
 

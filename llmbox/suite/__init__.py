@@ -15,7 +15,7 @@ from __future__ import annotations
 from . import agentic, code, explain, knowledge, longctx, reasoning, sessions, techhelp, tools, writing
 from .common import Item
 
-VERSION = "0.10-dev6"
+VERSION = "0.10-dev7"
 # v0.10: weights for people who download and run local models (developers and enthusiasts; docs/usage-research.md):
 # coding 30 (agentic 20 + single-file functions 10), agents/tools 15, tech help for their own machines 15 ("homelab" is the
 # third-largest local use), knowledge and "I don't know" 10 and explanations 10 (information seeking and advice are the
@@ -61,6 +61,10 @@ def _level_for(block: str, kind: str, level: int) -> int:
 # seeded bugs each, a different combination per seed) instead of the spend session (10 min for Tiel, always solved by it;
 # two fixed sessions were 2 items for 20% of the score). Explain at level 4: with the reference explanation the reader
 # answers 0.96-1.0 there, 0.83-0.88 at level 5 (its own mistakes on the most tangled rules would be noise in every score).
+# dev7: billing asks for the parts of a bill in turn; the reader answers 4 questions per call and says UNKNOWN when the
+# explanation lacks a fact (it spent 16k tokens guessing a missing plan fee); access out of quick - with the reference
+# explanation the reader still misses 1-2 of 8 "share" cases (medium / deep keep it); techhelp / knowledge / explain
+# replies may use 32k tokens (16k was below Tiel's 24k reasoning budget and cut a knowledge answer to nothing).
 # Generators test a fixed mix of rules per level (a seed changes names, numbers and values): techhelp compose/routing/
 # chmod, agentic bugs one per module, knowledge exactly 2 made-up questions - a random mix made items score 0 / 0 / 1.
 QUICK_ITEMS = [
@@ -70,7 +74,7 @@ QUICK_ITEMS = [
     ("techhelp", "compose_port", 5), ("techhelp", "compose_port", 6), ("techhelp", "nginx_route", 6), ("techhelp", "log_root", 5),
     ("techhelp", "subnet", 6), ("techhelp", "chmod_seq", 5),
     ("knowledge", "python", 5), ("knowledge", "shell", 5), ("knowledge", "codes", 5), ("knowledge", "codes", 6),   # 8 questions each, 2 made up
-    ("explain", "config", 4), ("explain", "billing", 4), ("explain", "access", 4),      # graded by the reader model (8 questions)
+    ("explain", "config", 4), ("explain", "billing", 4), ("explain", "billing", 3),     # graded by the reader model (8 questions)
     ("longctx", "lookup", 3), ("longctx", "multihop", 3),     # one ~80k-token document, 5 questions each
     ("writing", "constrained", 5), ("writing", "rewrite", 5), ("writing", "minutes", 5), ("writing", "i18n", 5),
     ("reasoning", "arith", 5), ("reasoning", "code_trace", 3),
