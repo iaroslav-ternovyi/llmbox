@@ -418,16 +418,19 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
     t0, slowness, n = time.time(), 1.0, 0
     est = irt.block_estimate(bank, obs, prior)
     cap, lo, hi = est["capability"], est["lo"], est["hi"]
+    sel = est
     while True:
         spent = time.time() - t0
-        if spent >= budget_min * 60 or (obs and (hi - lo) / 2 <= target):
+        # explanations are graded by the reader after the loop: until then they count as answered at their predicted
+        # score, so the selection neither re-picks explain for lack of news nor stops on an interval it cannot have yet
+        if spent >= budget_min * 60 or (obs and (sel["hi"] - sel["lo"]) / 2 <= target):
             break
         short = [b for b in bank.weights if counts.get(b, 0) < min_per_block]
         if short:   # every block gets its minimum first, cheapest informative family of that block
             full = {f for f in bank.a if bank.block[f] not in short or per_fam.get(f, 0) >= max_per_family}
-            fam = irt.next_family(bank, est["theta"], full, slowness)
+            fam = irt.next_family(bank, sel["theta"], full, slowness)
         else:
-            fam = irt.next_family_blocks(bank, est, per_fam, slowness, max_per_family)
+            fam = irt.next_family_blocks(bank, sel, per_fam, slowness, max_per_family)
         if fam is None:
             break
         blk, kind, lvl = fam.split(".")
@@ -447,6 +450,10 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         slowness = statistics.median(ratios) if ratios else 1.0
         est = irt.block_estimate(bank, obs, prior)
         cap, lo, hi = est["capability"], est["lo"], est["hi"]
+        pend = [(r["family"], bank.p(r["family"], est["blocks"].get(bank.block[r["family"]], {}).get("eta", est["theta"])))
+                for r in rows if r.get("pending")]
+        sel = irt.block_estimate(bank, obs + pend, prior) if pend else est
+        cap, lo, hi = sel["capability"], sel["lo"], sel["hi"]
         progress(f"  [{n:3d}] {row['score']:.2f} {row['seconds']:6.1f}s  {fam:26s} -> {cap:5.1f} ({lo:.0f}-{hi:.0f})  "
                  f"{(time.time() - t0) / 60:5.1f} min")
     pend = [r for r in rows if r.get("pending")]

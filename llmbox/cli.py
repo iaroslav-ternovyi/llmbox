@@ -151,16 +151,19 @@ def cmd_probe(a: argparse.Namespace) -> None:
 def cmd_irt(a: argparse.Namespace) -> None:
     """Calibrate the task families on every full run, report them, or replay adaptive runs on recorded answers."""
     from . import irt, suite
-    ch = a.content_hash or suite.content_hash()
-    resp = irt.responses(ch)
+    hs = (a.content_hash or suite.content_hash()).split(",")   # several: versions whose tasks are the same
+    ch = hs[-1]
+    resp = irt.responses(hs)
     models = sorted({r.model for r in resp})
     if not resp:
         raise SystemExit(f"no full runs of suite content {ch}; pass --content-hash")
     if a.action == "calibrate":
-        bank = irt.calibrate(resp, suite.WEIGHTS)
-        print(f"calibrated {len(bank.a)} families on {len(models)} models ({len(resp)} answers) -> {irt.save(bank, ch, len(models))}")
+        bank = irt.calibrate_blocks(resp, suite.WEIGHTS)
+        print(f"calibrated {len(bank.a)} families on {len(models)} models ({len(resp)} answers), tau {bank.tau:.2f} "
+              f"-> {irt.save(bank, ch, len(models))}")
         for m, t in sorted(bank.theta.items(), key=lambda x: -x[1]):
-            print(f"  {m:22s} theta {t:5.2f}  capability {bank.capability(t):5.1f}")
+            dv = bank.dev.get(m, {})
+            print(f"  {m:22s} theta {t:5.2f}  " + " ".join(f"{b[:4]} {v:+.1f}" for b, v in dv.items()))
     elif a.action == "report":
         bank = irt.load(ch) or irt.calibrate(resp, suite.WEIGHTS)
         print(f"{'family':28s} {'a':>5s} {'b':>6s} {'sec':>6s} {'info/min at 0.5':>16s}")

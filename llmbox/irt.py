@@ -48,8 +48,10 @@ class Resp:
     tokens: int
 
 
-def responses(content_hash: str | None = None, hosts_: tuple = ("box", "cloud")) -> list[Resp]:
-    """Every graded task of every full suite run (optionally of one exact suite content)."""
+def responses(content_hash: str | list | None = None, hosts_: tuple = ("box", "cloud")) -> list[Resp]:
+    """Every graded task of every full suite run (optionally of some exact suite contents: a hash or a list of them,
+    e.g. two versions whose tasks are the same and whose grader fix was applied to the older runs by regrade)."""
+    hashes = {content_hash} if isinstance(content_hash, str) else set(content_hash or [])
     out = []
     for h in hosts_:
         for f in sorted(glob.glob(os.path.join(HOME, "results", h, "*.json"))):
@@ -58,10 +60,13 @@ def responses(content_hash: str | None = None, hosts_: tuple = ("box", "cloud"))
             except ValueError:
                 continue
             su = r.get("suite") or {}
-            if r.get("kind") != "suite" or su.get("blocks") or (content_hash and su.get("content_hash") != content_hash):
+            if r.get("kind") != "suite" or su.get("blocks") or su.get("tier") not in ("quick", "adaptive", "medium", "deep") \
+                    or (hashes and su.get("content_hash") not in hashes):
                 continue
             m = (r.get("recipe") or {}).get("id") or "?"
             for x in r.get("rows", []):
+                if x.get("pending") or x.get("error"):
+                    continue
                 out.append(Resp(m, family_of(x["id"]), x["id"], max(0.0, min(1.0, float(x["score"]))), float(x["seconds"]),
                                 int(x.get("max_reply_tokens") or 0)))
     return out
@@ -75,6 +80,8 @@ class Bank:
     block: dict = field(default_factory=dict)      # family -> block
     theta: dict = field(default_factory=dict)      # calibration models -> theta
     weights: dict = field(default_factory=dict)    # block -> weight (for the capability scale)
+    tau: float = 1.0                                # sd of a model's per-block deviation from its theta
+    dev: dict = field(default_factory=dict)        # calibration models -> {block: deviation}
 
     def p(self, fam: str, th: float) -> float:
         return _sig(self.a[fam] * (th - self.b[fam]))
@@ -125,6 +132,89 @@ def calibrate(resp: list[Resp], weights: dict, iters: int = 4000, lr: float = 0.
         bank.seconds[f] = statistics.median(r.seconds for r in rs)
         bank.block[f] = f.split(".")[0]
     return bank
+
+
+def calibrate_blocks(resp: list[Resp], weights: dict, iters: int = 6000, lr: float = 0.03, tau0: float = 1.0,
+                     fixed_tau: float | None = None) -> Bank:
+    """Joint MAP fit with block offsets, the model the scoring uses: eta(model, block) = theta(model) + d(model, block),
+    d ~ N(0, tau^2), family 2PL on eta. tau is estimated from the data (empirical Bayes, re-set every 500 steps).
+    A unidimensional fit reads a model that is strong in one block and weak in another (Nex: agentic 100, writing 59)
+    as family difficulty; the offsets absorb that."""
+    models = sorted({r.model for r in resp})
+    fams = sorted({r.family for r in resp})
+    blocks = sorted({f.split(".")[0] for f in fams})
+    th = {m: 0.0 for m in models}
+    d = {(m, b): 0.0 for m in models for b in blocks}
+    la = {f: 0.0 for f in fams}
+    b_ = {f: 0.0 for f in fams}
+    tau = fixed_tau or tau0
+    for it in range(iters):
+        gth = {m: -th[m] / PRIOR[1] ** 2 for m in models}
+        gd = {k: -v / tau ** 2 for k, v in d.items()}
+        gla = {f: -la[f] / 0.5 ** 2 for f in fams}
+        gb = {f: -b_[f] / 2.0 ** 2 for f in fams}
+        for r in resp:
+            blk = r.family.split(".")[0]
+            a = math.exp(la[r.family])
+            eta = th[r.model] + d[(r.model, blk)]
+            p = _sig(a * (eta - b_[r.family]))
+            e = r.score - p
+            gth[r.model] += a * e
+            gd[(r.model, blk)] += a * e
+            gb[r.family] -= a * e
+            gla[r.family] += a * (eta - b_[r.family]) * e
+        for m in models:
+            th[m] += lr * gth[m]
+        for k in d:
+            d[k] += lr * gd[k]
+        for f in fams:
+            la[f] = max(-3.0, min(1.5, la[f] + lr * gla[f]))
+            b_[f] += lr * gb[f]
+        if fixed_tau is None and it % 500 == 499:   # empirical Bayes for tau (biased low on small data: prefer choose_tau)
+            tau = max(0.3, min(2.0, math.sqrt(sum(v * v for v in d.values()) / len(d))))
+    bank = Bank(a={f: math.exp(la[f]) for f in fams}, b=b_, theta=th, weights=weights, tau=tau,
+                dev={m: {b: round(d[(m, b)], 3) for b in blocks} for m in models})
+    for f in fams:
+        rs = [r for r in resp if r.family == f]
+        bank.seconds[f] = statistics.median(r.seconds for r in rs)
+        bank.block[f] = f.split(".")[0]
+    return bank
+
+
+def _loglik(bank: Bank, rs: list[Resp]) -> float:
+    ll = 0.0
+    for r in rs:
+        eta = bank.theta.get(r.model, 0.0) + bank.dev.get(r.model, {}).get(r.family.split(".")[0], 0.0)
+        p = min(max(bank.p(r.family, eta), 1e-6), 1 - 1e-6) if r.family in bank.a else 0.5
+        ll += r.score * math.log(p) + (1 - r.score) * math.log(1 - p)
+    return ll
+
+
+def choose_tau(resp: list[Resp], weights: dict, taus: tuple = (0.3, 0.5, 0.7, 1.0, 1.4), folds: int = 3, seed: int = 1,
+               iters: int = 3000) -> tuple[float, dict]:
+    """tau by cross-validation: hold out one answer per (model, block) in each fold, fit on the rest, score the held-out
+    answers. The empirical-Bayes estimate from MAP offsets is biased low (the offsets it averages are already shrunk)."""
+    import random as _r
+    rnd = _r.Random(seed)
+    groups: dict = {}
+    for i, r in enumerate(resp):
+        groups.setdefault((r.model, r.family.split(".")[0]), []).append(i)
+    held = [set() for _ in range(folds)]
+    for idx in groups.values():
+        if len(idx) < 2:
+            continue
+        pick = rnd.sample(idx, min(folds, len(idx)))
+        for k, i in enumerate(pick):
+            held[k].add(i)
+    score = {}
+    for t in taus:
+        ll = 0.0
+        for k in range(folds):
+            train = [r for i, r in enumerate(resp) if i not in held[k]]
+            bank = calibrate_blocks(train, weights, iters=iters, fixed_tau=t)
+            ll += _loglik(bank, [resp[i] for i in held[k]])
+        score[t] = ll
+    return max(score, key=score.get), score
 
 
 def posterior(bank: Bank, obs: list[tuple[str, float]], prior: tuple = PRIOR) -> tuple[float, float, list[float]]:
@@ -206,7 +296,8 @@ def save(bank: Bank, content_hash: str, n_models: int) -> str:
     p = bank_path(content_hash)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     json.dump({"content_hash": content_hash, "n_models": n_models, "a": bank.a, "b": bank.b, "seconds": bank.seconds,
-               "block": bank.block, "theta": bank.theta, "weights": bank.weights}, open(p, "w"), indent=1)
+               "block": bank.block, "theta": bank.theta, "weights": bank.weights, "tau": bank.tau, "dev": bank.dev},
+              open(p, "w"), indent=1)
     return p
 
 
@@ -215,7 +306,8 @@ def load(content_hash: str) -> Bank | None:
     if not os.path.exists(p):
         return None
     d = json.load(open(p))
-    return Bank(a=d["a"], b=d["b"], seconds=d["seconds"], block=d["block"], theta=d["theta"], weights=d["weights"])
+    return Bank(a=d["a"], b=d["b"], seconds=d["seconds"], block=d["block"], theta=d["theta"], weights=d["weights"],
+                tau=d.get("tau", TAU), dev=d.get("dev", {}))
 
 
 # ---- block offsets: one capability plus a shrunk per-block deviation ---------------------------------------------------
@@ -242,12 +334,13 @@ def _grid_post(bank: Bank, obs: list[tuple[str, float]], mu: float, sd: float) -
     return [v / s for v in w]
 
 
-def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple = PRIOR, tau: float = TAU, draws: int = 60) -> dict:
+def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple = PRIOR, tau: float | None = None, draws: int = 60) -> dict:
     """Posterior of the weighted capability under theta + per-block offsets, by drawing theta from its posterior and,
     for each draw, eta_b = theta + d_b from its block posterior (prior N(theta, tau^2), the block's own answers).
     Blocks share theta, so their errors are correlated exactly as much as the data say. Returns per block the
     expected score (mean, var, eta, eta_var) and the capability with its 95% interval."""
     import random as _r
+    tau = tau or bank.tau or TAU
     rnd = _r.Random(len(obs) * 7919 + 17)
     th, sdth, wth = posterior(bank, obs, prior)
     cdf, acc = [], 0.0
