@@ -231,7 +231,15 @@ def run(until_empty: bool = False) -> None:
         if os.path.exists(PAUSE):
             reason = "paused (remove ~/.llmbox/queue/PAUSE to continue)"
         else:
-            job = _next_job(holds)
+            try:
+                job = _next_job(holds)
+            except Exception as e:   # a bad job must not kill the worker silently (2026-09-27: 4 h idle after a TypeError)
+                reason = f"worker error while picking a job: {type(e).__name__}: {str(e)[:200]} - retrying every minute"
+                if reason != waiting:
+                    event(reason)
+                    waiting = reason
+                time.sleep(60)
+                continue
             if job is None:
                 if until_empty:
                     event("queue empty - worker exits")
