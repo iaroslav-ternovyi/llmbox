@@ -18,7 +18,7 @@ TYPICAL_STEP = {"new_prompt_tokens": 3000, "output_tokens": 600}   # one agent t
 
 
 # blocks whose grade depends only on the final answer text: a saved run can be re-graded after a grader fix
-TEXT_GRADED = {"longctx", "writing", "reasoning", "code"}
+TEXT_GRADED = {"longctx", "writing", "reasoning", "code", "techhelp", "knowledge"}
 
 # wall-clock limit per item (seconds): a model that needs longer is graded on what it reached (v0.7; v0.6 had none)
 DEADLINE_S = {"agentic": 2700}

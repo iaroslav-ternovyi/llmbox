@@ -186,9 +186,13 @@ def _match(q: dict, a: str) -> bool:
             if len(c) >= 2 and c[0] == c[-1] and c[0] in "'\"" and _ws(c[1:-1]) == _ws(acc.get("str") or "\0") and acc.get("type") == "str":
                 return True
         elif mode == "text":
-            c2 = c[1:-1] if len(c) >= 2 and c[0] == c[-1] and c[0] in "'\"" else c
-            if _ws(c) in acc["texts"] or _ws(c2) in acc["texts"]:
-                return True
+            # the output written with escapes ("1\tx") or a description after it ("... (five spaces, a TAB)") is still it
+            c0 = re.sub(r"\s*\([^()]*\)\s*$", "", c).strip()
+            for x in (c, c0):
+                x2 = x[1:-1] if len(x) >= 2 and x[0] == x[-1] and x[0] in "'\"" else x
+                for y in (x, x2, x2.replace("\\t", "\t").replace("\\n", "\n")):
+                    if _ws(y) in acc["texts"]:
+                        return True
         elif mode == "int":
             ns = _ints(c)
             if ns and ns[0] == acc["int"] and not (len(set(ns)) > 1 and re.search(r"\bor\b", c)):
