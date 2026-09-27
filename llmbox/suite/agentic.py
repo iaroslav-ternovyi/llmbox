@@ -220,7 +220,19 @@ def make(project: str):
         else:
             per = meta.get("bugs_per_level")
             n_bugs = min(len(meta["mutations"]), per[level - 1] if per else max(1, level))
-            bugs = set(r.sample(meta["mutations"], n_bugs))
+            # dev6: bugs spread over the modules (mutation ids start with their module: "money-round", "acc-limit"):
+            # one per module in turn, so a seed changes which bugs, not whether they pile up in one file
+            groups: dict[str, list[str]] = {}
+            for m in meta["mutations"]:
+                groups.setdefault(m.split("-")[0], []).append(m)
+            order = list(groups)
+            r.shuffle(order)
+            bugs, k = set(), 0
+            while len(bugs) < n_bugs:
+                g = [m for m in groups[order[k % len(order)]] if m not in bugs]
+                if g:
+                    bugs.add(r.choice(g))
+                k += 1
         feature = meta.get("feature") if level >= 4 and meta.get("feature") else None
         ws = Workspace(project, bugs, (feature.get("strip") or feature.get("strip_js") or feature.get("blocks")) if feature else None)
         task = meta["prompt"].format(n_bugs=n_bugs)

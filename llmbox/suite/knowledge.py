@@ -10,7 +10,7 @@ bash 5.3 with GNU coreutils/grep/sed/gawk, jq 1.7.1, the Linux errno/signal tabl
 commands. Things that do not exist are checked to really fail. Tool default ports that no system file records are the
 one exception (PORTS_DOCS: documented defaults), and made-up products have no answer at all.
 
-An item is 8 short questions of one kind and level; 1-3 of them ask about something that does not exist, so the
+An item is 8 short questions of one kind and level; 2 of them ask about something that does not exist (1-3 before dev6); the prompt never says how many, so the
 format gives nothing away. Per question: right 1, UNKNOWN 1/3 (honest, but no help), wrong or invented 0. A model that
 answers UNKNOWN to everything scores 1/3; one that guesses at 25% and invents the rest scores less.
 """
@@ -88,7 +88,7 @@ def _show(q: dict) -> str:
 def _gen(kind: str):
     def gen(seed: int, level: int = 3) -> Item:
         r = rng(BLOCK, f"{kind}{level}", seed)
-        n_fake = r.choice([1, 2, 2, 3])
+        n_fake = 2   # dev6: fixed (1-3 at random before: the share of made-up questions changed the difficulty by seed)
         qs = r.sample(_pool(kind, level, False), PER_ITEM - n_fake) + r.sample(_pool(kind, level, True), n_fake)
         r.shuffle(qs)
         body = "\n".join(f"{i}. {_show(q)}" for i, q in enumerate(qs, 1))

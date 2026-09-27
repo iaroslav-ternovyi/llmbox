@@ -76,14 +76,11 @@ def compose_port(seed: int, level: int = 3) -> Item:
     targets = r.sample(["web", "api", "grafana", "auth", "search", "app"], 3)
     names = targets + r.sample([n for n in CONVENTIONAL if n not in targets], max(1, level - 1))
     tports = dict(zip(targets, r.sample([80, 3000, 8000, 8080, 5000, 9090], 3)))
-    allowed = ["plain", "ip", "env", "range", "host", "expose", "bare"][: min(7, 2 + level)]
-    modes, bases = {}, [(8000, 1), (9100, 2)]
-    for t in targets:   # different modes where the level has enough of them; one network_mode: host at most
-        pool = [m for m in allowed if m not in modes.values() and not (m == "range" and not bases)] or \
-               [m for m in allowed if m not in ("host", "range")]
-        modes[t] = r.choice(pool)
-        if modes[t] == "range":
-            bases.pop(0)
+    # dev6: the same three publishing modes at a level (which service gets which mode is random)
+    triple = {1: ["plain", "ip", "plain"], 2: ["ip", "env", "range"], 3: ["env", "range", "host"], 4: ["env", "expose", "plain"],
+              5: ["env", "bare", "range"]}[level]
+    r.shuffle(triple)
+    modes = dict(zip(targets, triple))
     env_file = {}
     published: dict[str, set[str]] = {t: set() for t in targets}
     # disjoint pools: two services never publish the same host port (compose would refuse to start)
@@ -122,7 +119,7 @@ def compose_port(seed: int, level: int = 3) -> Item:
                 var = f"{svc.upper()}_PORT"
                 default = free["env"].pop()
                 add_port(ports, f"${{{var}:-{default}}}", tport)
-                if level >= 3 and r.random() < 0.7:
+                if level >= 3:   # the .env file overrides the default
                     val = free["envval"].pop()
                     env_file[var] = str(val)
                     pub.add(str(val))
@@ -367,15 +364,26 @@ def chmod_seq(seed: int, level: int = 3) -> Item:
     if level >= 6:
         return chmod_expert(seed, level)
     r = rng(BLOCK, f"chmod{level}", seed)
-    pool = ["u+x", "g-w", "o-r", "g+w", "o=r", "a+r", "u-w", "go-rwx", "g=rx", "o+x", "ug+rw", "a-x"]
-    if level >= 3:
-        pool += ["740", "u=rwx,g=rx,o=", "a+X", "go+X"]
-    if level >= 5:
-        pool += ["u+s", "g+s", "g-s", "u=rwxs", "u-s"]   # setuid/setgid on files; no sticky: it means nothing on files
+    # dev6: every file gets the same mix of operation kinds for the level, in its own order (a random mix made the
+    # difficulty of an item depend on the seed)
+    ops = {"basic": ["u+x", "g-w", "o-r", "g+w", "a+r", "u-w", "o+x", "ug+rw", "a-x", "go-rwx"],
+           "eq": ["o=r", "g=rx", "u=rwx,g=rx,o=", "g=r", "o="], "X": ["a+X", "go+X", "u+X"], "oct": ["740", "750", "640"],
+           "special": ["u+s", "g+s", "g-s", "u=rwxs", "u-s"]}   # setuid/setgid on files; no sticky: it means nothing on files
+    mix = {1: ["basic", "basic"], 2: ["basic", "basic", "eq"], 3: ["basic", "eq", "X", "basic"],
+           4: ["basic", "eq", "X", "basic", "eq"], 5: ["oct", "basic", "eq", "X", "special", "special"]}[level]
     paths, blocks, exp, files = [], [], [], []
     for path, is_dir in [("run.sh", False), ("data/", level == 4), ("notes.txt", False)]:   # three files, one question each
         start = r.choice([0o644, 0o600, 0o640, 0o755, 0o664, 0o700, 0o750]) if not is_dir else r.choice([0o755, 0o750, 0o700, 0o775])
-        steps = [r.choice(pool) for _ in range(1 + level)]
+        kinds = list(mix)
+        if kinds[0] == "oct":   # an octal mode first (later steps build on it), the rest shuffled
+            rest = kinds[1:]
+            r.shuffle(rest)
+            kinds = ["oct"] + rest
+        else:
+            r.shuffle(kinds)
+        steps = []
+        for k in kinds:
+            steps.append(r.choice([o for o in ops[k] if o not in steps]))
         mode = start
         for st in steps:
             mode = chmod_apply(mode, st, is_dir)
@@ -473,10 +481,11 @@ def compose_expert(seed: int, level: int = 6) -> Item:
     tport = r.choice([80, 3000, 8000, 8080])
     var = f"{svc.upper()}_PORT"
     default, envval, shellval = r.choice([8080, 8090]), r.choice([18080, 8443, 28080]), r.choice([9090, 19090, 7080])
-    fixed = r.choice([9443, 7443, 10443]) if r.random() < 0.6 else None
-    in_env = r.random() < 0.75
-    profile = r.random() < 0.5
-    mode = r.choice(["merge", "override", "reset", "merge"])
+    # dev6: the same rules in every item (a seed changes names, ports and values, not which rules are tested - a random
+    # mix of override/reset/profile made one item score 0, 0 and 1 in three runs of one model): a profile, a variable in
+    # .env and in the shell, a fixed second port, and compose.override.yaml merged automatically (its ports appended)
+    fixed = r.choice([9443, 7443, 10443])
+    in_env, profile, mode = True, True, "merge"
     extra = r.choice([7000, 17000, 6443])
     def published(shell_set: bool, enabled: bool) -> set[str]:
         hostport = str(shellval if shell_set else envval if in_env else default)
@@ -499,8 +508,9 @@ def compose_expert(seed: int, level: int = 6) -> Item:
     envf = (f"{var}={envval}\n" if in_env else "") + "COMPOSE_PROJECT_NAME=stack\n"
     files.append((".env", envf))
     # the same files, three ways to start them: each command exercises other rules (shell beats .env, profiles)
-    variants = [(False, None), (True, None), (False, "flag"), (False, "env"), (True, "flag")]
-    chosen = r.sample(variants, 3)
+    # without the profile (not started), shell variable + --profile (shell beats .env), COMPOSE_PROFILES (.env value)
+    chosen = [(False, None), (True, "flag"), (False, "env")]
+    r.shuffle(chosen)
     cmds, want = [], []
     for sh, en in chosen:
         prefix = (f"{var}={shellval} " if sh else "") + ("COMPOSE_PROFILES=debug " if en == "env" else "")
@@ -596,25 +606,28 @@ def routing_expert(seed: int, level: int = 6) -> Item:
     vpn = ipaddress.ip_network(f"10.{r.randint(1, 250)}.0.0/24")
     far = ipaddress.ip_network(f"172.{r.randint(16, 31)}.{r.randint(0, 250)}.0/24")
     far_sup = far.supernet(new_prefix=16)
-    tables = {"main": [("0.0.0.0/0", "wan0", 100), (str(lan), "lan0", 0), (str(far_sup), "eth1", 50)],
-              "100": [(str(far), "wg0", 10)] + ([("0.0.0.0/0", "wg0", 10)] if r.random() < 0.5 else []),
-              "200": [(str(far_sup), "tun0", 20), (str(far), "tun1", 5)]}
-    if r.random() < 0.5:
-        tables["main"].append((str(far), "eth2", 30))
-    rules = [(0, None, None, "local"), (r.choice([90, 110]), str(vpn), None, "100"), (100, None, str(far_sup), "200"),
+    # dev6: one fixed layout (a seed changes addresses and interface names, not the rules tested): the VPN rule comes
+    # first and its table only knows the far /24, so VPN traffic elsewhere falls through; the "to far /16" table has
+    # both the /16 and a more specific /24
+    wan, lan_if, eth, wg, tun_a, tun_b = r.choice(["wan0", "ppp0"]), r.choice(["lan0", "br-lan"]), r.choice(["eth1", "eth2"]), \
+        r.choice(["wg0", "wg1"]), r.choice(["tun0", "tun2"]), r.choice(["tun1", "tun3"])
+    tables = {"main": [("0.0.0.0/0", wan, 100), (str(lan), lan_if, 0), (str(far_sup), eth, 50)],
+              "100": [(str(far), wg, 10)],
+              "200": [(str(far_sup), tun_a, 20), (str(far), tun_b, 5)]}
+    rules = [(0, None, None, "local"), (90, str(vpn), None, "100"), (100, None, str(far_sup), "200"),
              (32766, None, None, "main"), (32767, None, None, "default")]
-    packets = []
-    while len(packets) < 4:   # four packets: from the VPN or the LAN, to the far /24, the rest of its /16, or elsewhere
-        src = ipaddress.ip_address(int(r.choice([vpn, lan]).network_address) + r.randint(2, 200))
-        kind = r.choice(["far", "sup", "far", "out"])
-        if kind == "out":
-            dst = ipaddress.ip_address(f"{r.choice([8, 1, 9, 185])}.{r.randint(0, 255)}.{r.randint(0, 255)}.{r.randint(1, 254)}")
-        else:
-            dst = ipaddress.ip_address(int(far.network_address) + r.randint(2, 200) * (1 if kind == "far" else 256))
-            if dst not in far_sup:
-                dst = ipaddress.ip_address(int(far.network_address) + 7)
-        if (src, dst) not in packets:
-            packets.append((src, dst))
+
+    def host_in(net, sub=None):
+        while True:
+            a = ipaddress.ip_address(int(net.network_address) + r.randint(2, net.num_addresses - 2))
+            if sub is None or a not in sub:
+                return a
+    outside = ipaddress.ip_address(f"{r.choice([8, 1, 9, 185])}.{r.randint(0, 255)}.{r.randint(0, 255)}.{r.randint(1, 254)}")
+    packets = [(host_in(vpn), host_in(far)),               # VPN rule, its table has the /24
+               (host_in(vpn), host_in(far_sup, far)),      # VPN rule, no route there: falls through to the /16 table
+               (host_in(vpn), outside),                    # falls through twice, to main
+               (host_in(lan), host_in(far))]               # the /16 rule; most specific route in its table
+    r.shuffle(packets)
     expected = [route_lookup([x for x in rules if x[3] != "local"], tables, s_, d_) or "none" for s_, d_ in packets]
     rl = "\n".join(f"{p}:\tfrom {frm or 'all'}{' to ' + to if to else ''} lookup {t}" for p, frm, to, t in sorted(rules))
     tl = "\n\n".join(f"$ ip route show table {t}\n" + "\n".join(f"{n} dev {d} metric {m}" if n != "0.0.0.0/0" else f"default dev {d} metric {m}"
@@ -632,11 +645,14 @@ def chmod_expert(seed: int, level: int = 6) -> Item:
     write for the owner only; `chmod =r` with umask 027 gives 0440), mixed with explicit ones."""
     r = rng(BLOCK, f"chmod{level}", seed)
     um = r.choice([0o022, 0o027, 0o077, 0o002])
-    pool = ["+x", "+w", "-w", "=r", "=rw", "+rX", "-rwx", "u+x", "g=u", "o-r", "a+r", "+s", "g+s", "=rwx", "go-w"]
+    ops = {"bare": ["+x", "+w", "-w", "+rX", "-rwx"], "bare_eq": ["=r", "=rw", "=rwx"], "who": ["u+x", "o-r", "a+r", "go-w", "g=u"],
+           "special": ["+s", "g+s"]}   # dev6: each file: one of each kind, in its own order
     blocks, exp, names, files = [], [], ["run.sh", "deploy.sh", "notes.txt"], []
     for path in names:   # three files under the same umask, one question each
         start = r.choice([0o644, 0o600, 0o664, 0o755, 0o640, 0o666])
-        steps = [r.choice(pool) for _ in range(4)]
+        kinds = list(ops)
+        r.shuffle(kinds)
+        steps = [r.choice(ops[k]) for k in kinds]
         mode = start
         for st in steps:
             # g=u copies the owner's rwx to the group; like any '=' for g it also clears setgid (GNU)

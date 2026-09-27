@@ -47,6 +47,11 @@ def _answers(text: str, n: int) -> dict[int, str]:
     return answers(text, n)
 
 
+# dev6: 8 questions per explanation (4-5 before): the model writes the same explanation; only the reader answers more,
+# and each question checks one more case the explanation had to cover.
+QUIZ = 8
+
+
 def reader_prompt(topic: str, explanation: str, setup: str, questions: list[str], fmt: str) -> str:
     body = "\n\n".join(f"{i}. {q}" for i, q in enumerate(questions, 1))
     return (f"A colleague wrote you this explanation of {topic}. You have never seen it before and have nothing else to go on.\n\n"
@@ -463,7 +468,7 @@ def config(seed: int, level: int = 3) -> Item:
     ru = _cfg_rules(r, level)
     quiz = []
     tries = 0
-    while len(quiz) < 5 and tries < 400:
+    while len(quiz) < QUIZ and tries < 400:
         tries += 1
         key, case = _cfg_case(r, ru, t, level)
         ans = cfg_resolve(ru, t, case, key)
@@ -592,7 +597,7 @@ def billing(seed: int, level: int = 3) -> Item:
     svc = r.choice(SERVICES)
     ru = _bill_rules(r, level)
     quiz = []
-    for _ in range(4):
+    for _ in range(QUIZ):
         plan = r.choice(list(ru["plans"]))
         month = r.choice(MONTHS[1:8])
         inc = ru["plans"][plan]["inc"]
@@ -775,7 +780,7 @@ def access(seed: int, level: int = 3) -> Item:
     r.shuffle(cand)
     good = [(u, fp) for u, fp in cand if acc_actions(ru, ws, u, fp.rsplit("/", 1)[0]) != acc_actions(naive, ws, u, fp.rsplit("/", 1)[0])]
     plain = [(u, fp) for u, fp in cand if (u, fp) not in good and acc_actions(ru, ws, u, fp.rsplit("/", 1)[0])]
-    picks = good[:4] + plain[:1] if len(good) >= 4 else (good + plain)[:5]
+    picks = good[:QUIZ - 2] + plain[:2] if len(good) >= QUIZ - 2 else (good + plain)[:QUIZ]   # mostly cases the usual reading gets wrong
     quiz = []
     for u, fp in picks:
         a = acc_actions(ru, ws, u, fp.rsplit("/", 1)[0])
