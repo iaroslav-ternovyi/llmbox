@@ -158,6 +158,12 @@ def run(rid: str, src: str, target: str, dry_run: bool = True, force: bool = Fal
                 out(f"{s.name} failed: {r.stderr.strip()[-300:]}")
                 return 1
             out(f"{s.name} written")
+            if s.name == "entry":   # llama-swap -watch-config reloads a few seconds later; until then the id is a 404
+                url = (hosts.load(target)["hw"].get("llama_swap") or {}).get("url") or "http://localhost:8080"
+                r = h.run(f"for i in $(seq 60); do curl -s {_q(url + '/v1/models')} | grep -q '\"id\":\"{rid}\"' && echo yes && break; sleep 1; done",
+                          timeout=90)
+                out(f"llama-swap serves {rid}" if "yes" in r.stdout else
+                    f"llama-swap does not list {rid} yet: it reloads the config only with -watch-config, else restart it")
         elif s.name == "check":
             d = rc.diff(rc.load(target, rid), rc.live_argv(h, rid))
             out("check OK" if not d else "check DIFF:\n  " + "\n  ".join(d))
