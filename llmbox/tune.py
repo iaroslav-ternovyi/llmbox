@@ -82,7 +82,10 @@ def run(host: str, rid: str, out=print, measure=None) -> dict:
 
     def one(name: str, ov: list[str]) -> dict:
         t = time.time()
-        m = measure(host, rid, overrides=ov, depths=[DEPTH], unload=True, save=True, sampling=sampling)
+        try:
+            m = measure(host, rid, overrides=ov, depths=[DEPTH], unload=True, save=True, sampling=sampling)
+        except RuntimeError as e:   # the server died under this variant (gemma4, 2026-09-29): a failed variant, not a failed tune
+            m = {"overrides": ov, "error": str(e).splitlines()[-1][-160:]}
         row = _row(name, m)
         rows.append(row)
         out(f"  {name:32s} " + (f"ERROR {row['error']}" if row["error"] else
