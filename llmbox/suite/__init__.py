@@ -15,7 +15,7 @@ from __future__ import annotations
 from . import agentic, code, explain, knowledge, longctx, reasoning, sessions, techhelp, tools, writing
 from .common import Item
 
-VERSION = "0.11-dev1"
+VERSION = "0.11-dev2"
 # v0.11: tools dedupe / bulk_discount graded by level with the discount policy part of the job (v0.10 hid it: only the
 # frontier guessed it, and 15% of the score hung on one yes/no task), levels 7-8 (headroom above the frontier reference);
 # answers to unchanged task families count across versions (llmbox/famfp.py), so only changed families need new runs.
@@ -33,7 +33,7 @@ MODULES = {"agentic": agentic, "code": code, "tools": tools, "techhelp": techhel
 BLOCKS = {b: m.KINDS for b, m in MODULES.items()}
 BLOCKS["agentic"] = {**agentic.KINDS, **sessions.KINDS}   # multi-turn sessions are agentic coding too
 # ladder: one item at every level - where a model breaks, and whether a new block's levels are spaced right
-LEVELS = {"quick": [3, 5], "medium": [2, 3, 4, 4, 5, 5, 5], "deep": [2, 3, 4, 4, 5, 5, 5] * 2, "ladder": [1, 2, 3, 4, 5, 6]}
+LEVELS = {"quick": [3, 5], "medium": [2, 3, 4, 4, 5, 5, 5], "deep": [2, 3, 4, 4, 5, 5, 5] * 2, "ladder": [1, 2, 3, 4, 5, 6, 7, 8]}
 # agentic tasks take minutes each: fewer, but spread over all projects
 AGENTIC_LEVELS = {"quick": [5], "medium": [4, 5], "deep": [3, 4, 5, 5], "ladder": [3, 4, 5]}
 # which agentic projects each tier uses: from-scratch implementations discriminate best, bug hunts add breadth
