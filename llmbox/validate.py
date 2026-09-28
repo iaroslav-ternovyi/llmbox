@@ -116,18 +116,27 @@ def _tools_oracle(it: Item) -> str | None:
             elif kind == "task":
                 _call(w, "create_task", {"title": f"Collections {c['id']}", "due_date": due3, "team": "collections"})
         return "done\nUNMATCHED: " + ("; ".join(unmatched) or "none")
-    if k == "bulk_discount":
-        city = re.search(r"customers in (\w+)", user).group(1)
-        tier = re.search(r"our (\w+) customers", user).group(1)
+    if k == "bulk_discount":   # v0.11: above 15% in total -> approval task; else the discount (a closed month warns)
+        city = re.search(r"customers in (\w+):", user).group(1)
+        pct = {t: int(p_) for t, p_ in re.findall(r"(\w+)-tier customer in \w+ a (\d+)% discount", user)}
         due2 = T._business_days(T.TODAY, 2).isoformat()
-        targets = [i["id"] for c in w.customers.values() if c["city"] == city and c["tier"] == tier for i in w.unpaid(c["id"])]
-        for iid in targets:
-            _call(w, "create_task", {"title": f"Discount approval: {iid} 25%", "due_date": due2, "team": "finance"})
-        return "done\nNOT DISCOUNTED: " + "; ".join(targets)
-    if k == "dedupe":
+        nd = []
+        for c in w.customers.values():
+            if c["city"] != city or c["tier"] not in pct:
+                continue
+            for inv in w.unpaid(c["id"]):
+                p_ = pct[c["tier"]]
+                if p_ + inv.get("discount_percent", 0) > 15:
+                    _call(w, "create_task", {"title": f"Discount approval: {inv['id']} {p_}%", "due_date": due2, "team": "finance"})
+                    nd.append(inv["id"])
+                elif "warning" in str(_call(w, "apply_discount", {"invoice_id": inv["id"], "percent": p_})):
+                    nd.append(inv["id"])
+        return "done\nNOT DISCOUNTED: " + ("; ".join(nd) or "none")
+    if k == "dedupe":   # the same person: same date of birth and the same phone digits (formats differ from level 5)
+        digits = lambda ph: re.sub(r"\D", "", ph)[-9:]
         for a_, b_ in w.pairs:
             ca, cb = w.customers[a_], w.customers[b_]
-            if ca["date_of_birth"] == cb["date_of_birth"] and ca["phone"] == cb["phone"]:
+            if ca["date_of_birth"] == cb["date_of_birth"] and digits(ca["phone"]) == digits(cb["phone"]):
                 p_, d_ = sorted((a_, b_), key=lambda x: int(x[2:]))
                 _call(w, "merge_customers", {"primary_id": p_, "duplicate_id": d_})
         return "done"
