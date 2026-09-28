@@ -98,5 +98,76 @@ check("rewrite one rule broken", near(it.check(good.replace("again.", "again!"))
 check("rewrite empty", it.check("") == 0.0)
 check("rewrite without the facts", it.check("Dear customer, we are sorry for the delay and we will fix it soon.") == 0.0)
 
+# v0.11 levels 6-8 of longctx: the document stays at the level-3 size, credit per question, NOT STATED is an answer
+from llmbox import validate as V  # noqa: E402
+for kind in ("lookup", "multihop", "count", "latest", "total"):
+    for level in (6, 7, 8):
+        it = L.KINDS[kind](3, level)
+        exp = it.meta["expected"]
+        lines = [f"ANSWER {i + 1}: {e}" for i, e in enumerate(exp)]
+        check(f"{kind} L{level} oracle", near(it.check("\n".join(lines)), 1.0))
+        check(f"{kind} L{level} one right", near(it.check(lines[0]), 1 / len(exp)))
+        check(f"{kind} L{level} empty", it.check("") == 0.0)
+        check(f"{kind} L{level} size", it.meta["doc_tokens_est"] <= 68_000, it.meta["doc_tokens_est"])   # level 3: ~66k (~95k real)
+for kind in ("lookup", "multihop"):
+    it = L.KINDS[kind](3, 7)
+    exp = it.meta["expected"]
+    ns = exp.index(L.NOT_STATED)
+    real = next(i for i, e in enumerate(exp) if e != L.NOT_STATED)
+    check(f"{kind} not stated", near(it.check(f"ANSWER {ns + 1}: The document does not say (not stated)."), 1 / len(exp)))
+    check(f"{kind} guess instead of not stated", it.check(f"ANSWER {ns + 1}: {exp[real]}") == 0.0)
+    check(f"{kind} not stated instead of a value", it.check(f"ANSWER {real + 1}: NOT STATED") == 0.0)
+for level in (7, 8):   # audit: stale values, moved engineers, withdrawn incidents; a false alarm cancels a hit
+    it = L.audit(2, level)
+    wrong = [x.strip() for x in it.meta["expected"].split(",")]
+    ids = sorted(set(__import__("re").findall(r"INC-\d+", it.messages[0]["content"].split("Draft reliability report")[1])))
+    extra = next(i for i in ids if i not in wrong)
+    check(f"audit L{level} all right", near(it.check("ANSWER: " + ", ".join(wrong)), 1.0))
+    check(f"audit L{level} one false alarm", near(it.check("ANSWER: " + ", ".join(wrong + [extra])), (len(wrong) - 1) / len(wrong)))
+    check(f"audit L{level} everything", it.check("ANSWER: " + ", ".join(ids)) == 0.0)
+    check(f"audit L{level} empty", it.check("") == 0.0)
+
+# v0.11 levels 6-8 of writing: the oracle (where there is one) earns 1.0, a real answer that breaks one rule loses one share
+for kind, levels in (("extract", (7, 8)), ("minutes", (6, 7, 8)), ("i18n", (6, 7, 8)), ("proofread", (6, 7, 8))):
+    for level in levels:
+        it = W.KINDS[kind](4, level)
+        check(f"{kind} L{level} oracle", near(it.check(V.oracle(it)), 1.0), it.check(V.oracle(it)))
+        check(f"{kind} L{level} empty", it.check("") == 0.0)
+it = W.extract(1, 8)   # one line wrong in one field: that line and nothing else
+import json as _json  # noqa: E402
+rows = [dict(o) for o in it.meta["expected"]]
+rows[0]["quantity"] += 1
+check("extract L8 one line wrong", near(it.check(_json.dumps(rows)), (len(rows) - 1 + 1) / (len(rows) + 1)))
+it = W.i18n(3, 8)      # a nested plural that lacks the Ukrainian few / many categories costs its key
+ref = _json.loads(V.oracle(it))
+ref["added"] = ref["added"].replace(" few {Вона додала # файли} many {Вона додала # файлів}", "")
+check("i18n L8 nested plural", near(it.check(_json.dumps(ref, ensure_ascii=False)), (len(ref) - 1) / len(ref)))
+it = W.proofread(2, 7)  # "correcting" a quotation (quoted verbatim) is an unrequested edit
+clean = V.oracle(it)
+check("proofread L7 quote fixed", near(it.check(clean.replace("paitence", "patience")), 1 - 1 / it.meta["errors"]))
+good = """NOVA KEEPS YOUR PASSWORDS SAFE
+
+Passwords are hard to remember, so let Nova help. Nova stores every login in one encrypted vault.
+
+Launching in 2026, Nova works on phones and laptops. It fills in forms for you. Your data never leaves your devices unencrypted.
+
+Trust Nova to watch the web for leaked passwords and warn you. Our support team answers questions 24/7.
+
+Setting up takes one minute. Nova can import your old logins. Scan the QR code to try Nova today?"""
+it = W.constrained(3, 8)   # conflicts resolved by order: the strings with digits stay, "Nova" in every paragraph, a final "?"
+check("constrained L8 all rules", near(it.check(good), 1.0), it.check(good))
+check("constrained L8 one rule broken", near(it.check(good.replace("Launching in 2026, Nova works", "Launching in 2026, it works")),
+                                              15 / 16))
+check("constrained L8 empty", it.check("") == 0.0)
+good = """Dear Prof. García,
+We regret to inform you that order 87913 cannot be shipped this week because a delivery from our supplier is four days late. \
+The missing parts will reach us this Friday, and we will ship your order on 28 October 2026. As compensation, we will grant you a \
+26% discount on your next order. We will also refund EUR 22.00 for the express shipping you paid. For your records, the internal \
+reference is ZX-7806."""
+it = W.rewrite(1, 8)       # the shipping day skips the Monday holiday; numbers below ten in words wins over digits
+check("rewrite L8 all rules", near(it.check(good), 1.0), it.check(good))
+check("rewrite L8 delay in digits", near(it.check(good.replace("four days", "4 days")), 13 / 14))
+check("rewrite L8 empty", it.check("") == 0.0)
+
 print("all passed" if not failed else f"{failed} failed")
 sys.exit(1 if failed else 0)
