@@ -17,6 +17,7 @@ Everything is plain Python (the project has no dependencies); the data are small
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import math
 import os
@@ -75,6 +76,86 @@ def responses(content_hash: str | list | None = None, hosts_: tuple = ("box", "c
                 out.append(Resp(m, family_of(x["id"]), x["id"], max(0.0, min(1.0, float(x["score"]))), float(x["seconds"]),
                                 int(x.get("max_reply_tokens") or 0)))
     return out
+
+
+def _regrade(fam: str, row: dict, cache: dict) -> float | None:
+    """The current grader's score for a saved answer to a text-graded task (the task regenerated from its id)."""
+    import hashlib
+    from . import suite
+    key = f"{row['id']}:{hashlib.sha256((row.get('final') or '').encode()).hexdigest()[:10]}"
+    if key in cache:
+        return cache[key]
+    block, kind, lv = fam.rsplit(".", 2)
+    try:
+        it = suite.BLOCKS[block][kind](int(row["id"].rsplit(".", 1)[1]), int(lv[1:]))
+        sc = round(max(0.0, min(1.0, float(it.check(row["final"], row)))), 4)
+    except Exception:
+        sc = None
+    cache[key] = sc
+    return sc
+
+
+def too_long(row: dict) -> bool:
+    e = str(row.get("error") or "")
+    return "exceeds the available context" in e or "context size" in e.lower() and "exceed" in e.lower()
+
+
+def pool(hosts_: tuple = ("box", "cloud")) -> dict:
+    """{(recipe id, host): [rows]}: every answer, from any suite version and any run (fixed, adaptive, one block only),
+    to a task family that is unchanged in the current suite (llmbox/famfp.py). Text-graded answers from another version
+    are graded again by the current grader; answers graded on a tool world, a workspace or by the reader count as saved.
+    An answer saved twice (a resumed run) counts once."""
+    from . import famfp, suite
+    from .bench import TEXT_GRADED
+    cur = suite.content_hash()
+    recs = []
+    for h in hosts_:
+        for f in sorted(glob.glob(os.path.join(HOME, "results", h, "*.json"))):
+            try:
+                r = json.load(open(f))
+            except ValueError:
+                continue
+            su = r.get("suite") or {}
+            if r.get("kind") != "suite" or su.get("tier") not in ("quick", "adaptive", "medium", "deep") or not su.get("content_hash"):
+                continue
+            recs.append((h, r))
+    fams_by_hash: dict = {}
+    for h, r in recs:
+        fams_by_hash.setdefault(r["suite"]["content_hash"], set()).update(family_of(x["id"]) for x in r.get("rows", []))
+    allf = set().union(*fams_by_hash.values()) if fams_by_hash else set()
+    now = famfp.fingerprints(cur, allf)
+    old = {ch: famfp.fingerprints(ch, fs) for ch, fs in fams_by_hash.items()}
+    cp = os.path.join(HOME, "irt", f"regrade-{cur}.json")
+    cache = json.load(open(cp)) if os.path.exists(cp) else {}
+    n0 = len(cache)
+    out: dict = {}
+    for h, r in sorted(recs, key=lambda hr: hr[1].get("created", "")):
+        ch = r["suite"]["content_hash"]
+        rid = (r.get("recipe") or {}).get("id") or "?"
+        rows = out.setdefault((rid, h), {})
+        for x in r.get("rows", []):
+            fam = family_of(x["id"])
+            if too_long(x):   # the task does not fit the model's context: a real 0, not a failed measurement
+                x = dict(x, score=0.0, error=None)
+            if x.get("pending") or x.get("error") or not now.get(fam) or old[ch].get(fam) != now[fam]:
+                continue
+            if ch != cur and fam.split(".")[0] in TEXT_GRADED and x.get("final") is not None:
+                sc = _regrade(fam, x, cache)
+                if sc is None:
+                    continue
+                x = dict(x, score=sc)
+            # a resumed run copies finished answers from the attempt before it: the same answer counts once; two
+            # different answers to one task (two runs with the same seed) are two samples and both count
+            rows[f"{x['id']}:{hashlib.sha256(str(x.get('final')).encode()).hexdigest()[:10]}"] = dict(x, _run=r.get("created"))
+    if len(cache) != n0:
+        json.dump(cache, open(cp, "w"))
+    return {k: list(v.values()) for k, v in out.items() if v}
+
+
+def pooled_responses(hosts_: tuple = ("box", "cloud")) -> list[Resp]:
+    """responses() over pool(): the calibration data of the current suite, old versions included where unchanged."""
+    return [Resp(m, family_of(x["id"]), x["id"], max(0.0, min(1.0, float(x["score"]))), float(x["seconds"]),
+                 int(x.get("max_reply_tokens") or 0)) for (m, _h), rows in pool(hosts_).items() for x in rows]
 
 
 @dataclass

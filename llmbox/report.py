@@ -56,16 +56,50 @@ def scale(tier: str | None) -> str | None:
     return "quick" if tier in ("quick", "adaptive") else tier
 
 
+_POOL: dict = {}
+
+
+def current_pool() -> dict:
+    """{(recipe id, results dir): {"rows", "score", "blocks", "runs"}} for the current suite: every answer to a task
+    family that is unchanged in it, from any version and any run, one block only included (irt.pool), scored with the
+    current bank. Empty when the current suite has no bank yet."""
+    from . import irt, suite
+    if "v" not in _POOL:
+        bank = irt.load(irt.canonical(suite.content_hash()))
+        res = {}
+        if bank:
+            for k, rs in irt.pool().items():
+                res[k] = {"rows": rs, "score": irt.score_rows(bank, rs), "runs": len({x.get("_run") for x in rs}),
+                          "blocks": {irt.family_of(x["id"]).split(".")[0] for x in rs}}
+        _POOL["v"] = res
+    return _POOL["v"]
+
+
+def ranked_now(rid: str, where: str) -> dict | None:
+    """The current pool entry of a model when its answers cover every block (a model enters the current ranking then)."""
+    from . import suite
+    p = current_pool().get((rid, where))
+    return p if p and set(suite.WEIGHTS) <= p["blocks"] and p["score"]["n"] else None
+
+
 def rows(host: str | None = None, suite_version: str | None = None, tier: str | None = None) -> list[dict]:
+    from . import suite as _suite
     out = []
-    recs = results.load_all(host) + (results.load_all("cloud") if host and host != "cloud" else [])
+    recs = [dict(x, _dir=host) for x in results.load_all(host)] + \
+        ([dict(x, _dir="cloud") for x in results.load_all("cloud")] if host and host != "cloud" else [])
     from . import bench
     recs = [bench.rescore(with_probe(x, recs)) if x.get("kind") == "suite" else x for x in recs]   # current weights
+    # the current suite with a bank: a model is ranked on all its answers that still count (current_pool), whatever
+    # version its runs were; one-block runs feed that pool and are not listed on their own
+    cur = suite_version in (None, _suite.VERSION) and bool(current_pool())
     for rec in recs:
         if rec.get("kind") != "suite":
             continue
         su, s = rec.get("suite", {}), rec.get("summary", {})
-        if suite_version and version_of(su) != suite_version:
+        if cur:
+            if su.get("blocks") or not ranked_now((rec.get("recipe") or {}).get("id") or "?", rec["_dir"]):
+                continue
+        elif suite_version and version_of(su) != suite_version:
             continue
         if tier and scale(su.get("tier")) != scale(tier):
             continue
@@ -80,20 +114,26 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
             "speed": s.get("speed", {}), "solved_per_hour": s.get("solved_per_hour"), "items": s.get("items"),
             "wall_minutes": s.get("wall_minutes"), "created": rec.get("created", "")[:16],
             "recipe": {k: r.get(k) for k in ("placement", "speculative", "sampling", "chat", "antiloop") if k in r},
-            "_rows": rec.get("rows") or [], "_hash": su.get("content_hash"),
+            "_rows": rec.get("rows") or [], "_hash": su.get("content_hash"), "_dir": rec.get("_dir"),
         })
-    if suite_version is None and out:  # default: only the newest suite version, results of older versions are not comparable
+    if suite_version is None and out and not cur:  # default: only the newest suite version, results of older versions are not comparable
         newest = max((version_of(x["suite"]) for x in out), key=_vkey)
         out = [x for x in out if version_of(x["suite"]) == newest]
     # newest result per (recipe id, host, suite version, tier)
     best: dict = {}
     for x in sorted(out, key=lambda x: x["created"]):
-        best[(x["id"], x["host"].get("id"), version_of(x["suite"]), scale(x["suite"].get("tier")))] = x
-    _pool(out, best)
+        best[(x["id"], x["host"].get("id"), _suite.VERSION if cur else version_of(x["suite"]), scale(x["suite"].get("tier")))] = x
+    if cur:
+        for x in best.values():
+            p = ranked_now(x["id"], x["_dir"])
+            x.update(capability=p["score"]["capability"], ci=p["score"]["ci95"], blocks=p["score"]["blocks"], runs=p["runs"],
+                     answers=p["score"]["n"], scoring="irt")
+    else:
+        _pool(out, best)
     rs = sorted(best.values(), key=lambda x: (x.get("partial", False), -(x["capability"] or 0)))   # partial runs listed last
     # 100% = the best frontier reference on the same suite version and tier (per block as well)
     for x in rs:
-        refs = [r for r in rs if r["host"].get("id") == "cloud" and version_of(r["suite"]) == version_of(x["suite"])
+        refs = [r for r in rs if r["host"].get("id") == "cloud" and (cur or version_of(r["suite"]) == version_of(x["suite"]))
                 and scale(r["suite"].get("tier")) == scale(x["suite"].get("tier"))]
         if refs:
             ref = max(refs, key=lambda r: r["capability"] or 0)

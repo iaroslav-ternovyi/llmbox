@@ -515,10 +515,11 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
             except ValueError:
                 continue
             su = rec.get("suite") or {}
-            from . import report as _report
-            if rec.get("kind") != "suite" or _report.version_of(su) != suite_version or _report.scale(su.get("tier")) != _report.scale(tier) \
-                    or su.get("blocks"):
-                continue
+            from . import report as _report, suite as _suite
+            cur = suite_version == _suite.VERSION and bool(_report.current_pool())
+            if rec.get("kind") != "suite" or _report.scale(su.get("tier")) != _report.scale(tier) or su.get("blocks") or (
+                    not _report.ranked_now((rec.get("recipe") or {}).get("id") or "?", h) if cur else _report.version_of(su) != suite_version):
+                continue   # the current suite: any run of a model whose answers still cover every block (report.current_pool)
             from . import bench
             rec = bench.rescore(rec)   # current suite weights: the task scores are the run's, the weighting is today's
             rec["_path"] = os.path.join(d, f)
@@ -532,12 +533,18 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
     for (h, rid), recs in runs.items():   # the number of a model = the IRT estimate over all its runs (report._pool)
         tgt = ref if h == "cloud" and ref is not None and (ref.get("recipe") or {}).get("id") == rid else out.get(rid) if h != "cloud" else None
         if tgt is not None:
-            _pool_summary(tgt, recs)
+            _pool_summary(tgt, recs, h)
     return {"local": out, "ref": ref}
 
 
-def _pool_summary(rec: dict, recs: list[dict]) -> None:
-    from . import irt
+def _pool_summary(rec: dict, recs: list[dict], where: str = "box") -> None:
+    from . import irt, report as _report
+    p = _report.ranked_now((rec.get("recipe") or {}).get("id") or "?", where)
+    if p:   # the current suite: every answer that still counts, from any run (report.current_pool)
+        s = rec["summary"]
+        rec["summary"] = dict(s, capability=p["score"]["capability"], capability_ci95=p["score"]["ci95"], blocks=p["score"]["blocks"],
+                              runs=p["runs"], answers=p["score"]["n"], scoring="irt", capability_this_run=s.get("capability"))
+        return
     bank = irt.bank_for((rec.get("suite") or {}).get("content_hash"))
     if bank is None:
         return

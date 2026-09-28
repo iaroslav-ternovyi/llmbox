@@ -20,6 +20,7 @@ from . import hosts, recipe as rc, results, speed, tune
 # what llama-server does when only the model and the context are given (llama.cpp b8xxx, 2026-09: `llama-server --help`)
 STOCK = ["placement.fit=true", "placement.fit_target_mib=1024", 'placement.kv_type="f16"', "placement.ubatch=512",
          "placement.batch=2048", 'speculative.type=""', "speculative.draft_max=0"]
+STOCK_FLAGS = "--fit on --fit-target 1024 -ctk f16 -ctv f16 -ub 512 -b 2048, no speculative decoding"
 DEPTH = 32000
 
 
@@ -51,7 +52,7 @@ def compare(host: str, rid: str, out=print, repeats: int = 3) -> dict:
     rec = results.new("optimize", prof, recipe=r, model={k: r["model"].get(k) for k in ("hf_repo", "file", "path", "sha256")})
     tu = _tuned(host, rid) or {}
     rec["summary"] = {"stock": stock, "llmbox": {k: lb.get(k) for k in ("decode", "deep", "prefill", "step_s", "acceptance")},
-                      "stock_flags": tune.flags_of(STOCK), "tuned_flags": tu.get("applied_flags") or [], "drift": round(drift, 3) if drift is not None else None,
+                      "stock_flags": STOCK_FLAGS, "tuned_flags": tu.get("applied_flags") or [], "drift": round(drift, 3) if drift is not None else None,
                       "gain_decode": round(lb["decode"] / stock["decode"] - 1, 3) if ok and stock.get("decode") and lb.get("decode") else None,
                       "gain_deep": round(lb["deep"] / stock["deep"] - 1, 3) if ok and stock.get("deep") and lb.get("deep") else None,
                       "gain_step": round(1 - lb["step_s"] / stock["step_s"], 3) if ok and stock.get("step_s") and lb.get("step_s") else None}

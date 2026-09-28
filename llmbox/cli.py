@@ -160,7 +160,9 @@ def cmd_irt(a: argparse.Namespace) -> None:
     from . import irt, suite
     hs = (a.content_hash or suite.content_hash()).split(",")   # several: versions whose tasks are the same
     ch = irt.canonical(hs[-1])   # runs of every suite content with the same tasks (irt.SAME_TASKS) share its bank
-    resp = irt.responses(hs)
+    # the current suite: every answer to a family that is unchanged in it, from any version and any run (irt.pool);
+    # an explicit --content-hash: the full runs of exactly that content, as before
+    resp = irt.pooled_responses() if not a.content_hash else irt.responses(hs)
     models = sorted({r.model for r in resp})
     if not resp:
         raise SystemExit(f"no full runs of suite content {ch}; pass --content-hash")

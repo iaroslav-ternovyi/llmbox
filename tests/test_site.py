@@ -15,7 +15,7 @@ bad = []
 for p in pages:
     html = open(p).read()
     for href in re.findall(r'href="([^"#?]+\.html)"', html):
-        if href not in names:
+        if href not in names and "${" not in href:   # a link a page script fills in (recipe-${id}.html)
             bad.append(f"{os.path.basename(p)} -> {href}")
 print(f"{len(pages)} pages built in {out}")
 print("broken links:", bad or "none")
