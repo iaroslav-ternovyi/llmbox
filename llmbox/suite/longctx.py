@@ -1,7 +1,9 @@
-"""Long documents / RAG-style reading at 5 difficulty levels.
+"""Long documents / RAG-style reading at 8 difficulty levels.
 
-Level scales document length (~29k -> ~200k real tokens; the chars/4 estimate under-counts by ~1.2x), hop count, the number of conditions and adds later corrections
+Levels 1-5 scale document length (~29k -> ~200k real tokens; the chars/4 estimate under-counts by ~1.2x), hop count, the number of conditions and adds later corrections
 ("incident reopened" entries that override earlier facts).
+v0.11: levels 6-8 (audit: 7-8) keep the document at the level-3 size and make the reading harder: dated org changes, withdrawn
+duplicates, revised user counts, facts the document does not contain (NOT STATED) - see "levels 6-8" below.
 """
 from __future__ import annotations
 
@@ -119,6 +121,8 @@ def _eq(expected: str):
 
 
 def lookup(seed: int, level: int = 3) -> Item:
+    if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
+        return _hard_item("lookup", seed, level)
     def build(r, staff, mgr, incidents, level):
         pool = [i for i in incidents if i["updates"] and "corrected" in i["updates"][-1][1]] if level >= 3 else incidents
         inc = r.choice(pool or incidents)
@@ -127,6 +131,8 @@ def lookup(seed: int, level: int = 3) -> Item:
 
 
 def multihop(seed: int, level: int = 3) -> Item:
+    if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
+        return _hard_item("multihop", seed, level)
     def build(r, staff, mgr, incidents, level):
         inc = r.choice(incidents)
         m = staff[inc["engineer"]]["manager"]
@@ -142,6 +148,8 @@ def multihop(seed: int, level: int = 3) -> Item:
 
 
 def count(seed: int, level: int = 3) -> Item:
+    if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
+        return _hard_item("count", seed, level)
     def build(r, staff, mgr, incidents, level):
         for _ in range(50):   # re-draw degenerate questions (v0.5 asked about an office no manager was in -> answer 0)
             svc = r.choice(SERVICES)
@@ -164,6 +172,8 @@ def count(seed: int, level: int = 3) -> Item:
 
 
 def latest(seed: int, level: int = 3) -> Item:
+    if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
+        return _hard_item("latest", seed, level)
     def build(r, staff, mgr, incidents, level):
         cause = r.choice(CAUSES)
         sel = [i for i in incidents if i["cause"] == cause]
@@ -181,6 +191,8 @@ def latest(seed: int, level: int = 3) -> Item:
 
 def total(seed: int, level: int = 3) -> Item:
     """Sum of affected users over many matching incidents - needs every match, not just finding one."""
+    if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
+        return _hard_item("total", seed, level)
     def build(r, staff, mgr, incidents, level):
         for _ in range(50):
             svc = r.choice(SERVICES)
@@ -201,6 +213,8 @@ def audit(seed: int, level: int = 6) -> Item:
     """Expert: fact-check a draft monthly report (40 lines) against the incident log - the log is the source of truth and
     later updates override earlier facts. Errors are subtle: a pre-correction severity or root-cause code, two swapped
     digits in the user count, a duration off by an hour, a wrong service. Credit per error found, minus false alarms."""
+    if level >= 7:
+        return _audit_hard(seed, level)
     r = rng(BLOCK, f"audit{level}", seed)
     staff, mgr_info, incidents = _world(r, TOKENS[4], corrections=2)
     doc = _render(staff, mgr_info, incidents)
@@ -256,4 +270,552 @@ def audit(seed: int, level: int = 6) -> Item:
                 meta={"expected": ", ".join(exp), "doc_tokens_est": (len(doc) + len(report)) // 4, "level": level, "wrong": len(exp)})
 
 
+# ---- levels 6-8 (v0.11) -----------------------------------------------------------------------------------------------
+# Levels 1-5 grow the document; levels 1-5 of lookup / multihop / latest topped out (frontier ~1.0, strong local models
+# ~0.9). From level 6 the document stays at the level-3 size (<= ~95k real tokens, one prefill on a 12 GB box) and the
+# READING gets harder instead:
+#   - org changes that take effect on a date: an engineer moves to another manager (and team), a manager relocates to
+#     another office or reports to another director - "who was the manager WHEN the incident was opened";
+#   - withdrawn duplicates that no statistic may count, and revised user counts (the incident entry keeps the first figure);
+#   - facts the document does not contain (a contractor outside the directory, a manager whose office is not stated yet,
+#     an incident id or date that is not in the log): the answer is NOT STATED (from level 7);
+#   - aggregations picked so that a reader who misses one kind of later update gets a different answer.
+# Every level-6..8 item mixes a fixed set of question types (a seed changes only which incidents / values they hit).
+TOKENS_HARD = {6: 72_000, 7: 72_000, 8: 72_000}
+NOT_STATED = "NOT STATED"
+_T0 = dt.datetime(2026, 1, 1)
+_NS = re.compile(r"\bnot[\s_-]+(stated|specified|mentioned|given|listed|recorded|documented|provided|available|found|in\s+the\s+"
+                 r"(document|log))\b|\bunknown\b|\bcannot\s+be\s+determined\b|\bno\s+information\b", re.I)
+_HARD_FILLER = _FILLER | {"team", "service", "severity"}
+
+
+def _at(hist: list, when: dt.datetime):
+    """The entry of a dated history [(effective, ...), ...] in effect at `when` (entries are sorted by date)."""
+    cur = hist[0]
+    for h in hist:
+        if h[0] <= when:
+            cur = h
+    return cur
+
+
+def _world_hard(r, level: int) -> dict:
+    staff, mgr_info, incidents = _world(r, TOKENS_HARD[level], corrections=2)
+    managers = list(mgr_info)
+    dirs = sorted({v["director"] for v in mgr_info.values()})
+    used = set(staff) | set(managers) | set(dirs)
+    fresh = [f"{f} {l}" for f in FIRST for l in LAST if f"{f} {l}" not in used]
+    r.shuffle(fresh)
+    if len(dirs) < 3:   # a director who only appears in an org change
+        dirs.append(fresh.pop())
+    org = []
+    # engineers who move to another manager (and sometimes another team) during the year
+    hist = {n: [(_T0, s["team"], s["manager"])] for n, s in staff.items()}
+    for n in r.sample(list(staff), len(staff) // 3):
+        for d in sorted(r.sample(range(30, 290), 2 if level >= 8 and r.random() < 0.4 else 1)):
+            when = _T0 + dt.timedelta(days=d)
+            _, team, mgr = hist[n][-1]
+            new_mgr = r.choice([m for m in managers if m != mgr])
+            new_team = r.choice([t for t in SERVICES if t != team]) if r.random() < 0.4 else team
+            hist[n].append((when, new_team, new_mgr))
+            org.append((when, f"Effective {when:%Y-%m-%d}, {n} " + (f"moves from the {team} team to the {new_team} team and "
+                                                                     if new_team != team else "") + f"now reports to {new_mgr}."))
+    # managers: two without a stated office at first, three relocations, two new directors
+    office = {m: [(_T0, v["office"])] for m, v in mgr_info.items()}
+    for m in r.sample(managers, 2):
+        office[m] = [(_T0, None)]
+    for m in r.sample(managers, 3):
+        when = _T0 + dt.timedelta(days=r.randint(30, 290))
+        cur = office[m][-1][1]
+        new = r.choice([o for o in OFFICES if o != cur])
+        office[m].append((when, new))
+        org.append((when, f"Effective {when:%Y-%m-%d}, engineering manager {m} " + (f"relocates from the {cur} office to the {new} office."
+                                                                                   if cur else f"is based in the {new} office.")))
+    director = {m: [(_T0, v["director"])] for m, v in mgr_info.items()}
+    for m in r.sample(managers, 2):
+        when = _T0 + dt.timedelta(days=r.randint(30, 290))
+        new = r.choice([d for d in dirs if d != director[m][-1][1]])
+        director[m].append((when, new))
+        org.append((when, f"Effective {when:%Y-%m-%d}, engineering manager {m} now reports to director {new}."))
+    # contractors: on-call engineers who are not in the directory (their reporting line is not stated anywhere)
+    contractors = fresh[:4]
+    for inc in r.sample(incidents, max(6, len(incidents) // 60)):
+        inc["engineer"] = r.choice(contractors)
+    for inc in incidents:
+        inc["users0"], inc["dup_of"] = inc["users"], None
+    # withdrawn duplicates of an earlier incident on the same service
+    by_time = sorted(incidents, key=lambda i: i["opened"])
+    wd = r.sample(by_time[30:], max(8, len(incidents) // 50))
+    wd_ids = {i["id"] for i in wd}
+    for inc in wd:
+        earlier = [j for j in by_time if j["service"] == inc["service"] and j["opened"] < inc["opened"] and j["id"] not in wd_ids]
+        tgt = earlier[-r.randint(1, min(6, len(earlier)))]
+        inc["dup_of"] = tgt["id"]
+        when = inc["resolved"] + dt.timedelta(days=r.randint(1, 6), hours=r.randint(0, 12))
+        inc["updates"].append((when, f"{inc['id']} was a duplicate of {tgt['id']} and is withdrawn from the log; it does not count "
+                                     f"in any statistics."))
+    # revised user counts (the incident entry keeps the first figure)
+    for inc in r.sample(incidents, len(incidents) // 12):
+        new = max(10, int(inc["users"] * r.choice([0.2, 0.4, 0.6, 1.5, 2, 3])) + r.randint(-99, 99))
+        last = max([inc["resolved"]] + [w for w, _ in inc["updates"]])
+        when = last + dt.timedelta(days=r.randint(1, 10), hours=r.randint(0, 12))
+        inc["updates"].append((when, f"Post-mortem update for {inc['id']}: the number of affected users is revised from "
+                                     f"{inc['users']:,} to {new:,}."))
+        inc["users"] = new
+    for inc in incidents:   # the value of each field over time, read back from the update texts
+        h = {"sev": [(inc["opened"], inc["sev0"])], "code": [(inc["opened"], inc["code0"])]}
+        for when, text in sorted(inc["updates"]):
+            m = re.search(r"reclassified from \S+ to (\S+)\.|the root-cause code is corrected from \S+ to (\S+)\.", text)
+            if m:
+                h["sev" if m.group(1) else "code"].append((when, m.group(1) or m.group(2)))
+        assert h["sev"][-1][1] == inc["sev"] and h["code"][-1][1] == inc["code"]
+        inc["hist"] = h
+    return {"staff": staff, "mgr": mgr_info, "incidents": incidents, "hist": hist, "office": office, "director": director,
+            "org": org, "contractors": set(contractors), "by_id": {i["id"]: i for i in incidents}, "cache": {}}
+
+
+def _render_hard(W: dict) -> str:
+    parts = ["# Platform operations handbook - incident log and org directory\n",
+             "## Management (as of 2026-01-01; later org changes are recorded in the incident log)\n"]
+    for m in W["mgr"]:
+        o, d = W["office"][m][0][1], W["director"][m][0][1]
+        parts.append(f"- {m} is an engineering manager " + (f"based in the {o} office " if o else "") + f"and reports to director {d}.")
+    parts.append("\n## Engineers (as of 2026-01-01)\n")
+    for n, s in W["staff"].items():
+        parts.append(f"- {n} works on the {s['team']} team and reports to {s['manager']}.")
+    parts.append("\n## Incident log\n")
+    events = []
+    for inc in W["incidents"]:
+        o, rs = inc["opened"], inc["resolved"]
+        events.append((o, f"### {inc['id']} ({inc['sev0']}, {inc['service']})\nOpened {o:%Y-%m-%d %H:%M} UTC. About {inc['users0']:,} "
+                          f"users were affected. The on-call engineer {inc['engineer']} traced it to a {inc['cause']} and applied a fix; "
+                          f"the incident was resolved {rs:%Y-%m-%d %H:%M} UTC. Root-cause code: {inc['code0']}. Follow-up actions "
+                          f"were filed in the {inc['service']} backlog.\n"))
+        for when, text in inc["updates"]:
+            events.append((when, f"### Update {when:%Y-%m-%d}\n{text}\n"))
+    for when, text in W["org"]:
+        events.append((when, f"### Org change {when:%Y-%m-%d}\n{text}\n"))
+    parts += [t for _, t in sorted(events, key=lambda e: e[0])]
+    return "\n".join(parts)
+
+
+# reporting lines at a point in time; None = the document does not say (a contractor, a manager without a stated office)
+def _mgr_at(W, e, t):
+    return _at(W["hist"][e], t)[2] if e in W["hist"] else None
+
+
+def _team_at(W, e, t):
+    return _at(W["hist"][e], t)[1] if e in W["hist"] else None
+
+
+def _office_at(W, m, t):
+    return _at(W["office"][m], t)[1] if m in W["office"] else None
+
+
+def _dir_at(W, m, t):
+    return _at(W["director"][m], t)[1] if m in W["director"] else None
+
+
+def _clean(W, inc) -> bool:
+    """No org change touching this incident's reporting line takes effect on the day it was opened (no same-day ambiguity)."""
+    e = inc["engineer"]
+    if e not in W["hist"]:
+        return True
+    days = W["cache"].get(("days", e))
+    if days is None:
+        days = {h[0].date() for h in W["hist"][e][1:]}
+        for m in {h[2] for h in W["hist"][e]}:
+            days |= {h[0].date() for h in W["office"][m][1:] + W["director"][m][1:]}
+        W["cache"][("days", e)] = days
+    return inc["opened"].date() not in days
+
+
+def _norm_hard(s: str) -> list[str]:
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
+    return [w for w in re.findall(r"[\w-]+", s.lower()) if w not in _HARD_FILLER]
+
+
+def _chk(expected, how: str = "text"):
+    if expected == NOT_STATED:
+        return lambda t, _t=None: 1.0 if _NS.search(final_answer(t) or "") else 0.0
+    if how == "num":
+        return lambda t, _t=None: 1.0 if num(final_answer(t)) == expected else 0.0
+    if how == "sev":
+        return lambda t, _t=None: 1.0 if re.fullmatch(rf"sev\s*-?\s*{expected[-1]}", (final_answer(t) or "").strip(" .").lower()) else 0.0
+    return lambda t, _t=None: 1.0 if _norm_hard(final_answer(t)) == _norm_hard(str(expected)) else 0.0
+
+
+_FIELD = {"code": ("What is the final root-cause code of {ref}?", "code", "text"),
+          "sev": ("What is the final severity of {ref}?", "sev", "sev"),
+          "users": ("How many users were affected by {ref}, according to the latest figure in the log? Answer with a number.", "users", "num")}
+
+
+def _changed(i, field: str) -> bool:
+    return i[field] != i[field + "0"]
+
+
+def _field_q(ref: str, inc, field: str):
+    q, key, how = _FIELD[field]
+    ans = NOT_STATED if inc is None else inc[key]
+    return q.format(ref=ref), _chk(ans, how), ans
+
+
+def _lookup_hard(r, W, typ, level):
+    incs = W["incidents"]
+    live = [i for i in incs if not i["dup_of"]]
+    if typ in _FIELD:        # by id; the value changed after the incident entry (a chain of corrections / a revision)
+        i = r.choice([i for i in live if _changed(i, typ)])
+        return _field_q(i["id"], i, typ)
+    if typ == "absent_id":   # an id with two digits swapped that no incident has
+        i = r.choice(incs)
+        d = i["id"][4:]
+        k = r.randrange(len(d) - 1)
+        new = "INC-" + d[:k] + d[k + 1] + d[k] + d[k + 2:]
+        if new in W["by_id"] or new == i["id"]:
+            return None
+        return _field_q(new, None, r.choice(["code", "sev"]))
+    if typ == "asof":        # the value on a past day, between two entries: later corrections must be left out
+        i = r.choice([i for i in live if len(i["hist"]["sev"]) + len(i["hist"]["code"]) > 2])
+        field = r.choice([f for f in ("sev", "code") if len(i["hist"][f]) > 1])
+        h = i["hist"][field]
+        k = r.randrange(len(h) - 1)
+        lo, hi = h[k][0].date(), h[k + 1][0].date()
+        days = (hi - lo).days
+        if days < 2:
+            return None
+        day = lo + dt.timedelta(days=r.randint(1, days - 1))
+        what = "severity" if field == "sev" else "root-cause code"
+        return (f"According to the log, what was the {what} of {i['id']} at the end of {day:%Y-%m-%d} (leave out any update made "
+                f"after that day)?"), _chk(h[k][1], "sev" if field == "sev" else "text"), h[k][1]
+    if typ == "dup":         # withdrawn -> the incident it duplicated -> its final value
+        w = r.choice([i for i in incs if i["dup_of"]])
+        field = r.choice(["code", "sev"])
+        q, a, e = _field_q("that other incident", W["by_id"][w["dup_of"]], field)
+        return f"{w['id']} was withdrawn as a duplicate of another incident. {q}", a, e
+    groups = {}
+    for i in incs:
+        groups.setdefault((i["service"], i["opened"].date()), []).append(i)
+    if typ == "attr_absent":  # a day with incidents on other services, none on this one
+        day = r.choice(sorted({d for (_s, d), v in groups.items()}))
+        svcs = {s for (s, d) in groups if d == day}
+        if len(svcs) < 2:
+            return None
+        svc = r.choice([s for s in SERVICES if s not in svcs])
+        return _field_q(f"the incident on the {svc} service that was opened on {day:%Y-%m-%d}", None, r.choice(["code", "sev"]))
+    field = typ.split("_")[1]  # attr_code / attr_sev / attr_users: identified by service and opening day, not by id
+    pool = [i for i in live if _changed(i, field) and len(groups[(i["service"], i["opened"].date())]) == 1]
+    i = r.choice(pool)
+    return _field_q(f"the incident on the {i['service']} service that was opened on {i['opened']:%Y-%m-%d}", i, field)
+
+
+_MH_Q = {"mgr": "Who was the manager of the engineer who handled {id} at the time {id} was opened? Answer with the full name.",
+         "office": "In which office was the manager of the engineer who handled {id} based at the time {id} was opened?",
+         "dir": "Which director was at the top of the reporting line of the engineer who handled {id} at the time {id} was opened? "
+                "Answer with the full name.",
+         "team": "On which team did the engineer who handled {id} work at the time {id} was opened?"}
+
+
+def _mh_answer(W, inc, what):
+    e, t = inc["engineer"], inc["opened"]
+    m = _mgr_at(W, e, t)
+    if m is None:
+        return None
+    return {"mgr": m, "office": _office_at(W, m, t), "dir": _dir_at(W, m, t), "team": _team_at(W, e, t)}[what]
+
+
+def _mh_naive(W, inc, what):
+    """What a reader who takes the directory at face value (ignoring org changes) answers."""
+    e = inc["engineer"]
+    if e not in W["staff"]:
+        return None
+    m = W["staff"][e]["manager"]
+    return {"mgr": m, "office": W["office"][m][0][1], "dir": W["director"][m][0][1], "team": W["staff"][e]["team"]}[what]
+
+
+def _multihop_hard(r, W, typ, level):
+    incs = [i for i in W["incidents"] if _clean(W, i)]
+    staffed = [i for i in incs if i["engineer"] in W["staff"]]
+    if typ == "absent_contractor":
+        i = r.choice([i for i in incs if i["engineer"] in W["contractors"]])
+        what = r.choice(["mgr", "office", "dir"])
+        return _MH_Q[what].format(id=i["id"]), _chk(NOT_STATED), NOT_STATED
+    if typ == "absent_office":   # prefer a manager who gets an office later (the log names one, just not for that date)
+        pool = [i for i in staffed if _mh_answer(W, i, "office") is None]
+        later = [i for i in pool if W["office"][_mgr_at(W, i["engineer"], i["opened"])][-1][1]]
+        i = r.choice(later or pool)
+        return _MH_Q["office"].format(id=i["id"]), _chk(NOT_STATED), NOT_STATED
+    if typ == "dup_office":
+        pool = [w for w in W["incidents"] if w["dup_of"] and W["by_id"][w["dup_of"]]["engineer"] in W["staff"]
+                and _clean(W, W["by_id"][w["dup_of"]]) and _mh_answer(W, W["by_id"][w["dup_of"]], "office")]
+        w = r.choice(pool)
+        a = _mh_answer(W, W["by_id"][w["dup_of"]], "office")
+        return (f"{w['id']} was withdrawn as a duplicate of another incident. In which office was the manager of the engineer who "
+                f"handled that other incident based at the time that other incident was opened?"), _chk(a), a
+    if typ == "mgr_t_same":      # opened BEFORE the engineer moved: the directory is still right
+        pool = [i for i in staffed if len(W["hist"][i["engineer"]]) > 1 and i["opened"] < W["hist"][i["engineer"]][1][0]]
+        i = r.choice(pool)
+        a = _mh_answer(W, i, "mgr")
+        return _MH_Q["mgr"].format(id=i["id"]), _chk(a), a
+    what = typ.split("_")[0]     # mgr_t / office_t / dir_t / team_t: the answer differs from the directory's
+    pool = [i for i in staffed if _mh_answer(W, i, what) and _mh_answer(W, i, what) != _mh_naive(W, i, what)]
+    i = r.choice(pool)
+    a = _mh_answer(W, i, what)
+    return _MH_Q[what].format(id=i["id"]), _chk(a), a
+
+
+# ---- aggregations: every candidate question is scored by how many kinds of later update change its answer --------------
+
+def _org_ok(W, inc, org, naive: bool) -> bool | None:
+    if org is None:
+        return True
+    e, t = inc["engineer"], inc["opened"]
+    if e not in W["staff"]:
+        return None
+    m = W["staff"][e]["manager"] if naive else _mgr_at(W, e, t)
+    v = (W["office"][m][0][1] if naive else _office_at(W, m, t)) if org[0] == "office" else \
+        (W["director"][m][0][1] if naive else _dir_at(W, m, t))
+    return None if v is None else v == org[1]
+
+
+def _variants(W, sel, org, key=None):
+    """(right answer, [answers of readers who miss one kind of update]) over the incidents `sel` (pre-filtered on service,
+    cause and months). None when a candidate's org condition cannot be decided from the document or falls on a change day."""
+    out, n_right = {}, 0
+    for name in ("right", "sev", "wd", "users", "org"):
+        if name == "users" and key not in ("users", "sum"):
+            continue
+        if name == "org" and org is None:
+            continue
+        rows = []
+        for i in sel["items"]:
+            sev = i["sev0"] if name == "sev" else i["sev"]
+            if sev not in sel["sevs"] or (i["dup_of"] and name != "wd"):
+                continue
+            ok = _org_ok(W, i, org, name == "org")
+            if ok is None or (org and not _clean(W, i)):
+                return None
+            if ok:
+                rows.append(i)
+        if name == "right":
+            n_right = len(rows)
+        users =(lambda i: i["users0"]) if name == "users" else (lambda i: i["users"])
+        if key is None:
+            out[name] = len(rows)
+        elif key == "sum":
+            out[name] = sum(users(i) for i in rows) if rows else None
+        else:
+            vals = sorted(((users(i) if key == "users" else i["resolved"] - i["opened"]), i["id"]) for i in rows)
+            if len(vals) < 3 or vals[-1][0] == vals[-2][0]:
+                out[name] = None if name == "right" else (vals[-1][1] if vals else None)
+            else:
+                out[name] = vals[-1][1]
+    if out["right"] is None or n_right < 3:
+        return None
+    work = sum(1 for i in sel["items"] if i["sev"] in sel["sevs"] or i["sev0"] in sel["sevs"])   # incidents a reader must trace
+    return out["right"], sum(v != out["right"] for k, v in out.items() if k != "right"), n_right, work
+
+
+def _agg_pool(W, kind: str, level: int):
+    ck = (kind, level)
+    if ck in W["cache"]:
+        return W["cache"][ck]
+    incs = W["incidents"]
+    dirs = sorted({d for h in W["director"].values() for _, d in h})
+    pool = []
+    if kind in ("count", "total"):
+        span, cap = {6: 9, 7: 4, 8: 3}[level], {6: 20, 7: 16, 8: 16}[level]
+        sev_sets = [("SEV1",), ("SEV2",)] if (kind, level) in (("count", 6), ("count", 7)) else \
+            [("SEV1",), ("SEV2",), ("SEV3",)] if kind == "total" and level != 7 else [("SEV1", "SEV2"), ("SEV1", "SEV3"), ("SEV2", "SEV3")]
+        orgs = [("dir", d) for d in dirs] if (kind, level) in (("count", 7), ("count", 8), ("total", 8)) else [None]
+        for svc in SERVICES:
+            on = [i for i in incs if i["service"] == svc]
+            for a in range(1, 11):
+                for b in range(a + 1, min(11, a + span + 1)):
+                    items = [i for i in on if a <= i["opened"].month <= b]
+                    for sevs in sev_sets:
+                        for org in orgs:
+                            v = _variants(W, {"items": items, "sevs": sevs}, org, None if kind == "count" else "sum")
+                            if v and v[2] <= 15 and v[3] <= cap:
+                                pool.append((v[1], (svc, sevs, a, b, org), v[0]))
+    else:   # latest: the incident with the most (final) users / the longest duration among a cause on one or two services
+        key = "dur" if level == 6 else "users"
+        sev_sets = [None, ("SEV1",), ("SEV2",), ("SEV3",)] if level == 6 else \
+            [("SEV1",), ("SEV2",), ("SEV1", "SEV2"), ("SEV2", "SEV3")] if level == 7 else [("SEV1", "SEV2"), ("SEV1", "SEV3"), ("SEV2", "SEV3")]
+        svc_sets = [(s,) for s in SERVICES] if level < 8 else [(a, b) for k, a in enumerate(SERVICES) for b in SERVICES[k + 1:]]
+        for cause in CAUSES:
+            of = [i for i in incs if i["cause"] == cause]
+            for svcs in svc_sets:
+                items = [i for i in of if i["service"] in svcs]
+                for sevs in sev_sets:
+                    v = _variants(W, {"items": items, "sevs": sevs or ("SEV1", "SEV2", "SEV3")}, None, key)
+                    if v and v[3] <= 20:
+                        pool.append((v[1], (cause, svcs, sevs, key), v[0]))
+    W["cache"][ck] = pool
+    return pool
+
+
+def _pick(r, pool, need: int):
+    for n in range(need, -1, -1):
+        sub = [p for p in pool if p[0] >= n]
+        if len(sub) >= 12:
+            return r.choice(sub)
+    return r.choice(pool)
+
+
+def _org_phrase(org) -> str:
+    if org is None:
+        return ""
+    if org[0] == "dir":
+        return f" and handled by an engineer whose manager, at the time the incident was opened, reported to director {org[1]}"
+    return f" and handled by an engineer whose manager was based in the {org[1]} office at the time the incident was opened"
+
+
+def _count_hard(r, W, typ, level):
+    _, (svc, sevs, a, b, org), n = _pick(r, _agg_pool(W, "count", level), {6: 1, 7: 2, 8: 2}[level])
+    q = (f"How many incidents on the {svc} service with final severity {' or '.join(sevs)} were OPENED between month {a} and "
+         f"month {b} of 2026 (inclusive){_org_phrase(org)}? Answer with a number.")
+    return q, _chk(n, "num"), n, (svc, a, b)   # one question per service and months window
+
+
+def _total_hard(r, W, typ, level):
+    _, (svc, sevs, a, b, org), n = _pick(r, _agg_pool(W, "total", level), {6: 2, 7: 2, 8: 3}[level])
+    q = (f"What is the total number of affected users (latest figures) over all incidents on the {svc} service with final "
+         f"severity {' or '.join(sevs)} that were OPENED between month {a} and month {b} of 2026 (inclusive){_org_phrase(org)}? "
+         f"Answer with a plain integer.")
+    return q, _chk(n, "num"), n, (svc, a, b)
+
+
+def _latest_hard(r, W, typ, level):
+    _, (cause, svcs, sevs, key), best = _pick(r, _agg_pool(W, "latest", level), {6: 1, 7: 1, 8: 2}[level])
+    what = "took the longest from opening to resolution" if key == "dur" else "affected the most users (latest figures)"
+    sev = f" with final severity {' or '.join(sevs)}" if sevs else ""
+    return (f"Among all incidents caused by a {cause} on the {' or '.join(svcs)} service{sev}, which one {what}? Answer with the "
+            f"incident id."), _chk(best), best, (cause, svcs)
+
+
+_HARD = {"lookup": (_lookup_hard, {6: ["code", "sev", "users", "code", "users"], 7: ["code", "asof", "users", "dup", "absent_id"],
+                                   8: ["attr_code", "asof", "attr_users", "dup", "attr_absent"]}),
+         "multihop": (_multihop_hard, {6: ["mgr_t", "mgr_t", "mgr_t_same", "office_t", "team_t"],
+                                       7: ["mgr_t", "office_t", "dir_t", "mgr_t_same", "absent_contractor"],
+                                       8: ["dir_t", "office_t", "dup_office", "team_t", "absent_office"]}),
+         "count": (_count_hard, None), "total": (_total_hard, None), "latest": (_latest_hard, None)}
+
+
+def _hard_item(kind: str, seed: int, level: int) -> Item:
+    """One document per (level, seed) as below level 6, shared by every question kind (the prompt cache prefills it once)."""
+    W = _world_hard(rng(BLOCK, f"doc{level}", seed), level)
+    doc = _render_hard(W)
+    build, plans = _HARD[kind]
+    plan = list(plans[level]) if plans else ["q"] * QUESTIONS
+    rng(BLOCK, f"{kind}{level}plan", seed).shuffle(plan)
+    qs = []
+    for k, typ in enumerate(plan):
+        for a in range(60):
+            q = build(rng(BLOCK, f"{kind}{level}q{k}.{a}", seed), W, typ, level)
+            if q and q[2] is not None and all(q[-1] != x[-1] for x in qs):   # distinct questions (or dedupe keys)
+                qs.append(q)
+                break
+        else:
+            raise RuntimeError(f"no question of type {typ} for {kind} L{level} seed {seed}")
+    note = ("\nLater updates in the log override earlier facts; org changes take effect on their date; withdrawn incidents do "
+            "not count anywhere.")
+    if level >= 7:
+        note += " If the document does not contain the answer to a question, answer NOT STATED."
+    ask = "Answer each of these questions:\n" + "\n".join(f"{i + 1}. {q[0]}" for i, q in enumerate(qs))
+    fin = ("\n\nAnswer from the document only. Finish with one final line per question, exactly in the form:\n"
+           + "\n".join(f"ANSWER {i + 1}: <answer>" for i in range(len(qs))))
+    return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind,
+                [{"role": "user", "content": doc + "\n\n---\n" + ask + note + fin}], multi_check([q[1] for q in qs]),
+                max_tokens=32000, meta={"expected": [q[2] for q in qs], "doc_tokens_est": len(doc) // 4, "level": level,
+                                        "questions": len(qs), "types": plan})
+
+
+def _audit_hard(seed: int, level: int) -> Item:
+    """Levels 7-8: fact-check a draft report against the level-6+ log. Besides the level-6 errors (stale severity / code,
+    swapped digits, an hour off, a wrong service) a line can use the user count before its revision, name the manager from
+    the directory although the engineer had moved by then (or name the manager the engineer only moved to later), or report
+    a withdrawn incident at all. Correct lines are picked among the incidents that LOOK suspicious (corrected, revised,
+    moved engineers). Credit per error found, minus false alarms."""
+    r = rng(BLOCK, f"audit{level}", seed)
+    W = _world_hard(r, level)
+    doc = _render_hard(W)
+    hist = W["hist"]
+    elig = [i for i in W["incidents"] if i["engineer"] in W["staff"] and _clean(W, i)]
+    live = [i for i in elig if not i["dup_of"]]
+
+    def mgr(i):
+        return _mgr_at(W, i["engineer"], i["opened"])
+
+    def later_mgr(i):
+        return next((h[2] for h in hist[i["engineer"]] if h[0] > i["opened"] and h[2] != mgr(i)), None)
+    pools = {"stale_sev": [i for i in live if _changed(i, "sev")], "stale_code": [i for i in live if _changed(i, "code")],
+             "stale_users": [i for i in live if _changed(i, "users")],
+             "stale_manager": [i for i in live if mgr(i) != W["staff"][i["engineer"]]["manager"]],
+             "future_manager": [i for i in live if later_mgr(i)], "withdrawn": [i for i in elig if i["dup_of"]],
+             "digits": [i for i in live if len(set(str(i["users"]))) > 1], "duration": live, "service": live}
+    kinds = ["stale_sev", "stale_code", "stale_users", "stale_manager", "withdrawn", "digits", "duration", "service"]
+    decoys = ["stale_sev", "stale_code", "stale_users", "stale_manager", "future_manager", "stale_users"]
+    n_lines = 30
+    if level >= 8:
+        kinds += ["future_manager", "stale_manager", "stale_code"]
+        decoys += ["stale_manager", "stale_sev"]
+        n_lines = 36
+    used, plan = set(), {}
+    for k in kinds:
+        i = r.choice([i for i in pools[k] if i["id"] not in used])
+        used.add(i["id"])
+        plan[i["id"]] = k
+    for k in decoys:   # right lines on incidents whose facts changed: a reader who flags every change pays for it
+        used.add(r.choice([i for i in pools[k] if i["id"] not in used])["id"])
+    rest = r.sample([i for i in live if i["id"] not in used], n_lines - len(used))
+    chosen = sorted([W["by_id"][x] for x in used] + rest, key=lambda i: i["opened"])
+
+    def fields(i):
+        d = i["resolved"] - i["opened"]
+        return {"service": i["service"], "sev": i["sev"], "users": i["users"], "dur": int(d.total_seconds() // 60), "code": i["code"],
+                "mgr": mgr(i)}
+    lines = []
+    for i in chosen:
+        f = fields(i)
+        k = plan.get(i["id"])
+        if k == "stale_sev":
+            f["sev"] = i["sev0"]
+        elif k == "stale_code":
+            f["code"] = i["code0"]
+        elif k == "stale_users":
+            f["users"] = i["users0"]
+        elif k == "stale_manager":
+            f["mgr"] = W["staff"][i["engineer"]]["manager"]
+        elif k == "future_manager":
+            f["mgr"] = later_mgr(i)
+        elif k == "digits":
+            s_ = str(f["users"])
+            p = r.choice([j for j in range(len(s_) - 1) if s_[j] != s_[j + 1]])
+            f["users"] = int(s_[:p] + s_[p + 1] + s_[p] + s_[p + 2:])
+        elif k == "duration":
+            f["dur"] += 60 if f["dur"] <= 60 or r.random() < 0.5 else -60
+        elif k == "service":
+            f["service"] = r.choice([x for x in SERVICES if x != i["service"]])
+        assert (f != fields(i)) == (k is not None and k != "withdrawn")
+        lines.append(f"- {i['id']} ({f['service']}, {f['sev']}): about {f['users']:,} users affected, resolved after {f['dur'] // 60}h "
+                     f"{f['dur'] % 60:02d}m, root-cause code {f['code']}; handled by {i['engineer']}, whose manager at the time was "
+                     f"{f['mgr']}.")
+    exp = [i["id"] for i in chosen if i["id"] in plan]
+    report = "## Draft reliability report (to be checked)\n\n" + "\n".join(lines)
+    question = ("The draft reliability report above was written from the incident log before it. Check EVERY line of the report "
+                "against the log: the log is the source of truth, later updates override earlier facts, the manager named must be "
+                "the one the engineer reported to when the incident was opened (org changes take effect on their date), and a "
+                "withdrawn incident must not appear in the report at all (its line is an error). List the ids of all incidents "
+                "whose report line contains at least one error, in report order.")
+    fin = "\n\nAnswer from the documents only. Finish with a final line exactly in the form:\nANSWER: <comma-separated incident ids, or none>"
+
+    def check(t, _t=None, exp=tuple(exp)) -> float:
+        got = set(re.findall(r"INC-\d+", final_answer(t) or ""))
+        return max(0.0, (len(got & set(exp)) - len(got - set(exp))) / len(exp))
+    return Item(f"{BLOCK}.audit.L{level}.{seed}", BLOCK, "audit",
+                [{"role": "user", "content": doc + "\n\n---\n" + report + "\n\n---\n" + question + fin}], check, max_tokens=32000,
+                meta={"expected": ", ".join(exp), "doc_tokens_est": (len(doc) + len(report)) // 4, "level": level, "wrong": len(exp)})
+
+
+MAX_LEVEL = 8
 KINDS = {"lookup": lookup, "multihop": multihop, "count": count, "latest": latest, "total": total, "audit": audit}

@@ -175,6 +175,11 @@ def _writing_oracle(it: Item) -> str | None:
         return json.dumps(e)
     if it.kind == "minutes":
         return json.dumps([{"topic": t, "owner": o, "due": d} for t, (o, d) in e.items()])
+    if it.kind in ("proofread", "i18n") and it.meta["level"] >= 6:   # v0.11: levels 6-8 have their own texts / a reference table
+        from .suite import writing as W
+        if it.kind == "i18n":
+            return W.i18n_reference(it)
+        return W._proofread_texts(int(it.id.split(".")[-1]), it.meta["level"])[0]
     if it.kind == "proofread":
         user = it.messages[0]["content"]
         from .suite import writing as W

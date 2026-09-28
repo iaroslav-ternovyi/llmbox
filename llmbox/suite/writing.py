@@ -1,7 +1,9 @@
-"""Writing, editing, translation, summarization, extraction - verifiable constraints, multilingual, 5 difficulty levels.
+"""Writing, editing, translation, summarization, extraction - verifiable constraints, multilingual, 8 difficulty levels.
 
 Level raises the number of simultaneous constraints and adds traps (changed decisions, corrections, glossaries).
 Score = fraction of constraints met.
+v0.11: levels 7-8 (minutes, i18n, proofread: 6-8) - interacting rules, contradicting rule pairs with one stated resolution,
+derived facts, authority rules, values that must not appear; see "levels 7-8" below.
 """
 from __future__ import annotations
 
@@ -42,6 +44,8 @@ def _share(results: list, gate: bool) -> float:
 
 
 def constrained(seed: int, level: int = 3) -> Item:
+    if level >= 7:   # v0.11: levels 7-8, below
+        return _constrained_hard(seed, level)
     r = rng(BLOCK, f"constrained{level}", seed)
     lang = r.choice(list(LANGS))
     topic = r.choice(TOPICS)
@@ -82,6 +86,8 @@ def constrained(seed: int, level: int = 3) -> Item:
 
 
 def translate(seed: int, level: int = 3) -> Item:
+    if level >= 7:   # v0.11: levels 7-8, below
+        return _translate_hard(seed, level)
     r = rng(BLOCK, f"translate{level}", seed)
     target = r.choice([k for k in LANGS if k != "en"])
     name = f"{r.choice(FIRST)} {r.choice(LAST)}"
@@ -124,6 +130,8 @@ def translate(seed: int, level: int = 3) -> Item:
 
 def summarize(seed: int, level: int = 3) -> Item:
     """Email thread where decisions change; only the final values count."""
+    if level >= 7:   # v0.11: levels 7-8, below
+        return _summarize_hard(seed, level)
     r = rng(BLOCK, f"summarize{level}", seed)
     lang = r.choice(["en", "en", "es", "de", "ru", "fr"])
     ppl = r.sample([f"{f} {l}" for f in FIRST for l in LAST], 5)
@@ -161,6 +169,8 @@ def summarize(seed: int, level: int = 3) -> Item:
 
 def extract(seed: int, level: int = 3) -> Item:
     """Several orders in one message, with corrections at higher levels; output a JSON array."""
+    if level >= 7:   # v0.11: levels 7-8, below
+        return _extract_hard(seed, level)
     r = rng(BLOCK, f"extract{level}", seed)
     name = f"{r.choice(FIRST)} {r.choice(LAST)}"
     city = r.choice(["Valencia", "Porto", "Lyon", "Graz", "Tartu", "Bilbao"])
@@ -207,6 +217,8 @@ def extract(seed: int, level: int = 3) -> Item:
 
 
 def rewrite(seed: int, level: int = 3) -> Item:
+    if level >= 7:   # v0.11: levels 7-8, below
+        return _rewrite_hard(seed, level)
     r = rng(BLOCK, f"rewrite{level}", seed)
     n1, n2 = r.randint(3, 19), r.randint(20, 90)
     src = (f"hey!! so we can't ship the thing this week, sorry :( the supplier's truck broke down and we're like {n1} days "
@@ -278,6 +290,8 @@ def _due_phrases(day: _dt.date, level: int) -> list[tuple[str, _dt.date]]:
 def minutes(seed: int, level: int = 3) -> Item:
     """Meeting transcript -> action items (topic, owner, due date). Owners change, deadlines move and are relative,
     items get dropped (and revived at level 5), people are named by first name or role. Graded per action item."""
+    if level >= 6:   # v0.11: levels 6-8 (this kind stopped at level 5), below
+        return _minutes_hard(seed, level)
     r = rng(BLOCK, f"minutes{level}", seed)
     day = _dt.date(2026, 10, 1) + _dt.timedelta(days=r.randint(0, 60))
     while day.weekday() not in (1, 2):
@@ -479,6 +493,8 @@ def i18n(seed: int, level: int = 3) -> Item:
     """App localization: translate a JSON string table keeping placeholders, printf tokens, HTML tags and ICU plural /
     select structure (Russian plurals need one/few/many/other), with a glossary term that is also a placeholder name
     and a brand that must not be translated. Graded per key."""
+    if level >= 6:   # v0.11: levels 6-8 (this kind stopped at level 5), below
+        return _i18n_hard(seed, level)
     r = rng(BLOCK, f"i18n{level}", seed)
     lang = r.choice(["ru", "uk"]) if level >= 5 else r.choice(["es", "de", "fr", "it", "pt", "ru"])   # ru/uk plurals: one/few/many/other
     pool = [u for u in _UI if u[2] <= level]
@@ -557,6 +573,8 @@ _PROOF = [
 def proofread(seed: int, level: int = 3) -> Item:
     """Fix the injected spelling/grammar errors and change NOTHING else. Graded on the word sequence against the clean
     original: every unfixed error and every unrequested word edit costs one; score = 1 - differing words / errors."""
+    if level >= 6:   # v0.11: levels 6-8 (this kind stopped at level 5), below
+        return _proofread_hard(seed, level)
     r = rng(BLOCK, f"proofread{level}", seed)
     paras = r.sample(_PROOF, 1 + (level + 1) // 2)
     slots = [(pi, m) for pi, p in enumerate(paras) for m in re.finditer(r"\{([^|}]*)\|([^}]*)\}", p)]
@@ -582,6 +600,948 @@ def proofread(seed: int, level: int = 3) -> Item:
                 meta={"level": level, "errors": n_err})
 
 
+# ---- v0.11: levels 7-8 (and 6 for the kinds that stopped at 5) ------------------------------------------------------------
+# Levels 1-6 topped out (frontier ~1.0, strong local models ~0.9). The hard levels do not add length; they add rules that
+# INTERACT: pairs of rules that contradict each other with one stated resolution (the later rule wins, only as far as
+# the conflict goes), facts that must be derived (a date two working days after a Friday, a refund in a fixed format,
+# a price 10% lower), authority rules (only the lead can move the deadline), values that must NOT appear (superseded or
+# rejected ones), and in-text instructions. Every rule is still one checkable constraint; the score stays the share met.
+
+_CONFLICT = ("Some of these rules contradict each other. When two rules conflict, the rule that comes LATER in the list wins, "
+             "and only as far as the conflict goes: follow every other rule, and every other part of a rule, fully.")
+_LETTERS = {"en": "BCDFHLMPRSTW", "es": "BCDLMPST", "de": "BDFGHKLMSTW", "fr": "BCDLMPST", "it": "BCDFLMPST", "pt": "BCDFLMPST",
+            "ru": "БВДКМНПСТ"}
+
+
+def _count_str(t: str, k: str) -> int:
+    return len(re.findall(rf"(?<![\w/]){re.escape(k)}(?![\w/])", t))
+
+
+def _insert_pair(r, rules: list, first, second, anchor: int | None = None) -> bool:
+    """Insert two conflicting rules at random places in `rules`, in random order; True when `second` ends up later.
+    With `anchor`, `first` conflicts with the rule already at that index: it goes before or after it."""
+    later = r.random() < 0.5
+    if anchor is not None:
+        pos = r.randint(anchor + 1, len(rules)) if later else r.randint(0, anchor)
+        rules.insert(pos, first)
+        return later
+    a, b = sorted(r.sample(range(len(rules) + 2), 2))
+    x, y = (first, second) if later else (second, first)
+    rules.insert(a, x)
+    rules.insert(b, y)
+    return later
+
+
+def _constrained_hard(seed: int, level: int) -> Item:
+    """Promotional text under 12 (L7) / 15 (L8) interacting rules: exact paragraph and per-paragraph sentence counts, a
+    narrow word window, strings exactly once, paragraph initials, a sentence length cap, and pairs of contradicting rules
+    whose order (random per seed) decides the resolution: no digits vs required strings with digits, a final question
+    mark vs periods everywhere, and (L8) a name in every paragraph vs not in the second one, plus an exact sentence length."""
+    r = rng(BLOCK, f"constrained{level}", seed)
+    lang = r.choice(list(LANGS))
+    topic = r.choice(TOPICS)
+    n = r.choice([3, 4])
+    sents = [r.choice([2, 3]) for _ in range(n)]
+    cap, width = (18, 20) if level == 7 else (15, 14)
+    lo = 5 * round(sum(sents) * r.choice([8, 9, 10]) / 5)
+    hi = lo + width
+    letters = r.sample(_LETTERS[lang], n)
+    kws = r.sample(["QR", "Madrid"] + (["Nova"] if level == 7 else []), 1) + r.sample(["48", "2026", "24/7", "3x"], 2)
+    dig = kws[1:]   # the strings with digits
+    banned = BANNED[lang]
+    first_len = r.randint(7, 11)
+
+    def body(t):
+        return _paragraphs(t)[1:]
+
+    def body_sents(t):
+        return [s for p in body(t) for s in _sentences(p)]
+
+    def title_ok(t):
+        ps = _paragraphs(t)
+        return bool(ps) and len(ps[0].splitlines()) == 1 and ps[0] == ps[0].upper() and any(c.isalpha() for c in ps[0])
+
+    # the tests read the resolution of each conflict (known once the pair is placed) when they run
+    def kw_ok(t):
+        return all(_count_str(t, k) == (0 if no_digits_wins and k in dig else 1) for k in kws)
+
+    def no_digit_ok(t):
+        rest = t
+        for k in ([] if no_digits_wins else dig):
+            rest = re.sub(rf"(?<![\w/]){re.escape(k)}(?![\w/])", " ", rest)
+        return re.search(r"\d", rest) is None
+
+    def periods_ok(t):
+        ss = body_sents(t)
+        return len(ss) >= 2 and all(s.rstrip().endswith(".") for s in ss[:-1])
+
+    def last_ok(t):
+        ss = body_sents(t)
+        return bool(ss) and ss[-1].rstrip().endswith("?" if q_wins else ".")
+    rules = [("start with a title line written entirely in UPPERCASE; the title is a paragraph of its own (a single line)", title_ok),
+             (f"after the title, exactly {n} paragraphs, separated by one blank line", lambda t: len(body(t)) == n),
+             ("the paragraphs after the title have exactly " + ", ".join(str(x) for x in sents) + " sentences, in this order",
+              lambda t: [len(_sentences(p)) for p in body(t)] == sents),
+             (f"between {lo} and {hi} words in total, the title included", lambda t: lo <= len(words(t)) <= hi),
+             ("include each of these exact strings exactly once: " + ", ".join(f'"{k}"' for k in kws), kw_ok),
+             (f'the string "{kws[0]}" appears in the last paragraph', lambda t: bool(body(t)) and _count_str(body(t)[-1], kws[0]) >= 1),
+             (f'never use the word "{banned}"', lambda t: re.search(rf"(?<!\w){re.escape(banned)}(?!\w)", t, re.I) is None),
+             ("the paragraphs after the title start with words beginning with the letters " + ", ".join(letters) + ", in this order",
+              lambda t: [p.strip()[:1].upper() for p in body(t)] == letters),
+             (f"no sentence is longer than {cap} words", lambda t: bool(body_sents(t)) and all(len(words(s)) <= cap for s in body_sents(t)))]
+    no_digits_wins = _insert_pair(r, rules, ("do not use any digits anywhere in the text", no_digit_ok), None, anchor=4)
+    q_wins = _insert_pair(r, rules, ("end every sentence after the title with a period", periods_ok),
+                          ("the text ends with a question mark", last_ok))
+    if level >= 8:
+        not2_wins = _insert_pair(
+            r, rules, ('mention the name "Nova" in every paragraph after the title',
+                       lambda t: len(body(t)) >= 2 and all(_count_str(p, "Nova") >= 1 for k, p in enumerate(body(t)) if k != 1)),
+            ('the second paragraph after the title must not contain the name "Nova"',
+             lambda t: len(body(t)) >= 2 and (_count_str(body(t)[1], "Nova") == 0) == not2_wins))
+        rules.insert(r.randint(0, len(rules)), (f"the first sentence after the title has exactly {first_len} words",
+                                                lambda t: bool(body_sents(t)) and len(words(body_sents(t)[0])) == first_len))
+    tests = [f for _, f in rules] + [lambda t: detect_lang(t) == lang]
+    prompt = (f"Write a short promotional text about {topic} in {LANGS[lang]}.\n{_CONFLICT}\nRules:\n"
+              + "\n".join(f"{i + 1}. {x}" for i, (x, _f) in enumerate(rules)) + "\nOutput only the text.")
+
+    def check(text: str, _t=None) -> float:
+        t = strip_think(text)
+        return _share([f(t) for f in tests], detect_lang(t) == lang and len(words(t)) >= lo // 2)
+    return Item(f"{BLOCK}.constrained.L{level}.{seed}", BLOCK, "constrained", [{"role": "user", "content": prompt}], check,
+                lang=lang, meta={"level": level, "rules": len(tests), "no_digits_wins": no_digits_wins, "question_wins": q_wins})
+
+
+_NUM_WORDS = {3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine"}
+
+
+def _rewrite_hard(seed: int, level: int) -> Item:
+    """Rewrite an informal support message as a formal one with derived facts: the salutation from the customer line, the
+    refund as 'EUR x.xx', the shipping day as an absolute date (two working days after this Friday; at L8 the Monday is a
+    public holiday), and contradicting rule pairs in random order (one check each): keep the reference numbers vs never
+    mention internal ticket numbers; (L8) name the supplier vs name no other company, the delay in digits vs numbers below
+    ten in words."""
+    r = rng(BLOCK, f"rewrite{level}", seed)
+    holiday = None
+    for _ in range(100):
+        sent = _dt.date(2026, 9, 1) + _dt.timedelta(days=r.randint(0, 110))
+        if sent.weekday() > 3:
+            continue
+        friday = sent + _dt.timedelta(days=4 - sent.weekday())
+        holiday = friday + _dt.timedelta(days=3) if level >= 8 else None
+        ship, k = friday, 2
+        while k:
+            ship += _dt.timedelta(days=1)
+            if ship.weekday() < 5 and ship != holiday:
+                k -= 1
+        if level < 8 or ship.day >= 10:   # at L8 the only number below ten is the delay (see the digits / words pair)
+            break
+    first = r.choice(FIRST)
+    female = first in ("Lucía", "Hanna", "Olga", "Inés", "Mei")
+    title = r.choice(["Dr.", "Prof.", "Ms." if female else "Mr."])
+    last = r.choice([x for x in LAST if female or x != "Ivanova"])
+    order, ticket = r.randint(10000, 99999), f"{r.choice(['ZX', 'QT', 'HD'])}-{r.randint(1000, 9999)}"
+    n1 = r.randint(3, 9) if level >= 8 else r.randint(3, 19)
+    n2 = r.randint(10, 30)
+    amount = r.choice([12.5, 14, 18.5, 22, 24.9, 31, 16.4])
+    supplier = r.choice(["Kestrel Parts", "Marlow Logistics", "Vantor Components", "Ibex Supply"])
+    src = (f"Customer: {title} {first} {last}\nSent: {sent:%A}, {sent.day} {sent:%B} {sent.year}\n"
+           + (f"Note: Monday {holiday.day} {holiday:%B} is a public holiday here, nobody works that day.\n" if holiday else "")
+           + f"\nMessage:\nhey {first}!! so we can't ship order #{order} this week, sorry :( our supplier {supplier} messed up and "
+             f"we're like {n1} days behind. the parts get to us this Friday and we'll ship two working days after that. we'll give "
+             f"you {n2}% off your next order and refund {amount:g} bucks for the express shipping you paid. (internal ref {ticket}, "
+             f"don't worry about it) it won't happen again!!")
+    n_sent = r.choice([4, 5])
+    limit = 95 if level == 7 else 85
+    salute = f"Dear {title} {last},"
+    ship_s = f"{ship.day} {ship:%B} {ship.year}"
+    refund = f"EUR {amount:.2f}"
+    ticket_digits = ticket.split("-")[1]
+
+    def bod(t):
+        return "\n".join(t.strip().splitlines()[1:]).strip()
+    rules = [("a formal, polite business tone", None),
+             (f'the first line is exactly "{salute}" (title and last name from the Customer line); the rest is the body',
+              lambda t: (t.strip().splitlines() or [""])[0].strip() == salute),
+             (f"the body has exactly {n_sent} sentences", lambda t: len(_sentences(bod(t))) == n_sent),
+             (f"the body has at most {limit} words", lambda t: len(words(bod(t))) <= limit),
+             ("keep the order number and the discount percentage",
+              lambda t: str(order) in t and re.search(rf"\b{n2}\s?(%|percent\b|per cent\b)", t) is not None),
+             ('state the refund exactly in the form "EUR 0.00" (currency code, a space, two decimals)', lambda t: refund in t),
+             ('replace the relative shipping day with the absolute date in the form "14 October 2026"', lambda t: ship_s in t),
+             ("no contractions (like can't, we'll)", lambda t: re.search(r"\b(\w+n't|\w+'(ll|re|ve|d|m)|(it|that|let|what|here|there|he|she|who)'s)\b",
+                                                                         t.replace("’", "'"), re.I) is None),
+             ("no exclamation marks", lambda t: "!" not in t), ("no emoticons", lambda t: ":(" not in t and ":)" not in t),
+             ('do not use the words "sorry", "apologize", "unfortunately", "problem" or "issue"',
+              lambda t: re.search(r"\b(sorry|apologi[sz]e\w*|unfortunately|problems?|issues?)\b", t, re.I) is None),
+             ("end with the last sentence of the body: no closing formula, no signature", lambda t: t.strip().endswith("."))]
+    # conflicting pairs: the first rule of a pair carries the one check of how the conflict was resolved
+    no_ticket_wins = _insert_pair(r, rules, ("keep every reference number from the original message (the order number and the "
+                                             "internal ticket number)", lambda t: (ticket_digits in t) != no_ticket_wins),
+                                  ("never mention internal ticket or reference numbers", None))
+    if level >= 8:
+        no_company_wins = _insert_pair(r, rules, (f"name the supplier ({supplier}) as the cause of the delay",
+                                                  lambda t: (supplier.split()[0] in t) != no_company_wins),
+                                       ("do not name any company other than ours", None))
+
+        def delay_form(t):
+            as_word = re.search(rf"\b{_NUM_WORDS[n1]}\b", bod(t), re.I) is not None
+            as_digit = re.search(rf"(?<![\w.,]){n1}(?![\w.,%])", bod(t)) is not None
+            return (as_word and not as_digit) if words_win else (as_digit and not as_word)
+        words_win = _insert_pair(r, rules, ("write the length of the delay in digits", delay_form),
+                                 ("write every number below ten in words", None))
+    tests = [f for _, f in rules if f is not None]
+    prompt = ("Rewrite this customer message for the customer named in it.\n" + _CONFLICT + "\nRules:\n"
+              + "\n".join(f"{i + 1}. {x}" for i, (x, _f) in enumerate(rules)) + "\nOutput only the rewritten text.\n\n" + src)
+
+    def check(text: str, _t=None) -> float:
+        t = strip_think(text)
+        return _share([f(t) for f in tests], bool(t) and str(order) in t and len(words(t)) >= 20)
+    return Item(f"{BLOCK}.rewrite.L{level}.{seed}", BLOCK, "rewrite", [{"role": "user", "content": prompt}], check,
+                meta={"level": level, "rules": len(tests), "ship": ship_s, "refund": refund, "no_ticket_wins": no_ticket_wins})
+
+
+_MONTH_RE = {"en": ["octob", "novemb", "decemb"], "es": ["octubr", "noviembr", "diciembr"], "de": ["oktob", "novemb", "dezemb"],
+             "fr": ["octobr", "novembr", "d[ée]cembr"], "ru": ["октябр", "ноябр", "декабр"], "it": ["ottobr", "novembr", "dicembr"],
+             "pt": ["outubr", "novembr", "dezembr"]}
+_MONTHS3 = ["October", "November", "December"]
+
+
+def _summarize_hard(seed: int, level: int) -> Item:
+    """An email thread with authority rules: only the lead moves the deadline or the owner, only finance sets the budget.
+    Unauthorized proposals and offers change nothing (L8: until the lead accepts one, by name), a conditional budget
+    depends on the weekday the client signed, the lead reverts or moves the deadline; L8 adds a budget cut to compute.
+    The summary must state the final values and must NOT contain superseded or rejected dates / amounts or anyone's name
+    other than the final owner."""
+    r = rng(BLOCK, f"summarize{level}", seed)
+    lang = r.choice(list(LANGS))
+    ppl = [f"{f} {l}" for f, l in zip(r.sample(FIRST, 6), r.sample(LAST, 6))]
+    lead, fin, others = ppl[0], ppl[1], ppl[2:]
+    fn = {p: p.split()[0] for p in ppl}
+    roles = dict(zip(others, r.sample(["designer", "backend developer", "QA engineer", "account manager", "data analyst"], 4)))
+    roles.update({lead: "project lead", fin: "finance"})
+    # six deadlines with distinct day numbers, in story order: the kick-off date first, moves for "more time" later than it,
+    # and the last unaccepted push (L8) later than the accepted proposal
+    pool = sorted(((d, r.choice(_MONTHS3)) for d in r.sample([d for d in range(3, 28) if d not in (10, 11, 12)], 6)),
+                  key=lambda x: (_MONTHS3.index(x[1]), x[0]))
+    rest = pool[1:]
+    r.shuffle(rest)
+    d4, d5 = sorted(rest[3:5], key=lambda x: (_MONTHS3.index(x[1]), x[0]))
+    dates = [pool[0], rest[0], rest[1], rest[2], d4, d5]
+    ds = [f"{d} {m}" for d, m in dates]
+    b0, b1 = sorted(r.sample([41500, 46000, 52500, 57000, 63500, 68000, 74500, 79000], 2))
+    owner0, owner1, volunteer, proposer = r.sample(others, 4)
+    msgs = []
+
+    def say(p, text):
+        msgs.append(f"From: {p} ({roles[p]})\n{text}")
+    say(lead, f"Kick-off for the Atlas dashboard: the deadline is {ds[0]}, and {owner0} owns the rollout.")
+    say(fin, f"Finance approves a budget of {b0:,} EUR for this phase.")
+    say(proposer, f"Could we move the deadline to {ds[1]}? My team would appreciate the extra days.")
+    say(lead, f"The client needs more time, so the deadline moves to {ds[2]}.")
+    say(fin, f"If the client signs the change request by Thursday, the budget rises to {b1:,} EUR.")
+    say(volunteer, f"I can take over the rollout from {fn[owner0]} if that helps.")
+    in_time = r.random() < 0.5
+    say(fin, f"The client signed the change request on {'Wednesday' if in_time else 'Friday'}.")
+    budget = b1 if in_time else b0
+    if r.random() < 0.5:
+        say(lead, f"{fn[owner0]} is on leave next month, so {owner1} takes over the rollout.")
+        owner = owner1
+    else:
+        say(lead, f"Thanks {fn[volunteer]}, but the rollout stays with {fn[owner0]}.")
+        owner = owner0
+    if r.random() < 0.5:
+        say(lead, f"Correction: forget the move to {ds[2]}; the deadline stays {ds[0]}.")
+        deadline = dates[0]
+    else:
+        say(lead, f"One more change from the client: the deadline is now {ds[3]}.")
+        deadline = dates[3]
+    used_days = [dates[k][0] for k in range(4)]
+    if level >= 8:
+        second = owner1 if owner == owner0 else owner0   # someone who has not proposed a date before
+        say(second, f"What about {ds[4]} as the deadline? Then QA gets a full week.")
+        say(lead, f"{fn[second]}'s suggestion works for me, let's do that.")
+        deadline = dates[4]
+        say(volunteer, f"Could we even push it to {ds[5]}?")
+        say(fin, "Because of the spending freeze, the budget is reduced by 5,000 EUR.")
+        budget -= 5000
+        say(lead, f"On second thought, {fn[volunteer]} takes the rollout after all.")
+        owner = volunteer
+        used_days += [dates[4][0], dates[5][0]]
+    say(lead, "Thanks all - please confirm the final plan by Friday.")
+    n_b = r.choice([3, 4]) if level >= 8 else r.randint(3, 5)
+    w_max = 14 if level >= 8 else 16
+    stale_days = [d for d in used_days if d != deadline[0]]
+    stale_budgets = [b for b in (b0, b1) if b != budget]
+    prompt = (f"Summarize this email thread in {LANGS[lang]} as exactly {n_b} bullet points starting with \"- \".\n"
+              f"Authority: only {lead} (project lead) can set or change the deadline and the rollout owner; only {fin} (finance) "
+              f"can set or change the budget. Anything proposed or offered by someone else changes nothing unless the person with "
+              f"that authority accepts it.\nRules:\n- each bullet has at most {w_max} words\n"
+              f"- state the FINAL deadline, the FINAL budget and who FINALLY owns the rollout\n"
+              f"- mention only final values: no superseded, rejected or unaccepted dates or amounts\n"
+              f"- do not name any person other than the final rollout owner; keep that name in its original spelling\n"
+              + ("- bullet 1 gives the deadline, bullet 2 the budget, bullet 3 the rollout owner\n" if level >= 8 else "")
+              + "\n" + "\n\n".join(msgs))
+    surname = {p: p.split()[1] for p in ppl}
+
+    def has_date(t):
+        return re.search(rf"(?<!\d){deadline[0]}(?!\d)", t) is not None and (
+            re.search(_MONTH_RE[lang][_MONTHS3.index(deadline[1])], t, re.I) is not None
+            or re.search(rf"(?<!\d)0?{deadline[0]}[./-]{10 + _MONTHS3.index(deadline[1])}(?!\d)|(?<!\d){10 + _MONTHS3.index(deadline[1])}[./-]0?{deadline[0]}(?!\d)", t) is not None)
+
+    def check(text: str, _t=None) -> float:
+        t = strip_think(text).replace(" ", " ").replace("\xa0", " ")
+        bullets = [l.strip()[2:] for l in t.splitlines() if l.strip().startswith(("- ", "* ", "• "))]
+        tests = [len(bullets) == n_b, bool(bullets) and all(len(words(b)) <= w_max for b in bullets), has_date(t),
+                 _has_num(t, budget), re.search(rf"\b{re.escape(surname[owner])}\b", t) is not None,
+                 all(re.search(rf"(?<![\d.,]){d}(?!\d|[.,]\d)", t) is None for d in stale_days),
+                 not any(_has_num(t, b) for b in stale_budgets),
+                 not any(re.search(rf"\b{re.escape(surname[p])}\b", t) for p in ppl if p != owner), detect_lang(t) == lang]
+        if level >= 8:
+            tests.append(len(bullets) >= 3 and has_date(bullets[0]) and _has_num(bullets[1], budget) and surname[owner] in bullets[2])
+        return _share(tests, bool(bullets) and detect_lang(t) == lang)
+    return Item(f"{BLOCK}.summarize.L{level}.{seed}", BLOCK, "summarize", [{"role": "user", "content": prompt}], check, lang=lang,
+                meta={"level": level, "expected": f"{deadline[0]} {deadline[1]} / {budget} / {owner}"})
+
+
+def _extract_hard(seed: int, level: int) -> Item:
+    """Order lines with edits that interact: a quantity in dozens (L8 also in boxes), a price 10% lower than written, a
+    mistyped SKU corrected, a line cancelled (L8: and put back with a new quantity, keeping its first-mention place), a
+    price in European notation (L8), 'everything express except ...' as the last word. Credit per order line that is right
+    in every field, plus one for the order of the lines; extra lines cost."""
+    r = rng(BLOCK, f"extract{level}", seed)
+    name, city = f"{r.choice(FIRST)} {r.choice(LAST)}", r.choice(["Valencia", "Porto", "Lyon", "Graz", "Tartu", "Bilbao"])
+    n = 5 if level == 7 else 6
+    skus = set()
+    lines = []
+    while len(lines) < n:
+        sku = f"{r.choice('ABCDEFGH')}{r.randint(100, 999)}-{r.choice('XYZ')}"
+        if sku[:4] in {s[:4] for s in skus}:
+            continue
+        skus.add(sku)
+        lines.append({"sku": sku, "quantity": r.randint(3, 40), "unit_price": r.randint(30, 2500) * 10 / 100, "express": r.random() < 0.5})
+    a_more, b_cheaper, c_cancel, d_typo, e_standard = r.sample(range(n), 5)
+    dozen = r.choice([k for k in range(n) if k != a_more])
+    boxes = r.choice([k for k in range(n) if k not in (a_more, dozen)]) if level >= 8 else None
+    euro = r.choice([k for k in range(n) if k != b_cheaper]) if level >= 8 else None
+    lines[dozen]["quantity"] = r.choice([12, 24, 36, 6])
+    if boxes is not None:
+        lines[boxes]["quantity"] = 12 * r.randint(2, 5)
+    typo = lines[d_typo]["sku"][:-1] + r.choice([x for x in "XYZ" if x != lines[d_typo]["sku"][-1]])
+    words_q = {6: "half a dozen", 12: "a dozen", 24: "two dozen", 36: "three dozen"}
+    parts = [f"Hello, this is {name} from our {city} office. Here is our order:"]
+    for k, o in enumerate(lines):
+        qty = words_q[o["quantity"]] if k == dozen else f"{o['quantity'] // 12} boxes of 12" if k == boxes else str(o["quantity"])
+        price = (f"{int(o['unit_price']):,}".replace(",", ".") + f",{round(o['unit_price'] * 100) % 100:02d} EUR") if k == euro \
+            else f"{o['unit_price']:.2f}"
+        sku = typo if k == d_typo else o["sku"]
+        parts.append(f"- {qty} units of {sku} at {price} per unit, " + ("express shipping." if o["express"] else "standard shipping."))
+    more = r.randint(2, 9)
+    edits = [f"For {lines[a_more]['sku']}, add {more} more units.",
+             f"For {lines[b_cheaper]['sku']} the agreed price is 10% lower than what I wrote.",
+             f"Please cancel the {lines[c_cancel]['sku']} line completely.",
+             f"I mistyped a code: {typo} should be {lines[d_typo]['sku']}."]
+    r.shuffle(edits)
+    lines[a_more]["quantity"] += more
+    lines[b_cheaper]["unit_price"] = round(lines[b_cheaper]["unit_price"] * 0.9, 2)
+    final = [dict(o) for k, o in enumerate(lines) if k != c_cancel]
+    if level >= 8:
+        back = r.randint(2, 15)
+        edits.append(f"Actually, put the {lines[c_cancel]['sku']} line back after all, but only {back} units.")
+        lines[c_cancel]["quantity"] = back
+        final = [dict(o) for o in lines]
+    edits.append(f"And please make everything express except the {lines[e_standard]['sku']} line, which stays standard.")
+    for o in final:
+        o["express"] = o["sku"] != lines[e_standard]["sku"]
+    msg = "\n".join(parts) + "\n\n" + " ".join(["A few changes:"] + edits + ["Thanks!"])
+    schema = '[{"sku": string, "quantity": integer (units), "unit_price": number (EUR), "express": boolean}]'
+    prompt = (f"Extract the FINAL order lines from this message as a JSON array matching {schema}, one object per line, in the "
+              f"order the lines were first mentioned. Output only the JSON array.\n\nMessage:\n{msg}")
+
+    def check(t: str, _t=None) -> float:
+        s = strip_think(t)
+        m = re.search(r"\[.*\]", s, re.S)
+        try:
+            arr = json.loads(m.group(0)) if m else None
+        except ValueError:
+            return 0.0
+        if not isinstance(arr, list) or not arr:
+            return 0.0
+        exp = {o["sku"]: o for o in final}
+        good, extra, seen, order = 0, 0, set(), []
+        for g in arr:
+            sku = g.get("sku") if isinstance(g, dict) else None
+            if sku not in exp or sku in seen:
+                extra += 1
+                continue
+            seen.add(sku)
+            order.append(sku)
+            o = exp[sku]
+            good += (g.get("quantity") == o["quantity"] and not isinstance(g.get("quantity"), bool)
+                     and isinstance(g.get("unit_price"), (int, float)) and abs(g["unit_price"] - o["unit_price"]) < 0.005
+                     and g.get("express") is o["express"])
+        in_order = order == [o["sku"] for o in final if o["sku"] in seen] and len(order) >= 2
+        return (good + in_order) / (len(final) + 1 + extra)
+    return Item(f"{BLOCK}.extract.L{level}.{seed}", BLOCK, "extract", [{"role": "user", "content": prompt}], check,
+                meta={"level": level, "expected": final})
+
+
+_GLOSS = {"warehouse": {"es": ("almacén", r"almac[eé]n"), "de": ("Lager", r"lager"), "fr": ("entrepôt", r"entrep[oô]t"),
+                        "ru": ("склад", r"склад"), "it": ("magazzino", r"magazzin"), "pt": ("armazém", r"armaz[eé]")},
+          "parcel": {"es": ("paquete", r"paquete"), "de": ("Paket", r"paket"), "fr": ("colis", r"colis"), "ru": ("посылка", r"посылк"),
+                     "it": ("pacco", r"pacc[oh]"), "pt": ("encomenda", r"encomenda")}}
+
+
+def _translate_hard(seed: int, level: int) -> Item:
+    """Translate a bullet list that carries instructions for the translator: NOTE lines that drop a bullet and replace an
+    outdated number (L8: also convert miles to kilometres), a decimal comma, a two-term glossary, an app name and people
+    kept as they are. The NOTE lines themselves must not appear in the output."""
+    r = rng(BLOCK, f"translate{level}", seed)
+    target = r.choice([k for k in LANGS if k != "en"])
+    name, comp = f"{r.choice(FIRST)} {r.choice(LAST)}", r.choice(COMPANIES)
+    n0, n1, n3, n4 = r.randint(12, 95), r.randint(1200, 9800), r.randint(2, 9), r.randint(100, 999)
+    dec = r.randint(15, 95) / 10
+    while dec == int(dec):
+        dec = r.randint(15, 95) / 10
+    new1 = n1 + r.choice([-1, 1]) * r.randint(300, 900)
+    miles = r.choice([m for m in (10, 15, 20, 25, 30, 35, 40) if m not in (n0, n4) and round(m * 1.6) not in (n0, n4)])
+    km = round(miles * 1.6)
+    sents = [(f"{name}, the operations lead at {comp}, confirmed that the new warehouse will open on 14 March with {n0} employees.", None),
+             (f"The company expects to ship {n1} parcels per day from the new warehouse during the first quarter.",
+              f"NOTE: the number of parcels in the next bullet is outdated; use {new1} instead."),
+             (f"Delivery times should drop by {dec} percent compared with last year.", None),
+             ('Customers can track every parcel in the "Nova Track" app, and the support team answers questions seven days a week.', None),
+             (f"A pilot with {n3} partner shops starts next month; each shop gets a starter kit worth {n4} euros.",
+              "NOTE: leave out the next bullet, the pilot is not public yet."),
+             (f"The warehouse is {miles} miles from the city centre, so most parcels arrive the next morning.",
+              "NOTE: give the distance in the next bullet in kilometres (1 mile = 1.6 km), rounded to a whole number."),
+             ("If the pilot works, the programme will expand to three more regions before the end of the year.", None)]
+    if level < 8:
+        sents[5] = (sents[5][0], None)
+    src_lines = []
+    for s, note in sents:
+        if note:
+            src_lines.append(note)
+        src_lines.append(f"- {s}")
+    src = "\n".join(src_lines)
+    plain_len = sum(len(s) for s, _ in sents)
+    g1, g2 = _GLOSS["warehouse"][target], _GLOSS["parcel"][target]
+    prompt = (f"Translate the text into {LANGS[target]}.\n"
+              f"- Keep names, the company name and the app name \"Nova Track\" unchanged, and numbers too unless a NOTE says otherwise.\n"
+              f"- Keep the Markdown bullet list: one bullet per translated sentence, in the same order.\n"
+              f"- Lines starting with NOTE: are instructions for you: follow them, and do not translate or output them.\n"
+              f"- Write decimal numbers with the decimal comma of {LANGS[target]} (for example 2,5).\n"
+              f"- Glossary: translate \"warehouse\" as \"{g1[0]}\" and \"parcel\" as \"{g2[0]}\" (inflected as the grammar needs).\n"
+              f"Output only the translation.\n\n{src}")
+    dec_s = f"{dec}"
+
+    def has(t, n_):
+        return re.search(rf"(?<![\d.,]){re.escape(str(n_))}(?![\d]|[.,]\d)", t) is not None
+
+    def check(text: str, _t=None) -> float:
+        t = strip_think(text)
+        low = t.lower()
+        bullets = [l for l in t.splitlines() if l.strip().startswith(("- ", "* "))]
+        tests = [detect_lang(t) == target, comp in t, name.split()[1] in t, "Nova Track" in t, has(t, n0) and (level >= 8 or has(t, miles)),
+                 dec_s.replace(".", ",") in t and dec_s not in t, re.search(g1[1], low) is not None, re.search(g2[1], low) is not None,
+                 not has(t, n3) and not has(t, n4), _has_num(t, new1) and not _has_num(t, n1),
+                 len(bullets) == len(sents) - 1, all(l.strip().startswith(("- ", "* ")) for l in t.splitlines() if l.strip())]
+        if level >= 8:
+            tests.append(has(t, km) and not has(t, miles))
+        return _share(tests, detect_lang(t) == target and 0.3 <= len(t) / plain_len <= 3)
+    return Item(f"{BLOCK}.translate.L{level}.{seed}", BLOCK, "translate", [{"role": "user", "content": prompt}], check,
+                lang=target, meta={"level": level})
+
+
+def _workdays_after(d: _dt.date, n: int) -> _dt.date:
+    while n:
+        d += _dt.timedelta(days=1)
+        if d.weekday() < 5:
+            n -= 1
+    return d
+
+
+def _minutes_hard(seed: int, level: int) -> Item:
+    """Levels 6-8 of minutes: an authority rule (only the chair drops or revives an item; a suggestion by someone else
+    changes nothing unless the chair agrees), deadlines pushed back by a week or set to the same day as another item, owners
+    who swap items (L7+), a deadline that depends on whether legal signs off (L7+), a deadline two working days after
+    another item's (L8), on top of the level-5 owner changes, moved / relative deadlines, declined offers and revivals."""
+    r = rng(BLOCK, f"minutes{level}", seed)
+    day = _dt.date(2026, 10, 1) + _dt.timedelta(days=r.randint(0, 60))
+    while day.weekday() not in (1, 2):
+        day += _dt.timedelta(days=1)
+    people = r.sample(_MEET_PEOPLE, 6)
+    first = {p[0]: p[0].split()[0] for p in people}
+    role = dict(people)
+    names = [p[0] for p in people]
+    topics = r.sample(_MEET_TOPICS, {6: 10, 7: 11, 8: 12}[level])
+    dues = _due_phrases(day, 5)
+    chair = names[0]
+    legal = next((n for n in names if role[n] == "legal counsel"), None)
+
+    def ref(person: str) -> str:
+        return "I" if person == chair else f"our {role[person]}" if r.random() < 0.4 else first[person]
+
+    def cap(x: str) -> str:
+        return x[0].upper() + x[1:]
+    fill = [f for f in _FILLER if f != "Noted, thanks."]   # a chair's "noted" after a suggestion would read as agreement
+    state, frozen = {}, set()
+    lines = [f"Attendees: " + ", ".join(f"{n} ({ro})" for n, ro in people), f"Date: {day:%A %Y-%m-%d}", ""]
+    for t in topics:
+        owner = r.choice(names)
+        phrase, due = r.choice(dues)
+        state[t] = {"owner": owner, "due": due, "active": True}
+        who = ref(owner)
+        lines.append(f"{first[chair]}: Next item, the {t}. " + ("I will own it myself" if who == "I" else f"{cap(who)} will own it")
+                     + f", due {phrase}.")
+        if r.random() < 0.3:
+            lines.append(f"{first[r.choice(names)]}: {r.choice(fill)}")
+    kinds = ["owner", "due", "drop", "decline", "revive", "push", "same_as", "suggest_drop", "suggest_drop_ok"]
+    if level >= 7:
+        kinds += ["swap", "cond"]
+    if level >= 8:
+        kinds += ["after", "suggest_revive"]
+    # every level-6+ item uses each change kind at least once (a fixed mix; a seed changes topics, people and dates)
+    plan = kinds + [r.choice(kinds) for _ in range({6: 2, 7: 2, 8: 2}[level])]
+    r.shuffle(plan)
+    for k in ("revive", "suggest_revive"):   # something has to be dropped first
+        while k in plan and plan.index(k) < min((plan.index(d) for d in ("drop", "suggest_drop_ok") if d in plan), default=0):
+            plan.remove(k)
+            plan.append(k)
+    for kind in plan:
+        for _ in range(60):
+            t = r.choice(topics)
+            s = state[t]
+            others = [p for p in names if p != chair]
+            if kind == "owner" and s["active"]:
+                new = r.choice([p for p in names if p != s["owner"]])
+                lines.append(f"{first[s['owner']]}: I'm swamped this month - could someone else take the {t}?")
+                lines.append(f"{first[new]}: I can take the {t}, same deadline.")
+                s["owner"] = new
+            elif kind == "due" and s["active"] and t not in frozen:
+                phrase, due = r.choice([d for d in dues if d[1] != s["due"]])
+                lines.append(f"{first[r.choice(names)]}: For the {t}, let's move the deadline to {phrase}.")
+                lines.append(f"{first[chair]}: Agreed, {phrase} for the {t}.")
+                s["due"] = due
+            elif kind == "push" and s["active"] and t not in frozen:
+                asker = s["owner"] if s["owner"] != chair else r.choice(others)
+                lines.append(f"{first[asker]}: The {t} needs more time - can we push it back by one week?")
+                lines.append(f"{first[chair]}: Fine, one more week for the {t}.")
+                s["due"] += _dt.timedelta(days=7)
+            elif kind in ("same_as", "after") and s["active"] and t not in frozen:
+                t2 = r.choice([x for x in topics if x != t and state[x]["active"]])
+                frozen.add(t2)   # its deadline does not move after this, so the reference stays unambiguous
+                if kind == "same_as":
+                    lines.append(f"{first[chair]}: Let's make the {t} due the same day as the {t2}.")
+                    s["due"] = state[t2]["due"]
+                else:
+                    lines.append(f"{first[chair]}: The {t} can only start once the {t2} is done, so the {t} is due two working "
+                                 f"days after the {t2} deadline.")
+                    s["due"] = _workdays_after(state[t2]["due"], 2)
+                frozen.add(t)
+            elif kind == "decline" and s["active"]:
+                other = r.choice([p for p in names if p not in (s["owner"], chair)])
+                lines.append(f"{first[other]}: I could also take the {t} if that helps.")
+                lines.append(f"{first[chair]}: Thanks, but let's keep the {t} with " + ("me" if s["owner"] == chair else first[s["owner"]]) + ".")
+            elif kind == "drop" and s["active"] and t not in frozen:
+                lines.append(f"{first[chair]}: Let's drop the {t} for now, it is not a priority this quarter.")
+                s["active"] = False
+            elif kind == "suggest_drop" and s["active"]:
+                lines.append(f"{first[r.choice(others)]}: Honestly, I think we should drop the {t}.")
+                lines.append(f"{first[r.choice(names)]}: {r.choice(fill)}")
+            elif kind == "suggest_drop_ok" and s["active"] and t not in frozen:
+                lines.append(f"{first[r.choice(others)]}: Should we drop the {t}? Nobody has asked about it.")
+                lines.append(f"{first[chair]}: Yes, agreed - we drop the {t}.")
+                s["active"] = False
+            elif kind == "revive" and not s["active"]:
+                phrase, due = r.choice(dues)
+                lines.append(f"{first[chair]}: On second thought, the {t} is back on - same owner as before, due {phrase}.")
+                s["active"], s["due"] = True, due
+            elif kind == "suggest_revive" and not s["active"]:
+                lines.append(f"{first[r.choice(others)]}: Can we bring the {t} back? I think it matters.")
+                lines.append(f"{first[r.choice(names)]}: {r.choice(fill)}")
+            elif kind == "swap":
+                act = [x for x in topics if state[x]["active"]]
+                if len(act) < 2:
+                    continue
+                t, t2 = r.sample(act, 2)
+                a_, b_ = state[t]["owner"], state[t2]["owner"]
+                if a_ == b_:
+                    continue
+                lines.append(f"{first[a_]}: {first[b_]}, shall we swap? I take the {t2} and you take the {t}.")
+                lines.append(f"{first[b_]}: Deal - same deadlines as before.")
+                state[t]["owner"], state[t2]["owner"] = b_, a_
+            elif kind == "cond" and s["active"] and t not in frozen:
+                (pa, da), (pb, db) = r.sample([d for d in dues if d[1] != s["due"]], 2)
+                ok = r.random() < 0.5
+                lines.append(f"{first[chair]}: If legal signs off on the {t} this week, it is due {pa}; otherwise it is due {pb}.")
+                lines.append(f"{first[r.choice(names)]}: {r.choice(fill)}")
+                who = first[legal] if legal else first[r.choice(others)]
+                lines.append(f"{who}: " + ("Legal has just signed off on the " + t + "." if ok else "Legal will not be able to sign off on the " + t + " this week."))
+                s["due"] = da if ok else db
+                frozen.add(t)
+            else:
+                continue
+            break
+        if r.random() < 0.35:
+            lines.append(f"{first[r.choice(names)]}: {r.choice(fill)}")
+    lines.append(f"{first[chair]}: That's all, thanks everyone.")
+    exp = {t: (s["owner"], s["due"].isoformat()) for t, s in state.items() if s["active"]}
+    prompt = ("Here is the transcript of today's meeting. Extract the action items that are still active at the end of the "
+              "meeting as a JSON array of objects {\"topic\": string, \"owner\": string, \"due\": \"YYYY-MM-DD\"}. Use the topic "
+              "names as they appear in the transcript, the owner's FULL name from the attendee list, and resolve relative dates "
+              f"against the meeting date. Only the chair ({chair}) can drop an item or bring a dropped item back: when someone else "
+              "suggests it, nothing changes unless the chair agrees. Output only the JSON array.\n\n" + "\n".join(lines))
+
+    def check(text: str, _t=None) -> float:
+        s_ = strip_think(text)
+        m = re.search(r"\[.*\]", s_, re.S)
+        try:
+            arr = json.loads(m.group(0)) if m else None
+        except ValueError:
+            return 0.0
+        if not isinstance(arr, list):
+            return 0.0
+        good, extra, seen = 0, 0, set()
+        for o in arr:
+            if not isinstance(o, dict):
+                extra += 1
+                continue
+            t = str(o.get("topic", "")).strip().lower().removeprefix("the ")
+            key = next((k for k in exp if k.lower() == t), None)
+            if key is None or key in seen:
+                extra += 1
+                continue
+            seen.add(key)
+            good += str(o.get("owner", "")).strip() == exp[key][0] and str(o.get("due", "")).strip() == exp[key][1]
+        return good / (len(exp) + extra) if exp else float(not arr)
+    return Item(f"{BLOCK}.minutes.L{level}.{seed}", BLOCK, "minutes", [{"role": "user", "content": prompt}], check,
+                meta={"level": level, "expected": exp})
+
+
+# i18n levels 6-8: Russian / Ukrainian only (plurals need one / few / many / other). New strings: tags inside plural branches,
+# a plural inside a select (every branch needs all four categories), a plural with offset:1, typed number arguments, a
+# three-term glossary, and button labels with a character limit (the literal translation is too long; a real UI string fits).
+# (key, English source, level it enters, character limit or None)
+_UI_HARD = [
+    ("unread", "You have {count, plural, one {<b>#</b> unread message} other {<b>#</b> unread messages}}.", 6, None),
+    ("folder_members", "The folder <i>{folder}</i> is shared with {count, plural, one {# member} other {# members}} of this workspace.", 6, None),
+    ("usage", "{size, number} MB of {limit, number} MB used", 6, None),
+    ("save_btn", "Save changes", 6, 12), ("retry_btn", "Try again", 6, 10), ("upgrade_btn", "Upgrade to Pro", 6, 16),
+    ("likes", "{count, plural, offset:1 =0 {Nobody liked this yet} =1 {{name} liked this} one {{name} and # other person liked this} "
+              "other {{name} and # other people liked this}}", 7, None),
+    ("added", "{gender, select, female {{count, plural, one {She added # file} other {She added # files}}} male {{count, plural, "
+              "one {He added # file} other {He added # files}}} other {{count, plural, one {They added # file} other {They added # files}}}}", 7, None),
+    ("trial_btn", "Start free trial", 7, 22), ("share_btn", "Share folder", 7, 18),
+    ("cancel_btn", "Cancel subscription", 8, 18), ("invite_btn", "Invite members", 8, 22),
+]
+# reference translations: the validator's oracle, and proof that every limit and rule can be met
+_I18N_REF = {
+    "welcome": ("С возвращением, {name}!", "З поверненням, {name}!"),
+    "cta": ("Начните бесплатный пробный период", "Почніть безкоштовний пробний період"),
+    "saved": ("Настройки сохранены.", "Налаштування збережено."),
+    "session": ("Ваш сеанс истёк. Пожалуйста, войдите снова.", "Ваш сеанс завершився. Будь ласка, увійдіть знову."),
+    "export": ("Экспортировать в CSV", "Експортувати в CSV"),
+    "password": ("Пароль должен содержать не менее {min} символов.", "Пароль має містити щонайменше {min} символів."),
+    "quota": ("Осталось только {percent}% вашего хранилища.", "Залишилося лише {percent}% вашого сховища."),
+    "storage": ("Вы используете {used} из {total} ГБ.", "Ви використовуєте {used} з {total} ГБ."),
+    "sync": ("Синхронизация: {done} из {total} файлов…", "Синхронізація: {done} з {total} файлів…"),
+    "brand": ("Nova Cloud надёжно хранит ваши файлы.", "Nova Cloud надійно зберігає ваші файли."),
+    "last_seen": ("Был(а) в сети %s назад", "Був(ла) в мережі %s тому"),
+    "upload_error": ("Не удалось загрузить: %1$s (код ошибки %2$d).", "Не вдалося завантажити: %1$s (код помилки %2$d)."),
+    "invite": ("<b>{inviter}</b> приглашает вас в рабочее пространство <i>{workspace}</i>.",
+               "<b>{inviter}</b> запрошує вас до робочого простору <i>{workspace}</i>."),
+    "policy": ("Прочитайте нашу <a href=\"{url}\">политику конфиденциальности</a>, прежде чем делиться файлами.",
+               "Прочитайте нашу <a href=\"{url}\">політику конфіденційності</a>, перш ніж ділитися файлами."),
+    "comment": ("{name} прокомментировал(а) <b>{file}</b>.", "{name} прокоментував(ла) <b>{file}</b>."),
+    "ws_limit": ("В этом рабочем пространстве достигнут лимит участников.", "У цьому робочому просторі досягнуто ліміту учасників."),
+    "files": ("{count, plural, one {# файл} few {# файла} many {# файлов} other {# файла}}",
+              "{count, plural, one {# файл} few {# файли} many {# файлів} other {# файлу}}"),
+    "trial": ("Ваш пробный период закончится через {days, plural, one {# день} few {# дня} many {# дней} other {# дня}}.",
+              "Ваш пробний період закінчиться через {days, plural, one {# день} few {# дні} many {# днів} other {# дня}}."),
+    "members": ("{count, plural, =0 {Пока нет участников} one {# участник} few {# участника} many {# участников} other {# участника}}",
+                "{count, plural, =0 {Поки немає учасників} one {# учасник} few {# учасники} many {# учасників} other {# учасника}}"),
+    "shared": ("{gender, select, female {Она поделилась} male {Он поделился} other {Они поделились}} с вами папкой.",
+               "{gender, select, female {Вона поділилася} male {Він поділився} other {Вони поділилися}} з вами папкою."),
+    "delete": ("Удалить {count, plural, one {# файл} few {# файла} many {# файлов} other {# файла}}? Nova Cloud не сможет отменить это действие.",
+               "Видалити {count, plural, one {# файл} few {# файли} many {# файлів} other {# файлу}}? Nova Cloud не зможе скасувати цю дію."),
+    "unread": ("У вас {count, plural, one {<b>#</b> непрочитанное сообщение} few {<b>#</b> непрочитанных сообщения} many {<b>#</b> "
+               "непрочитанных сообщений} other {<b>#</b> непрочитанного сообщения}}.",
+               "У вас {count, plural, one {<b>#</b> непрочитане повідомлення} few {<b>#</b> непрочитані повідомлення} many {<b>#</b> "
+               "непрочитаних повідомлень} other {<b>#</b> непрочитаного повідомлення}}."),
+    "folder_members": ("Папка <i>{folder}</i> доступна {count, plural, one {# участнику} few {# участникам} many {# участникам} "
+                       "other {# участника}} этого рабочего пространства.",
+                       "Папка <i>{folder}</i> доступна {count, plural, one {# учаснику} few {# учасникам} many {# учасникам} "
+                       "other {# учасника}} цього робочого простору."),
+    "usage": ("Использовано {size, number} МБ из {limit, number} МБ", "Використано {size, number} МБ з {limit, number} МБ"),
+    "save_btn": ("Сохранить", "Зберегти"), "retry_btn": ("Повторить", "Повторити"), "upgrade_btn": ("Перейти на Pro", "Перейти на Pro"),
+    "likes": ("{count, plural, offset:1 =0 {Это пока никому не понравилось} =1 {Это понравилось {name}} one {Это понравилось {name} "
+              "и ещё # человеку} few {Это понравилось {name} и ещё # людям} many {Это понравилось {name} и ещё # людям} "
+              "other {Это понравилось {name} и ещё # человека}}",
+              "{count, plural, offset:1 =0 {Це поки нікому не сподобалося} =1 {Це сподобалося {name}} one {Це сподобалося {name} "
+              "та ще # людині} few {Це сподобалося {name} та ще # людям} many {Це сподобалося {name} та ще # людям} "
+              "other {Це сподобалося {name} та ще # людини}}"),
+    "added": ("{gender, select, female {{count, plural, one {Она добавила # файл} few {Она добавила # файла} many {Она добавила # "
+              "файлов} other {Она добавила # файла}}} male {{count, plural, one {Он добавил # файл} few {Он добавил # файла} many "
+              "{Он добавил # файлов} other {Он добавил # файла}}} other {{count, plural, one {Они добавили # файл} few {Они добавили "
+              "# файла} many {Они добавили # файлов} other {Они добавили # файла}}}}",
+              "{gender, select, female {{count, plural, one {Вона додала # файл} few {Вона додала # файли} many {Вона додала # "
+              "файлів} other {Вона додала # файлу}}} male {{count, plural, one {Він додав # файл} few {Він додав # файли} many "
+              "{Він додав # файлів} other {Він додав # файлу}}} other {{count, plural, one {Вони додали # файл} few {Вони додали "
+              "# файли} many {Вони додали # файлів} other {Вони додали # файлу}}}}"),
+    "trial_btn": ("Попробовать бесплатно", "Спробувати безкоштовно"), "share_btn": ("Поделиться папкой", "Поділитися папкою"),
+    "cancel_btn": ("Отменить подписку", "Скасувати підписку"), "invite_btn": ("Пригласить участников", "Запросити учасників"),
+}
+_GLOSS_I18N = {"workspace": (_WS, _WS_RE), "folder": ({"ru": "папка", "uk": "папка"}, {"ru": r"папк", "uk": r"папк"}),
+               "member": ({"ru": "участник", "uk": "учасник"}, {"ru": r"участник", "uk": r"учасник"})}
+
+
+def _icu2(s: str, i: int = 0):
+    """ICU MessageFormat reader for levels 6+: nodes ('t', text) | ('a', name, type) | ('s', name, type, offset, {selector:
+    nodes}) | ('#',); stops at an unmatched '}' and returns (nodes, index)."""
+    nodes, buf = [], ""
+    while i < len(s):
+        c = s[i]
+        if c == "{":
+            if buf:
+                nodes.append(("t", buf))
+                buf = ""
+            m = re.match(r"\{\s*(\w+)\s*(\}|,\s*(\w+)\s*)", s[i:])
+            if not m:
+                raise ValueError("bad argument")
+            name, typ = m.group(1), m.group(3)
+            j = i + m.end()
+            if m.group(2) == "}":
+                nodes.append(("a", name, None))
+                i = j
+                continue
+            if typ in ("plural", "select", "selectordinal"):
+                m1 = re.match(r",\s*(?:offset\s*:\s*(\d+)\s*)?", s[j:])
+                if not m1:
+                    raise ValueError("no branches")
+                off, j = m1.group(1), j + m1.end()
+                br = {}
+                while True:
+                    m2 = re.match(r"\s*(=\d+|\w+)\s*\{", s[j:])
+                    if not m2:
+                        break
+                    sub, j = _icu2(s, j + m2.end())
+                    if j >= len(s) or m2.group(1) in br:
+                        raise ValueError("unclosed or repeated branch")
+                    br[m2.group(1)] = sub
+                    j += 1
+                m3 = re.match(r"\s*\}", s[j:])
+                if not m3 or not br:
+                    raise ValueError("unclosed argument")
+                nodes.append(("s", name, typ, off, br))
+                i = j + m3.end()
+            else:
+                k = s.find("}", j)
+                if k < 0:
+                    raise ValueError("unclosed argument")
+                nodes.append(("a", name, typ))
+                i = k + 1
+        elif c == "}":
+            break
+        elif c == "#":
+            if buf:
+                nodes.append(("t", buf))
+                buf = ""
+            nodes.append(("#",))
+            i += 1
+        else:
+            buf += c
+            i += 1
+    if buf:
+        nodes.append(("t", buf))
+    return nodes, i
+
+
+def _icu2_same(x, y, in_plural: bool) -> bool:
+    text = lambda ns: "".join(n[1] for n in ns if n[0] == "t")
+    if sorted(n[1:] for n in x if n[0] == "a") != sorted(n[1:] for n in y if n[0] == "a"):
+        return False
+    for pat in (r"</?\w+[^>]*>", r"%(?:\d+\$)?[sd]"):   # tags and printf tokens of THIS branch
+        if sorted(re.findall(pat, text(x))) != sorted(re.findall(pat, text(y))):
+            return False
+    if in_plural and ("#",) in x and ("#",) not in y:
+        return False
+    sx = {n[1]: n for n in x if n[0] == "s"}
+    sy = {n[1]: n for n in y if n[0] == "s"}
+    if set(sx) != set(sy) or len(sy) != sum(1 for n in y if n[0] == "s"):
+        return False
+    for k, nx in sx.items():
+        ny = sy[k]
+        if nx[2] != ny[2] or nx[3] != ny[3]:
+            return False
+        bx, by = nx[4], ny[4]
+        if nx[2] == "select":
+            if set(bx) != set(by):
+                return False
+        else:
+            need = {b for b in bx if b.startswith("=")} | ({"one", "few", "many", "other"} if nx[2] == "plural" else {"other"})
+            if not need <= set(by) or any(b not in bx and not b.startswith("=") and b not in ("zero", "one", "two", "few", "many", "other")
+                                          for b in by):
+                return False
+        for sel, sub in by.items():
+            ref = bx.get(sel, bx.get("other"))
+            if ref is None or not _icu2_same(ref, sub, nx[2] != "select" and not sel.startswith("=")):
+                return False
+    return True
+
+
+def _icu2_text(s: str) -> str:
+    """The translatable text of an ICU message (all branches), without tags and printf tokens: what the language check reads."""
+    def walk(ns):
+        return " ".join(n[1] if n[0] == "t" else " ".join(walk(b) for b in n[4].values()) if n[0] == "s" else " " for n in ns)
+    try:
+        t = walk(_icu2(s)[0])
+    except (ValueError, IndexError):
+        t = re.sub(r"\{[^{}]*\}", " ", s)
+    return re.sub(r"<[^>]+>|%(?:\d+\$)?[sd]", " ", t)
+
+
+def _icu2_ok(src: str, dst: str) -> bool:
+    try:
+        a, ia = _icu2(src)
+        b, ib = _icu2(dst)
+    except (ValueError, IndexError):
+        return False
+    return ib == len(dst) and ia == len(src) and _icu2_same(a, b, False)
+
+
+def _i18n_hard(seed: int, level: int) -> Item:
+    """Levels 6-8 of i18n (Russian or Ukrainian): the level-5 rules plus the new strings of _UI_HARD. Graded per key."""
+    r = rng(BLOCK, f"i18n{level}", seed)
+    lang = r.choice(["ru", "uk"])
+    new = [u for u in _UI_HARD if u[2] <= level]
+    old = r.sample([u for u in _UI if u[2] >= 2], {6: 8, 7: 6, 8: 6}[level])
+    chosen = [(k, v, None) for k, v, _ in old] + [(k, v, lim) for k, v, _, lim in new]
+    r.shuffle(chosen)
+    src = {k: v for k, v, _ in chosen}
+    limits = {k: lim for k, _, lim in chosen if lim}
+    gl = "; ".join(f"\"{w}\" as \"{_GLOSS_I18N[w][0][lang]}\"" for w in _GLOSS_I18N)
+    notes = ["Keep every placeholder ({name}, %s, %1$s ...) and HTML tag exactly as in the source; a tag inside a plural or select "
+             "branch stays in every branch that is built from it.",
+             "Keep the brand name \"Nova Cloud\" untranslated.",
+             f"Keep ICU MessageFormat syntax valid (including offset:1 and nested arguments): translate only the text, keep the "
+             f"argument names, types and select keywords, keep explicit =N branches, and give EVERY plural (nested ones too) the "
+             f"categories {_I18N_LANGS[lang]} needs: one, few, many, other.",
+             f"Glossary (inflect as the grammar needs; placeholder names stay unchanged): translate {gl}.",
+             "Keys ending in _btn are button labels and must fit: at most " + ", ".join(f"{k} {n}" for k, n in sorted(limits.items()))
+             + " characters."]
+    prompt = (f"Translate the values of this app string table from English into {_I18N_LANGS[lang]}. Output only the JSON object "
+              f"with the same keys.\n" + "\n".join(f"- {x}" for x in notes) + "\n\n" + json.dumps(src, ensure_ascii=False, indent=1))
+
+    def check(text: str, _t=None) -> float:
+        s = strip_think(text)
+        m = re.search(r"\{.*\}", s, re.S)
+        try:
+            out = json.loads(m.group(0)) if m else None
+        except ValueError:
+            return 0.0
+        if not isinstance(out, dict) or set(out) != set(src):
+            return 0.0
+        if detect_lang(" ".join(_icu2_text(str(v)) for v in out.values())) != "ru":   # uk reads as ru here too
+            return 0.0
+        good = 0
+        for k, sv in src.items():
+            v = out.get(k)
+            if not isinstance(v, str):
+                continue
+            ok = _icu2_ok(sv, v) and ("Nova Cloud" in v) == ("Nova Cloud" in sv)
+            plain = re.sub(r"\{[^{}]*\}|<[^>]+>|%\S+", "", sv)
+            if len(re.findall(r"[A-Za-z]{3,}", plain)) >= 2 and "Nova Cloud" not in sv:
+                ok &= v.strip() != sv.strip() and len(re.findall(r"[А-Яа-яЁёІіЇїЄєҐґ]", v)) >= 3
+            for w, (_tr, rx) in _GLOSS_I18N.items():
+                if re.search(rf"(?<!\{{)\b{w}s?\b(?!\}})", sv):
+                    ok &= re.search(rx[lang], v.lower()) is not None
+            if k in limits:
+                ok &= len(v) <= limits[k]
+            good += bool(ok)
+        return good / len(src)
+    return Item(f"{BLOCK}.i18n.L{level}.{seed}", BLOCK, "i18n", [{"role": "user", "content": prompt}], check, lang=lang,
+                meta={"level": level, "keys": list(src)})
+
+
+def i18n_reference(it: Item) -> str:
+    """The reference answer of a level-6+ i18n item (used by `llmbox validate`)."""
+    col = 0 if it.lang == "ru" else 1
+    return json.dumps({k: _I18N_REF[k][col] for k in it.meta["keys"]}, ensure_ascii=False)
+
+
+# proofread levels 6-8: British-English paragraphs; {right|wrong} marks where an error can be injected. Besides misspellings
+# the errors are wrong homophones, agreement and verb forms, and capitalization. Every paragraph also carries text that
+# LOOKS wrong and must stay: British spellings, misspellings inside quotation marks (quoted verbatim) and inside `code`.
+_PROOF_HARD = [
+    "The new travel policy comes into force on the first of {March|march}. Staff who travel more than twice a month must {submit|sumbit} "
+    "their expense claims within five working days, and the finance centre will {reimburse|reimberse} them by the end of the following "
+    "month. Please keep every receipt, including those for taxis and tyre repairs. As the memo from our {principal|principle} auditor put "
+    "it, \"Recieved means nothing without a reciept.\" Claims that {are|is} submitted late will be paid in the next cycle, and {their|there} "
+    "approval may take longer. {Whether|Weather} you travel by train or by car, the same rules apply.",
+    "{The|the} support team has moved to the ground floor of the east wing. Customers who visit in person should use the side entrance, "
+    "{which|wich} is signposted from the car park. The new ticketing programme has already {cut|cutted} response times by a third, although "
+    "the script `close_tikcet_v2` still needs a review. Every agent now {attends|attend} a weekly practice session, where they can practise "
+    "difficult calls. We {received|recieved} more {compliments|complements} this month than in the whole of last year, and we intend to "
+    "keep it that way.",
+    "The council has approved the plan to convert the old cinema into a community centre. Work will begin in the autumn and should "
+    "{take|takes} about eighteen months. {Residents|Residants} who live next to the site {have|has} been sent a letter explaining how the "
+    "noise will be kept to a minimum. The builders' licence allows work between eight in the morning and six in the evening, and "
+    "deliveries will not {affect|effect} the {weekly|weekley} market. One neighbour wrote that the building \"has been emtpy for to long\", "
+    "and most people seem to agree. The {council's|councils} website will publish a progress report every {month|moth}.",
+    "Before you update the firmware, check that the device is {fully|fuly} charged and connected to a stable network. The installer will "
+    "verify the image and refuse to continue if the checksum does not match. Do not unplug the cable while the light is {flashing|flasing}; "
+    "an interrupted update can {lose|loose} your settings. If the log shows the line `ERR_CONECTION_RESET`, simply start again. Most users "
+    "will not notice any difference, but the new version is {noticeably|noticably} faster {than|then} the old one when it {syncs|sync} "
+    "large catalogues.",
+    "Thank you for enrolling on our pottery course. The first lesson {takes|take} place on Saturday in the studio behind the library. "
+    "Please wear old clothes, as the glaze can stain fabric permanently, and tie back long hair. All materials are included in the fee, "
+    "but you are welcome to bring {your|you're} own tools. {It's|Its} a good idea to arrive early, because parking is limited. Our tutor, "
+    "Kaisa Lindqvist, likes to say that \"every pot is a lesson in paitence\". We look forward to {meeting|meating} you and {hope|hopes} you "
+    "enjoy the course as much as our {previous|previus} students did.",
+    "The annual report shows that the organisation grew steadily despite a difficult year. Revenue rose by eleven per cent, and the "
+    "number of customers {passed|past} forty thousand for the first time. The directors {were|was} particularly pleased with the new "
+    "defence contract, which {accounts|account} for a fifth of all sales. However, the cost of aluminium {has|have} risen sharply, and the "
+    "company expects margins to {remain|remian} under pressure. The chair's statement ends with a quote from the founder: \"Grwoth is a "
+    "habbit, not an accident.\" {Shareholders|Sharehoulders} will vote on the dividend in June.",
+]
+
+
+def _proofread_texts(seed: int, level: int) -> tuple[str, str, int]:
+    """(clean, dirty, number of injected errors) of a level-6+ proofread item."""
+    r = rng(BLOCK, f"proofread{level}", seed)
+    paras = r.sample(_PROOF_HARD, {6: 3, 7: 3, 8: 4}[level])
+    slots = [(pi, m.start()) for pi, p in enumerate(paras) for m in re.finditer(r"\{([^|}]*)\|([^}]*)\}", p)]
+    n_err = min(len(slots), {6: 11, 7: 14, 8: 18}[level])
+    bad = set(r.sample(slots, n_err))
+
+    def render(pi: int, p: str, inject: bool) -> str:
+        return re.sub(r"\{([^|}]*)\|([^}]*)\}", lambda m: m.group(2) if inject and (pi, m.start()) in bad else m.group(1), p)
+    return ("\n\n".join(render(i, p, False) for i, p in enumerate(paras)), "\n\n".join(render(i, p, True) for i, p in enumerate(paras)),
+            n_err)
+
+
+def _proofread_hard(seed: int, level: int) -> Item:
+    """Levels 6-8 of proofread: 11 / 14 / 18 errors in 3-4 British-English paragraphs, and text that must NOT be corrected
+    (British spelling, quotations, code). Graded as below level 6: 1 - differing words / errors."""
+    clean, dirty, n_err = _proofread_texts(seed, level)
+    prompt = ("Proofread this text. Fix only spelling, grammar and capitalization errors; do not rephrase, reorder or change anything "
+              "else, and keep the paragraphs. The text uses British spelling: keep it. Text inside quotation marks is quoted verbatim "
+              "and text inside backticks is code: leave both exactly as they are, even where they look wrong. Output only the corrected "
+              "text.\n\n" + dirty)
+
+    def toks(t: str) -> list[str]:
+        return re.findall(r"[A-Za-z0-9']+", (t or "").replace("’", "'"))
+
+    def check(text: str, _t=None) -> float:
+        a, b = toks(clean), toks(strip_think(text))
+        diff = sum(max(i2 - i1, j2 - j1) for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+                   if op != "equal")
+        return max(0.0, 1 - diff / n_err)
+    return Item(f"{BLOCK}.proofread.L{level}.{seed}", BLOCK, "proofread", [{"role": "user", "content": prompt}], check,
+                meta={"level": level, "errors": n_err})
+
+
+MAX_LEVEL = 8
 KINDS = {"constrained": constrained, "translate": translate, "summarize": summarize, "extract": extract, "rewrite": rewrite,
          "minutes": minutes, "i18n": i18n, "proofread": proofread}
 # the quick tier keeps the kinds that still discriminate at level 5 plus two classic generation tasks
