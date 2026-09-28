@@ -87,6 +87,8 @@ def _show(q: dict) -> str:
 
 def _gen(kind: str):
     def gen(seed: int, level: int = 3) -> Item:
+        if level >= 7:
+            return _gen78(kind, seed, level)
         r = rng(BLOCK, f"{kind}{level}", seed)
         n_fake = 2   # dev6: fixed (1-3 at random before: the share of made-up questions changed the difficulty by seed)
         qs = r.sample(_pool(kind, level, False), PER_ITEM - n_fake) + r.sample(_pool(kind, level, True), n_fake)
@@ -102,9 +104,163 @@ def _gen(kind: str):
     return gen
 
 
+# ---- levels 7-8: two or three verified facts in one question ------------------------------------------------------------
+# Level 6 left no room above the frontier reference (0.88-1.0). Levels 7-8 add no new facts: every answer is derived from
+# bank entries by a rule of the language or a documented convention, so the bank's verification carries over:
+#   python  `(A, B)` of single-line expressions: the tuple of both values, or the exception of the first part that raises
+#           (Python evaluates a tuple display left to right; tests/test_knowledge.py re-runs them on CPython when present)
+#   shell   `echo "$(A) $(B)"` of commands that write no files: both outputs on one line (command substitution drops the
+#           trailing newline; each ran alone in an empty directory, a subshell sees the same)
+#   codes   several numbers in one answer: ports, errno and signal numbers, HTTP codes; the errno number for an error
+#           message (message -> name -> number, both in the bank) and the status bash reports for a signal (128 + n)
+# An item: 10 questions, exactly 2 made up; level 7 has 4 single facts and 4 pairs, level 8 has 2 single facts, 3 pairs
+# and 3 triples, from the hardest levels. Each combined question counts as one, right only when every part is.
+_COMBO_BAD_SH = re.compile(r"\n|(?<![0-9&])>(?!&|\s*/dev/null)|\btouch\b|\bmkdir\b|\bln\b|\bcp\b|\bmv\b|\brm\b|\btee\b|"
+                           r"\bmkfifo\b|\bcase\b|#|\bcd\b|\$\$|BASHPID|SUBSHELL|SHLVL|\$0|PPID|\bexit\b|\bexec\b|\btrap\b|"
+                           r"RANDOM|\bmktemp\b|&\s*$|\bwait\b|\bjobs\b|\bsleep\b|\btimeout\b|\bread\b")
+_combo_cache: dict = {}
+
+
+def _py_combinable(q: dict) -> bool:
+    t = q["text"]
+    if "\n" in t or ";" in t:
+        return False
+    try:
+        node = ast.parse(t, mode="eval").body
+    except SyntaxError:
+        return False
+    return not isinstance(node, (ast.Tuple, ast.NamedExpr, ast.Lambda, ast.Starred, ast.Yield, ast.YieldFrom, ast.Await))
+
+
+def _codes_facts() -> list[dict]:
+    """Numeric codes facts as noun phrases: {'key', 'level', 'phrase', 'int'}."""
+    out, qs = [], [q for q in bank()["questions"] if q["kind"] == "codes" and not q["fake"]]
+    errno_num = {}
+    for q in qs:
+        m = re.fullmatch(r"What is the errno number of (E\w+) on Linux\?", q["text"])
+        if m:
+            errno_num[m.group(1)] = q["accept"]["int"]
+    for q in qs:
+        t, acc = q["text"], q["accept"]
+        m = re.fullmatch(r"What is the default (TCP|UDP) port of (.+)\?", t)
+        if m:
+            out.append({"key": "port:" + m.group(2), "level": q["level"], "phrase": f"the default {m.group(1)} port of {m.group(2)}", "int": acc["int"]})
+            continue
+        m = re.fullmatch(r"What is the errno number of (E\w+) on Linux\?", t)
+        if m:
+            out.append({"key": "errno:" + m.group(1), "level": q["level"], "phrase": f"the errno number of {m.group(1)} on Linux", "int": acc["int"]})
+            continue
+        m = re.fullmatch(r"What is the number of signal (SIG\w+) on x86-64 Linux\?", t)
+        if m:
+            out.append({"key": "signal:" + m.group(1), "level": q["level"], "phrase": f"the number of signal {m.group(1)} on x86-64 Linux", "int": acc["int"]})
+            if q["level"] >= 4:   # bash (and Docker) report a process killed by signal n as 128 + n
+                out.append({"key": "signal:" + m.group(1), "level": q["level"], "int": 128 + acc["int"],
+                            "phrase": f"the exit status bash reports for a process killed by {m.group(1)}"})
+            continue
+        m = re.fullmatch(r'Which HTTP status code has the reason phrase "(.+)"\?', t)
+        if m and q["level"] >= 4:
+            out.append({"key": "http:" + str(acc["int"]), "level": q["level"], "phrase": f'the HTTP status code with the reason phrase "{m.group(1)}"', "int": acc["int"]})
+            continue
+        m = re.fullmatch(r'Which errno name goes with the error message "(.+)" on Linux\?', t)
+        if m:   # message -> name (this entry) -> number (the errno-number entry of the same name)
+            n = next((errno_num[x] for x in acc["names"] if x in errno_num), None)
+            if n is not None:
+                out.append({"key": "errno:" + acc["names"][0], "level": q["level"], "int": n,
+                            "phrase": f'the errno number that goes with the error message "{m.group(1)}" on Linux'})
+    return out
+
+
+def _combo_pool(kind: str, level: int) -> list:
+    """Parts that combine: python and shell bank questions, or codes facts, from levels 5-6 (7) / 6 (8; codes: 4-5 / 5)."""
+    ck = (kind, level)
+    if ck not in _combo_cache:
+        lv = {7: (5, 6), 8: (6,)}[level] if kind != "codes" else {7: (4, 5), 8: (5,)}[level]
+        if kind == "codes":
+            pool = [f for f in _codes_facts() if f["level"] in lv]
+        else:
+            pool = [q for q in bank()["questions"] if q["kind"] == kind and not q["fake"] and q["level"] in lv
+                    and (_py_combinable(q) if kind == "python" else not _COMBO_BAD_SH.search(q["text"]))]
+            if kind == "python":   # every part has a literal form (a structural comparison), or it raises
+                pool = [q for q in pool if q["accept"].get("exc") or q["accept"].get("canon")]
+        _combo_cache[ck] = pool
+    return _combo_cache[ck]
+
+
+def _combine(kind: str, parts: list, level: int) -> dict:
+    if kind == "python":
+        text = "(" + ", ".join(p["text"] for p in parts) + ")"
+        exc = next((p["accept"]["exc"] for p in parts if p["accept"].get("exc")), None)
+        if exc:
+            acc = {"exc": exc}
+        else:
+            rep = "(" + ", ".join(p["accept"]["repr"] for p in parts) + ")"
+            try:
+                canon = repr(("tuple", [ast.literal_eval(p["accept"]["canon"]) for p in parts]))
+            except (ValueError, SyntaxError):
+                canon = None
+            acc = {"repr": rep, "str": rep, "type": "tuple", "canon": canon}
+        return {"kind": kind, "src": "combo", "level": level, "fake": False, "text": text, "mode": "py", "accept": acc,
+                "parts": [p["text"] for p in parts]}
+    if kind == "shell":
+        text = 'echo "' + " ".join(f"$({p['text']})" for p in parts) + '"'
+        return {"kind": kind, "src": "combo", "level": level, "fake": False, "text": text, "mode": "text",
+                "accept": {"texts": [_ws(" ".join(p["accept"]["texts"][0] for p in parts))]}, "parts": [p["text"] for p in parts]}
+    ints = tuple(p["int"] for p in parts)
+    text = (f"Give these {len(parts)} numbers in this order, separated by commas: "
+            + "; ".join(f"({'abc'[i]}) {p['phrase']}" for i, p in enumerate(parts)) + ".")
+    return {"kind": kind, "src": "combo", "level": level, "fake": False, "text": text, "mode": "py",
+            "accept": {"repr": ", ".join(map(str, ints)), "str": ", ".join(map(str, ints)), "type": "tuple",
+                       "canon": repr(_canon(ints))}, "parts": [p["phrase"] for p in parts]}
+
+
+def _gen78(kind: str, seed: int, level: int) -> Item:
+    r = rng(BLOCK, f"{kind}{level}", seed)
+    shape = {7: (4, [2, 2, 2, 2]), 8: (2, [2, 2, 2, 3, 3, 3])}[level]   # single facts, parts per combined question
+    n_fake = 2
+    singles = r.sample(_pool(kind, 6 if kind != "codes" else 5, False), shape[0])
+    used = {q["text"] for q in singles}
+    pool = [p for p in _combo_pool(kind, level) if p.get("text", p.get("phrase")) not in used]
+    if kind == "codes":   # a fact asked alone must not come back inside a combined question (status 135 / SIGBUS)
+        single_keys = set()
+        for q in singles:
+            names = re.findall(r"\b(?:E[A-Z0-9]{2,}|SIG[A-Z0-9]+)\b", q["text"]) + q["accept"].get("names", [])
+            single_keys |= {("signal:" if n.startswith("SIG") else "errno:") + n for n in names}
+            single_keys |= {"signal:SIG" + n for n in names if not n.startswith(("SIG", "E"))}   # 'BUS' -> SIGBUS
+            mm = re.search(r"port of (.+)\?", q["text"])
+            if mm:
+                single_keys.add("port:" + mm.group(1))
+            if q["src"] == "http":
+                single_keys |= {"http:" + x for x in re.findall(r"\b\d{3}\b", q["text"])} | {"http:" + str(q["accept"].get("int"))}
+        pool = [p for p in pool if p["key"] not in single_keys]
+    order = list(range(len(pool)))
+    r.shuffle(order)
+    combos, taken = [], set()
+    it_ = iter(order)
+    for size in shape[1]:
+        parts = []
+        while len(parts) < size:
+            p = pool[next(it_)]
+            k = p.get("key", p.get("text"))
+            if k in taken:
+                continue
+            taken.add(k)
+            parts.append(p)
+        combos.append(_combine(kind, parts, level))
+    qs = singles + combos + r.sample(_pool(kind, level, True), n_fake)
+    r.shuffle(qs)
+    body = "\n".join(f"{i}. {_show(q)}" for i, q in enumerate(qs, 1))
+    prompt = f"{HEAD[kind]} {RULES}\n\n{body}{TAIL}"
+
+    def check(text: str, _t=None, qs=qs) -> float:
+        got = answers(text, len(qs))
+        return sum(credit(q, got.get(i)) for i, q in enumerate(qs, 1)) / len(qs)
+    return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind, [{"role": "user", "content": prompt}], check,
+                max_tokens=32000, meta={"level": level, "questions": qs, "expected": [oracle_answer(q) for q in qs]})
+
+
 # ---- grading -----------------------------------------------------------------------------------------------------------
 
-_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?\s*(\d{1,2})\s*[.):]\s*(?:\*\*)?\s*(.*?)\s*$")
+_LINE =re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?\s*(\d{1,2})\s*[.):]\s*(?:\*\*)?\s*(.*?)\s*$")
 
 
 def answers(text: str, n: int) -> dict[int, str]:
@@ -275,7 +431,7 @@ def oracle(it: Item) -> str:
 
 
 KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes")}
-MAX_LEVEL = 6   # 6 = expert: implementation-specific behaviour even frontier models get wrong (headroom above them)
+MAX_LEVEL = 8   # 6 = expert: implementation-specific behaviour even frontier models get wrong; 7-8: facts combined
 QUICK = list(KINDS)
 
 
