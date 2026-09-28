@@ -426,11 +426,12 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         if spent >= budget_min * 60 or (obs and (sel["hi"] - sel["lo"]) / 2 <= target):
             break
         short = [b for b in bank.weights if counts.get(b, 0) < min_per_block]
+        cost = irt.cost_model(bank, [(r["family"], r["seconds"]) for r in rows])
         if short:   # every block gets its minimum first, cheapest informative family of that block
             full = {f for f in bank.a if bank.block[f] not in short or per_fam.get(f, 0) >= max_per_family}
-            fam = irt.next_family(bank, sel["theta"], full, slowness)
+            fam = irt.next_family(bank, sel["theta"], full, slowness, cost=cost)
         else:
-            fam = irt.next_family_blocks(bank, sel, per_fam, slowness, max_per_family)
+            fam = irt.next_family_blocks(bank, sel, per_fam, slowness, max_per_family, cost=cost)
         if fam is None:
             break
         blk, kind, lvl = fam.split(".")

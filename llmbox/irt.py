@@ -285,7 +285,30 @@ def capability_interval(bank: Bank, w: list[float], ref: list[str] | None = None
     return mean, lo, hi
 
 
-def next_family(bank: Bank, th: float, done: set, slowness: float = 1.0, min_per_block: int = 0, counts: dict | None = None) -> str | None:
+def cost_model(bank: Bank, seen: list[tuple[str, float]]):
+    """Expected seconds of a family for the model under test, from the tasks it already did: the family's own time
+    if it ran, else the bank median times this model's slowness in that block (else overall). Models differ in what
+    is slow for them: Occamy spent 32 of 106 min on techhelp, Tiel 5 of 55."""
+    own: dict = {}
+    for f, s in seen:
+        own.setdefault(f, []).append(s)
+    ratios: dict = {}
+    for f, ss in own.items():
+        if bank.seconds.get(f):
+            ratios.setdefault(bank.block[f], []).append(statistics.median(ss) / bank.seconds[f])
+    allr = [x for v in ratios.values() for x in v]
+    overall = statistics.median(allr) if allr else 1.0
+
+    def cost(f: str) -> float:
+        if f in own:
+            return statistics.median(own[f])
+        r = ratios.get(bank.block[f])
+        return bank.seconds[f] * (statistics.median(r) if r else overall)
+    return cost
+
+
+def next_family(bank: Bank, th: float, done: set, slowness: float = 1.0, min_per_block: int = 0, counts: dict | None = None,
+                cost=None) -> str | None:
     """The family with the most information per expected second; blocks below their minimum go first."""
     cands = [f for f in bank.a if f not in done]
     if not cands:
@@ -294,7 +317,8 @@ def next_family(bank: Bank, th: float, done: set, slowness: float = 1.0, min_per
         short = [f for f in cands if counts.get(bank.block[f], 0) < min_per_block]
         if short:
             cands = short
-    return max(cands, key=lambda f: bank.info(f, th) / (bank.seconds[f] * slowness))
+    cost = cost or (lambda f: bank.seconds[f] * slowness)
+    return max(cands, key=lambda f: bank.info(f, th) / cost(f))
 
 
 def simulate(bank: Bank, truth: dict, true_seconds: dict, prior: tuple = PRIOR, ref: list[str] | None = None,
@@ -421,8 +445,9 @@ def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple | None
             "lo": cs[max(0, int(0.025 * len(cs)))], "hi": cs[min(len(cs) - 1, int(0.975 * len(cs)))]}
 
 
-def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0, max_per_family: int = 3) -> str | None:
+def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0, max_per_family: int = 3, cost=None) -> str | None:
     """The family whose answer would shrink the capability's variance the most per expected second."""
+    cost = cost or (lambda f: bank.seconds[f] * slowness)
     best, best_v = None, -1.0
     wsum = sum(bank.weights.values())
     for f in bank.a:
@@ -439,7 +464,7 @@ def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0,
         # slope of the block score in eta, at the current estimate
         slope = sum(bank.a[g] * bank.p(g, b["eta"]) * (1 - bank.p(g, b["eta"])) for g in fams) / len(fams)
         gain = (bank.weights[blk] / wsum) ** 2 * slope ** 2 * d_eta_var
-        v = gain / (bank.seconds[f] * slowness)
+        v = gain / cost(f)
         if v > best_v:
             best, best_v = f, v
     return best
