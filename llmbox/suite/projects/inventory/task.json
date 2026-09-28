@@ -20,11 +20,5 @@
     "spec": "the function valueOnHand in src/report.js is not implemented yet (it throws). Implement it exactly as README.md specifies."
   },
   "grade_cmd": "node _hidden_tests/grade.js 2>&1",
-  "bugs_per_level": [
-    1,
-    2,
-    4,
-    6,
-    8
-  ]
+  "bugs_per_level": [1, 2, 4, 6, 8, 10, 12]
 }
