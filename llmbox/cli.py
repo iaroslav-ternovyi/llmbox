@@ -158,7 +158,9 @@ def cmd_irt(a: argparse.Namespace) -> None:
     if not resp:
         raise SystemExit(f"no full runs of suite content {ch}; pass --content-hash")
     if a.action == "calibrate":
-        tau, cv = irt.choose_tau(resp, suite.WEIGHTS) if len(models) >= 4 else (1.0, {})
+        # floor 0.5: with few models the held-out likelihood barely separates 0.3 from 0.5, and a small tau lets the
+        # other blocks overrule a model's own answers in one (gpt-oss: long documents 50 with the rest 83-100)
+        tau, cv = irt.choose_tau(resp, suite.WEIGHTS, taus=(0.5, 0.7, 1.0, 1.4)) if len(models) >= 4 else (1.0, {})
         bank = irt.calibrate_blocks(resp, suite.WEIGHTS, fixed_tau=tau)
         if cv:
             print("tau by cross-validation (held-out log-likelihood): " + ", ".join(f"{k}: {v:.1f}" for k, v in cv.items()))
