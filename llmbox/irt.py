@@ -26,6 +26,10 @@ from dataclasses import dataclass, field
 from .hosts import HOME
 
 GRID = [(-4.0 + 0.02 * i) for i in range(501)]   # theta from -4 to 6
+# discrimination prior: log a ~ N(0, 1), a <= 8. With sd 0.5 and a <= 4.5 a step item (tools.bulk_discount L6: every local
+# model 0, Opus 1) was fitted as a gentle slope that promised Tiel 0.21; three adaptive draws of it at 0 pulled Tiel's
+# estimate 6 points below its fixed runs.
+LOG_A_SD, LOG_A_MAX = 1.0, 2.08
 PRIOR = (0.0, 1.5)
 
 
@@ -156,7 +160,7 @@ def calibrate_blocks(resp: list[Resp], weights: dict, iters: int = 6000, lr: flo
     for it in range(iters):
         gth = {m: -th[m] / PRIOR[1] ** 2 for m in models}
         gd = {k: -v / tau ** 2 for k, v in d.items()}
-        gla = {f: -la[f] / 0.5 ** 2 for f in fams}
+        gla = {f: -la[f] / LOG_A_SD ** 2 for f in fams}
         gb = {f: -b_[f] / 2.0 ** 2 for f in fams}
         for r in resp:
             blk = r.family.split(".")[0]
@@ -173,7 +177,7 @@ def calibrate_blocks(resp: list[Resp], weights: dict, iters: int = 6000, lr: flo
         for k in d:
             d[k] += lr * gd[k]
         for f in fams:
-            la[f] = max(-3.0, min(1.5, la[f] + lr * gla[f]))
+            la[f] = max(-3.0, min(LOG_A_MAX, la[f] + lr * gla[f]))
             b_[f] += lr * gb[f]
         if fixed_tau is None and it % 500 == 499:   # empirical Bayes for tau (biased low on small data: prefer choose_tau)
             tau = max(0.3, min(2.0, math.sqrt(sum(v * v for v in d.values()) / len(d))))
@@ -456,7 +460,7 @@ def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple | None
             "lo": cs[max(0, int(0.025 * len(cs)))], "hi": cs[min(len(cs) - 1, int(0.975 * len(cs)))]}
 
 
-def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0, max_per_family: int = 3, cost=None) -> str | None:
+def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0, max_per_family: int = 2, cost=None) -> str | None:
     """The family whose answer would shrink the capability's variance the most per expected second."""
     cost = cost or (lambda f: bank.seconds[f] * slowness)
     best, best_v = None, -1.0
@@ -464,6 +468,7 @@ def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0,
     for f in bank.a:
         if used.get(f, 0) >= max_per_family:
             continue
+        fresh = 1.5 if not used.get(f) else 1.0   # coverage: a family not yet tried beats a repeat of the same value
         blk = bank.block[f]
         b = est["blocks"].get(blk)
         if not b:
@@ -475,7 +480,7 @@ def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0,
         # slope of the block score in eta, at the current estimate
         slope = sum(bank.a[g] * bank.p(g, b["eta"]) * (1 - bank.p(g, b["eta"])) for g in fams) / len(fams)
         gain = (bank.weights[blk] / wsum) ** 2 * slope ** 2 * d_eta_var
-        v = gain / cost(f)
+        v = fresh * gain / cost(f)
         if v > best_v:
             best, best_v = f, v
     return best

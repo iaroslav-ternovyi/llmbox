@@ -406,7 +406,7 @@ def speed_probe(base_url: str, model: str, depths: tuple = (2000, 32000, 96000),
 
 def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, target: float = 5.0, prior: tuple | None = None,
                  seed0: int = 7000, api_key: str | None = None, progress=print, jsonl_path: str | None = None,
-                 min_per_block: int = 1, max_per_family: int = 3) -> dict:
+                 min_per_block: int = 1, max_per_family: int = 2) -> dict:
     """Adaptive run (llmbox/irt.py): after every task, the family with the most information per expected second at the
     current estimate; fresh seeds, so a family can be drawn again (at most max_per_family times). Stops when the 95%
     interval of the capability is within +-target points or the time budget is spent. The capability is reported on
