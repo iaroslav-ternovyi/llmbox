@@ -537,6 +537,41 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
     return {"local": out, "ref": ref}
 
 
+def optimize_records(host: str) -> dict:
+    """{recipe id: newest "optimize" record} - stock llama.cpp vs the tuned recipe, measured back to back (llmbox optimize)."""
+    import json as _json
+    out = {}
+    d = os.path.join(HOME, "results", host)
+    for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        if f.endswith(".json") and "-optimize-" in f:
+            try:
+                rec = _json.load(open(os.path.join(d, f)))
+            except ValueError:
+                continue
+            s = rec.get("summary") or {}
+            if (s.get("stock") or {}).get("decode") and (s.get("llmbox") or {}).get("decode"):
+                out[(rec.get("recipe") or {}).get("id")] = rec   # sorted by name = by time: the newest wins
+    return out
+
+
+def _optimize_panel(o: dict | None) -> str:
+    if not o:
+        return ""
+    s = o["summary"]
+    st, lb = s["stock"], s["llmbox"]
+    ctx = ((o.get("recipe") or {}).get("placement") or {}).get("ctx") or 0
+    pct = lambda a, b: f"{(b / a - 1) * 100:+.0f}%" if a and b else "—"
+    flags = " ".join(s.get("tuned_flags") or []) or "none (the recipe's defaults were already fastest)"
+    return (f'<section class="panel pad"><div class="lbl">What the settings are worth</div><table class="opt">'
+            f'<tr><th></th><th>tok/s, short chat</th><th>tok/s at 32k</th><th>first word after a 12k prompt</th></tr>'
+            f'<tr><td class="l">stock llama.cpp</td><td>{st["decode"]:.0f}</td><td>{st["deep"] or 0:.0f}</td><td>{12000 / st["prefill"]:.1f} s</td></tr>'
+            f'<tr class="me"><td class="l">this recipe</td><td>{lb["decode"]:.0f} <small>{pct(st["decode"], lb["decode"])}</small></td>'
+            f'<td>{lb["deep"] or 0:.0f} <small>{pct(st["deep"], lb["deep"])}</small></td><td>{12000 / lb["prefill"]:.1f} s</td></tr></table>'
+            f'<p class="q" style="margin-top:12px">Same model file, same {ctx // 1024}k context, same box, measured back to back. Stock = '
+            f'<code>llama-server -m model.gguf -c {ctx}</code> with llama.cpp\'s own defaults ({esc(s.get("stock_flags") or "")}). '
+            f'Found by <code>llmbox tune</code> on this box: {esc(flags)}.</p></section>')
+
+
 def _pool_summary(rec: dict, recs: list[dict], where: str = "box") -> None:
     from . import irt, report as _report
     p = _report.ranked_now((rec.get("recipe") or {}).get("id") or "?", where)
@@ -688,7 +723,8 @@ def _human(v) -> str:
     return "default" if v is None else "on" if v is True else "off" if v is False else str(v)
 
 
-def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict, flags: dict, n_measured: int, n_total: int) -> str:
+def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict, flags: dict, n_measured: int, n_total: int,
+                opt: dict | None = None) -> str:
     s, sp = rec["summary"], rec["summary"]["speed"]
     bd = sp.get("by_depth") or {}
     vs = _vs(rec, ref)
@@ -768,6 +804,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict
  <div>{_star(s["blocks"], (ref or {}).get("summary", {}).get("blocks") or {}, lost)}</div></div>{sw}</section>
 <section class="panel pad"><div class="lbl">Speed as the context grows</div>{_depth_bars([(rid, bd)])}
  <p class="q" style="margin-top:16px">Measured on the reference box ({esc((rec["host"].get("gpu") or "").replace("NVIDIA GeForce ", ""))} · {rec["host"].get("ram_gib")} GB · {rec["host"].get("ram_read_gbs")} GB/s). <a href="hardware-{esc(rid)}.html">Other boxes →</a></p></section>
+{_optimize_panel(opt)}
 <section class="panel recipe"><div class="lbl">Settings</div>{recipe_html}</section>
 {_telemetry_panel(rec.get("telemetry"))}
 <section class="panel runs"><div class="lbl">Runs</div>{runs_html}</section>'''
@@ -1092,7 +1129,27 @@ render();
 """
 
 
-def method_page(ref: dict | None) -> str:
+def _optimize_table(opts: dict) -> str:
+    rows = sorted(opts.items(), key=lambda kv: -(kv[1]["summary"]["llmbox"]["decode"] / kv[1]["summary"]["stock"]["decode"]))
+    if not rows:
+        return ""
+    import statistics as _st
+    gains = [o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1 for _, o in rows]
+    deep = [o["summary"]["llmbox"]["deep"] / o["summary"]["stock"]["deep"] - 1 for _, o in rows if o["summary"]["stock"].get("deep") and o["summary"]["llmbox"].get("deep")]
+    tr = "".join(f'<tr><td class="l"><a href="recipe-{esc(rid)}.html">{esc(rid)}</a></td><td>{o["summary"]["stock"]["decode"]:.0f}</td>'
+                 f'<td>{o["summary"]["llmbox"]["decode"]:.0f}</td><td>{(o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1) * 100:+.0f}%</td>'
+                 f'<td>{o["summary"]["stock"].get("deep") or 0:.0f}</td><td>{o["summary"]["llmbox"].get("deep") or 0:.0f}</td>'
+                 f'<td class="q">{esc(" ".join(o["summary"].get("tuned_flags") or []) or "defaults")}</td></tr>' for rid, o in rows)
+    return (f"<h2>What the settings do</h2><p>Every model on the reference box, measured twice back to back: once the way "
+            f"<code>llama-server -m model.gguf -c &lt;context&gt;</code> runs it with llama.cpp's own defaults, once with its llmbox recipe (placement of the "
+            f"weights, KV cache type, speculative decoding with the model's MTP head where it has one, batch sizes, then <code>llmbox tune</code>). Same file, "
+            f"same context. Median: <b>{_st.median(gains) * 100:+.0f}%</b> in a short chat"
+            + (f", <b>{_st.median(deep) * 100:+.0f}%</b> at 32k" if deep else "") + ".</p>"
+            f'<table class="opt"><tr><th class="l">model</th><th>stock tok/s</th><th>llmbox tok/s</th><th>gain</th><th>stock at 32k</th>'
+            f"<th>llmbox at 32k</th><th class='l'>tuned</th></tr>{tr}</table>")
+
+
+def method_page(ref: dict | None, opts: dict | None = None) -> str:
     """How the numbers are made. The figures (weights, task counts, versions, depths) come from the code."""
     from . import suite
     per = {}
@@ -1146,6 +1203,7 @@ so the time per token follows from the model file and the two memory speeds. The
 against the same prediction on its own box. When most of a model moves onto a bigger card, it is outside what was measured, and the page says
 <i>rough estimate</i>.</p>
 
+{_optimize_table(opts or {})}
 <h2>What a run records</h2>
 <p>Every run keeps the server's exact command line and sampling defaults, the llama.cpp build, the model file's sha256, and the GPU and CPU
 temperature, power and memory every five seconds. The settings are compared with the recipe: differences in speed settings keep the
@@ -1188,6 +1246,7 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
     n_total = len(rs) + len([j for j in queue_state() if j["model"] not in local])
     data = shape_data(rs, host)
     flags = {rid: task_flags(rec) for rid, rec in local.items()}
+    opts = optimize_records(host)
     order = sorted(local, key=lambda k: -local[k]["summary"]["capability"])
     TAB_LINKS["COMPARE"] = f"compare-{order[0]}-vs-{order[1]}.html" if len(order) > 1 else "#"
     def w(name, html_):
@@ -1196,13 +1255,13 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
         written.append(p)
     for rid in order:
         rec = local[rid]
-        w(f"recipe-{rid}.html", recipe_page(rid, rec, ref, local, ranks, flags[rid], len(local), n_total))
+        w(f"recipe-{rid}.html", recipe_page(rid, rec, ref, local, ranks, flags[rid], len(local), n_total, opts.get(rid)))
         w(f"run-{rec['id'][:8]}.html", run_page(rid, local_run[rid], ref, flags[rid]))
         if rid in data["recipes"]:
             w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
     for a, b in itertools.combinations(order, 2):
         w(f"compare-{a}-vs-{b}.html", compare_page(a, b, local[a], local[b], ref, flags[a], flags[b]))
-    w("method.html", method_page(ref))
+    w("method.html", method_page(ref, opts))
     try:
         np_ = new_page(rs, data, host)
     except Exception as e:   # the list needs Hugging Face; the rest of the site must not depend on it
@@ -1214,6 +1273,8 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
 
 
 _PAGES_CSS = """
+.opt{border-collapse:collapse;margin:8px 0 4px;font-size:13px}.opt th,.opt td{padding:7px 12px;border-bottom:1px solid var(--line2);text-align:right}
+.opt th{color:var(--muted);font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase}.opt .l{text-align:left}.opt tr.me td{color:var(--amber)}.opt small{color:var(--muted);margin-left:4px}
 .title,.hd{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:18px;padding:18px 22px}
 .title h1,.hd h1{font:600 32px/1.1 "IBM Plex Sans Condensed";margin-top:6px}.title h1 a,.hd h1 a{color:var(--ink);border-bottom:1px dotted var(--faint)}
 .title .meta{font-size:12px;color:var(--muted);margin-top:8px}
