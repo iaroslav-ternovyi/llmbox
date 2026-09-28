@@ -68,6 +68,7 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
             "speed": s.get("speed", {}), "solved_per_hour": s.get("solved_per_hour"), "items": s.get("items"),
             "wall_minutes": s.get("wall_minutes"), "created": rec.get("created", "")[:16],
             "recipe": {k: r.get(k) for k in ("placement", "speculative", "sampling", "chat", "antiloop") if k in r},
+            "_rows": rec.get("rows") or [], "_hash": su.get("content_hash"),
         })
     if suite_version is None and out:  # default: only the newest suite version, results of older versions are not comparable
         newest = max(out, key=lambda x: _vkey(x["suite"].get("version")))["suite"].get("version")
@@ -76,6 +77,7 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
     best: dict = {}
     for x in sorted(out, key=lambda x: x["created"]):
         best[(x["id"], x["host"].get("id"), x["suite"].get("version"), scale(x["suite"].get("tier")))] = x
+    _pool(out, best)
     rs = sorted(best.values(), key=lambda x: (x.get("partial", False), -(x["capability"] or 0)))   # partial runs listed last
     # 100% = the best frontier reference on the same suite version and tier (per block as well)
     for x in rs:
@@ -87,6 +89,26 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
             x["vs_ref"] = round(100 * x["capability"] / ref["capability"], 1) if ref["capability"] else None
             x["blocks_vs_ref"] = {b: round(100 * v / ref["blocks"][b], 1) for b, v in x["blocks"].items() if ref["blocks"].get(b)}
     return rs
+
+
+def _pool(out: list[dict], best: dict) -> None:
+    """One number per model from ALL its runs of the same tasks (fixed and adaptive): the IRT estimate over every
+    answer it gave (llmbox/irt.py), so each extra run narrows its interval instead of replacing the last one. Without a
+    calibrated bank for the suite content, the newest run stands."""
+    from . import irt
+    for key, x in best.items():
+        if x.get("partial"):
+            continue
+        bank = irt.bank_for(x.get("_hash"))
+        if bank is None:
+            continue
+        same = [y for y in out if (y["id"], y["host"].get("id"), y["suite"].get("version"), scale(y["suite"].get("tier"))) == key
+                and irt.SAME_TASKS.get(y.get("_hash"), y.get("_hash")) == irt.SAME_TASKS.get(x.get("_hash"), x.get("_hash"))]
+        sc = irt.score_rows(bank, [r for y in same for r in y["_rows"]])
+        if not sc["n"]:
+            continue
+        x.update(capability=sc["capability"], ci=sc["ci95"], blocks=sc["blocks"], runs=len(same), answers=sc["n"],
+                 scoring="irt")
 
 
 def _depth_k(key: str) -> float:

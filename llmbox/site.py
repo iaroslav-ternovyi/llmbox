@@ -476,7 +476,7 @@ def _page(title: str, tab: str, body: str, css: str = "", js: str = "", links: d
 def load_records(host: str, suite_version: str, tier: str) -> dict:
     """Newest suite record per recipe id for this host and suite, plus the frontier reference. Keeps the file path."""
     import json as _json
-    out, ref = {}, None
+    out, ref, runs = {}, None, {}
     for h in (host, "cloud"):
         d = os.path.join(HOME, "results", h)
         for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
@@ -495,12 +495,31 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
             rec = bench.rescore(rec)   # current suite weights: the task scores are the run's, the weighting is today's
             rec["_path"] = os.path.join(d, f)
             rid = (rec.get("recipe") or {}).get("id")
+            runs.setdefault((h, rid), []).append(rec)
             if h == "cloud":
                 if not ref or rec["summary"]["capability"] > ref["summary"]["capability"]:
                     ref = rec
             elif rid:
                 out[rid] = rec   # sorted by name = by time: the newest wins
+    for (h, rid), recs in runs.items():   # the number of a model = the IRT estimate over all its runs (report._pool)
+        tgt = ref if h == "cloud" and ref is not None and (ref.get("recipe") or {}).get("id") == rid else out.get(rid) if h != "cloud" else None
+        if tgt is not None:
+            _pool_summary(tgt, recs)
     return {"local": out, "ref": ref}
+
+
+def _pool_summary(rec: dict, recs: list[dict]) -> None:
+    from . import irt
+    bank = irt.bank_for((rec.get("suite") or {}).get("content_hash"))
+    if bank is None:
+        return
+    key = lambda r: irt.SAME_TASKS.get((r.get("suite") or {}).get("content_hash"), (r.get("suite") or {}).get("content_hash"))
+    same = [r for r in recs if key(r) == key(rec)]
+    sc = irt.score_rows(bank, [x for r in same for x in r.get("rows") or []])
+    if sc["n"]:
+        s = rec["summary"]
+        rec["summary"] = dict(s, capability=sc["capability"], capability_ci95=sc["ci95"], blocks=sc["blocks"], runs=len(same),
+                              answers=sc["n"], scoring="irt", capability_this_run=s.get("capability"))
 
 
 def _trace_dir(rec: dict) -> str | None:
@@ -709,7 +728,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict
  <div class="meta">{esc(m.get("hf_repo") or "")}{f' · {m["bytes"]/1e9:.1f} GB' if m.get("bytes") else ""} · suite v{esc(rec["suite"]["version"])}</div></div>
  <div class="acts"><a class="btn" href="hardware-{esc(rid)}.html">SPEED ON OTHER BOXES →</a>{f'<a class="btn" href="{esc(cmp_href)}">COMPARE WITH {esc(rival.upper())}</a>' if rival else ""}</div></section>
 <section class="panel"><div class="lbl">Score</div><div class="top">
- <div class="score"><div class="n glow">{f"{vs:.0f}" if vs is not None else "—"}<small>%</small></div><div class="of">of frontier</div><div class="rk">rank {rk} of {n_measured}<br><span class="q">1 run</span></div><a class="q" href="method.html" style="display:block;margin-top:14px">how scores work</a></div>
+ <div class="score"><div class="n glow">{f"{vs:.0f}" if vs is not None else "—"}<small>%</small></div><div class="of">of frontier</div><div class="rk">rank {rk} of {n_measured}<br><span class="q">{s.get("runs", 1)} run{"s" if s.get("runs", 1) > 1 else ""}</span></div><a class="q" href="method.html" style="display:block;margin-top:14px">how scores work</a></div>
  <div class="lines">{line_html}</div>
  <div>{_star(s["blocks"], (ref or {}).get("summary", {}).get("blocks") or {}, lost)}</div></div>{sw}</section>
 <section class="panel pad"><div class="lbl">Speed as the context grows</div>{_depth_bars([(rid, bd)])}
