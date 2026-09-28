@@ -1139,14 +1139,15 @@ render();
 """
 
 
-def _optimize_table(opts: dict) -> str:
+def _optimize_table(opts: dict, ranked: set | None = None) -> str:
     rows = sorted(opts.items(), key=lambda kv: -(kv[1]["summary"]["llmbox"]["decode"] / kv[1]["summary"]["stock"]["decode"]))
     if not rows:
         return ""
     import statistics as _st
     gains = [o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1 for _, o in rows]
     deep = [o["summary"]["llmbox"]["deep"] / o["summary"]["stock"]["deep"] - 1 for _, o in rows if o["summary"]["stock"].get("deep") and o["summary"]["llmbox"].get("deep")]
-    tr = "".join(f'<tr><td class="l"><a href="recipe-{esc(rid)}.html">{esc(rid)}</a></td><td>{o["summary"]["stock"]["decode"]:.0f}</td>'
+    link = lambda rid: f'<a href="recipe-{esc(rid)}.html">{esc(rid)}</a>' if ranked is None or rid in ranked else esc(rid)
+    tr = "".join(f'<tr><td class="l">{link(rid)}</td><td>{o["summary"]["stock"]["decode"]:.0f}</td>'
                  f'<td>{o["summary"]["llmbox"]["decode"]:.0f}</td><td>{(o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1) * 100:+.0f}%</td>'
                  f'<td>{o["summary"]["stock"].get("deep") or 0:.0f}</td><td>{o["summary"]["llmbox"].get("deep") or 0:.0f}</td>'
                  f'<td class="q">{esc(" ".join(o["summary"].get("tuned_flags") or []) or "defaults")}</td></tr>' for rid, o in rows)
@@ -1159,7 +1160,7 @@ def _optimize_table(opts: dict) -> str:
             f"<th>llmbox at 32k</th><th class='l'>tuned</th></tr>{tr}</table>")
 
 
-def method_page(ref: dict | None, opts: dict | None = None) -> str:
+def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None = None) -> str:
     """How the numbers are made. The figures (weights, task counts, versions, depths) come from the code."""
     from . import suite
     per = {}
@@ -1213,7 +1214,7 @@ so the time per token follows from the model file and the two memory speeds. The
 against the same prediction on its own box. When most of a model moves onto a bigger card, it is outside what was measured, and the page says
 <i>rough estimate</i>.</p>
 
-{_optimize_table(opts or {})}
+{_optimize_table(opts or {}, ranked)}
 <h2>What a run records</h2>
 <p>Every run keeps the server's exact command line and sampling defaults, the llama.cpp build, the model file's sha256, and the GPU and CPU
 temperature, power and memory every five seconds. The settings are compared with the recipe: differences in speed settings keep the
@@ -1271,7 +1272,7 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
             w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
     for a, b in itertools.combinations(order, 2):
         w(f"compare-{a}-vs-{b}.html", compare_page(a, b, local[a], local[b], ref, flags[a], flags[b]))
-    w("method.html", method_page(ref, opts))
+    w("method.html", method_page(ref, opts, set(local)))
     try:
         np_ = new_page(rs, data, host)
     except Exception as e:   # the list needs Hugging Face; the rest of the site must not depend on it
