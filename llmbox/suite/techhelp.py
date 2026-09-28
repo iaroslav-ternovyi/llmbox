@@ -69,7 +69,9 @@ def _num_check(expected: float):
 def compose_port(seed: int, level: int = 3) -> Item:
     """docker compose port publishing. Short and long syntax, IP bindings, `expose` (not published), a bare container
     port (random host port), ${VAR:-default} with a .env file, a second -f file (ports lists concatenate), port ranges,
-    network_mode: host. Level 6: compose_expert."""
+    network_mode: host. Level 6: compose_expert; 7-8: compose_78."""
+    if level >= 7:
+        return compose_78(seed, level)
     if level >= 6:
         return compose_expert(seed, level)
     r = rng(BLOCK, f"compose{level}", seed)
@@ -193,6 +195,8 @@ def _nginx_match(locs: list[tuple[str, str, str]], uri: str) -> str:
 
 
 def nginx_route(seed: int, level: int = 3) -> Item:
+    if level >= 7:
+        return nginx_78(seed, level)
     if level >= 6:
         return nginx_expert(seed, level)
     r = rng(BLOCK, f"nginx{level}", seed)
@@ -242,6 +246,8 @@ def _naive(locs, uri):
 # ---- networking: hosts, broadcast, routing, summarisation ------------------------------------------------------------
 
 def subnet(seed: int, level: int = 3) -> Item:
+    if level >= 7:
+        return routing_78(seed, level)
     if level >= 6:
         return routing_expert(seed, level)
     r = rng(BLOCK, f"subnet{level}", seed)
@@ -361,6 +367,8 @@ def chmod_apply(mode: int, spec: str, is_dir: bool = False, umask: int = 0o022) 
 
 
 def chmod_seq(seed: int, level: int = 3) -> Item:
+    if level >= 7:
+        return chmod_78(seed, level)
     if level >= 6:
         return chmod_expert(seed, level)
     r = rng(BLOCK, f"chmod{level}", seed)
@@ -405,7 +413,9 @@ def chmod_seq(seed: int, level: int = 3) -> Item:
 def log_root(seed: int, level: int = 3) -> Item:
     """A cascade of failures in journal logs; the root cause is the earliest real failure, not the loudest line. Level
     adds noise, a recovered error before the root cause (a retry that succeeded), and a second machine whose logs are
-    in another time zone (the order must be read in UTC)."""
+    in another time zone (the order must be read in UTC). Levels 7-8: log_78."""
+    if level >= 7:
+        return log_78(seed, level)
     r = rng(BLOCK, f"log{level}", seed)
     svcs = ["postgres", "redis", "api", "worker", "nginx", "minio", "keycloak", "grafana"]
     chain = r.sample(svcs, 4)   # root -> dependents
@@ -668,6 +678,597 @@ def chmod_expert(seed: int, level: int = 6) -> Item:
                 meta={"expected": [f"{m:04o}" for m in exp], "files": files, "umask": f"{um:04o}", "level": level})
 
 
+# ---- levels 7-8: more interacting rules per question (v0.11) --------------------------------------------------------
+# Level 6 saturated: the frontier reference answered every level-6 techhelp item right. Levels 7-8 keep the fixed rule mix
+# per level (a seed changes names, numbers, order) and the credit per question, and every question now needs several
+# rules at once. Nothing below is reached from levels 1-6: they stay byte-identical (tests/test_levels_stable.py).
+
+def _set_check7(expected: set[str]):
+    """_set_check that also takes '8080/tcp' and a 'tcp' word."""
+    def check(text: str, _t=None) -> float:
+        a = final_answer(text)
+        if a is None:
+            return 0.0
+        toks = [re.sub(r"/tcp$", "", re.sub(r"^\d+\.\d+\.\d+\.\d+:", "", t)) for t in re.findall(r"[\w.:/-]+", a.lower())]
+        got = {t for t in toks if t not in {"and", "port", "ports", "on", "host", "tcp", "only"}}
+        want = {e.lower() for e in expected} or {"none"}
+        return 1.0 if got == want else 0.0
+    return check
+
+
+def _octal_check7(want: int):
+    """The last 3-5 digit octal number (2755, 02755 and 0755 are all read as numbers)."""
+    def check(text: str, _t=None) -> float:
+        a = re.findall(r"(?<![0-9])[0-7]{3,5}(?![0-9])", final_answer(text) or "")
+        return 1.0 if a and int(a[-1], 8) == want else 0.0
+    return check
+
+
+def _num_check7(expected: float, tol: float):
+    def check(text: str, _t=None) -> float:
+        v = num(final_answer(text))
+        return 1.0 if v is not None and abs(v - expected) <= tol + 1e-9 else 0.0
+    return check
+
+
+# -- compose: which env file, which compose files, which ports survive -------------------------------------------------
+
+def compose_78(seed: int, level: int) -> Item:
+    """Checked with `docker compose config` (v2.40): `env_file:` feeds the container, never ${VAR} interpolation;
+    `--env-file` replaces .env entirely (its COMPOSE_FILE too); a variable set in the shell beats .env even when empty,
+    and `${VAR:-d}` treats empty as unset while `${VAR-d}` keeps the empty value (the host port becomes a random one);
+    compose.override.yaml is merged only when no -f and no COMPOSE_FILE picks the files; `!override` replaces a list;
+    identical port mappings merge into one; a /udp mapping is no TCP port; `127.0.0.1::80` is a random port.
+    Level 8 adds COMPOSE_FILE in .env and `up <service>` (starts that service and its dependencies only)."""
+    r = rng(BLOCK, f"compose{level}", seed)
+    svc = r.choice(["web", "api", "grafana", "auth", "search", "app"])
+    # other services publish their usual port; none of them on a port the target could get (compose would refuse)
+    others = r.sample([n for n in CONVENTIONAL if n != svc and n not in ("nginx", "proxy", "keycloak", "auth")], 3)
+    tport = r.choice([80, 3000, 8000, 8080])
+    var = f"{svc.upper()}_PORT"
+    default, envval, trapval, shellval = r.choice([8080, 8090, 8181, 8282]), r.choice([18080, 8443, 28080]), \
+        r.choice([38080, 48080]), r.choice([9090, 19090, 7080])
+    fixed, udp, extra, prod = r.choice([9443, 7443, 10443]), r.choice([5353, 6060, 4789]), r.choice([7000, 17000, 6443]), \
+        r.choice([8800, 18800, 8888])
+    dash = level >= 8   # ${VAR-default}: an empty value stays empty
+    ref = f"${{{var}-{default}}}" if dash else f"${{{var}:-{default}}}"
+    lines = ["services:", f"  {svc}:", f"    image: example/{svc}:2", f"    env_file: {svc}.env", "    ports:",
+             f'      - "{ref}:{tport}"', f'      - "{fixed}:{tport}"', f'      - "{udp}:{tport}/udp"']
+    if level >= 8:
+        lines.append(f'      - "127.0.0.1::{tport}"')
+    taken = set()
+    for o in others:
+        lines += [f"  {o}:", f"    image: example/{o}:2"]
+        if r.random() < 0.6 and CONVENTIONAL[o] not in taken:
+            taken.add(CONVENTIONAL[o])
+            lines += ["    ports:", f'      - "{CONVENTIONAL[o]}:{CONVENTIONAL[o]}"']
+    target = others[0]   # level 8: `up -d <target>` - it does not depend on svc
+    over = ["services:", f"  {svc}:", "    ports:", f'      - "{extra}:{tport}"', f'      - "{fixed}:{tport}"']
+    prodf = ["services:", f"  {svc}:"] + (["    ports:"] if level >= 8 else ["    ports: !override"]) + [f'      - "{prod}:{tport}"']
+    envq = r.choice(['"{v}"', "{v}  # was {d}", "'{v}'"]).format(v=envval, d=default)
+    envf = f"COMPOSE_PROJECT_NAME=stack\n{var}={envq}\n" + ("COMPOSE_FILE=compose.yaml:compose.prod.yaml\n" if level >= 8 else "")
+    files = [("compose.yaml", "\n".join(lines) + "\n"), ("compose.override.yaml", "\n".join(over) + "\n"),
+             ("compose.prod.yaml", "\n".join(prodf) + "\n"), (".env", envf), (f"{svc}.env", f"{var}={trapval}\nLOG_LEVEL=info\n"),
+             ("prod.env", f"COMPOSE_PROJECT_NAME=stack\n{var}=\n")]
+
+    def pub(value: str | None, files_: list[str], started: bool = True) -> set[str]:
+        """The fixed TCP host ports of container port tport: the variable's port, the fixed one, and each file's own."""
+        if not started:
+            return set()
+        if "compose.prod.yaml" in files_ and level < 8:   # !override: only the prod port is left
+            return {str(prod)}
+        v = str(default) if value is None or (value == "" and not dash) else value
+        out = ({v} if v else set()) | {str(fixed)}
+        if "compose.override.yaml" in files_:
+            out.add(str(extra))
+        if "compose.prod.yaml" in files_:
+            out.add(str(prod))
+        return out
+
+    base, over_, prod_ = ["compose.yaml"], ["compose.yaml", "compose.override.yaml"], ["compose.yaml", "compose.prod.yaml"]
+    if level < 8:
+        runs = [("docker compose up -d", pub(str(envval), over_)),
+                ("docker compose -f compose.yaml -f compose.prod.yaml up -d", pub(str(envval), prod_)),
+                ("docker compose --env-file prod.env up -d", pub("", over_)),
+                (f"{var}={shellval} docker compose -f compose.yaml up -d", pub(str(shellval), base))]
+    else:
+        runs = [("docker compose up -d", pub(str(envval), prod_)),
+                ("docker compose --env-file prod.env up -d", pub("", over_)),
+                ("docker compose -f compose.yaml up -d", pub(str(envval), base)),
+                (f"{var}= docker compose up -d", pub("", prod_)),
+                (f"docker compose up -d {target}", pub(str(envval), prod_, started=False))]
+    r.shuffle(runs)
+    body = "\n\n".join(f"`{n}`:\n```{'yaml' if n.endswith('.yaml') else ''}\n{t}```" for n, t in files)
+    qs = [f"After `docker compose down`, I run `{c}`: on which host TCP port(s) can I reach container port {tport} of `{svc}`?"
+          for c, _w in runs]
+    prompt = (f"A directory contains these files:\n\n{body}\n\nWith Docker Compose v2.40 in bash, in that directory, with no "
+              "COMPOSE_* or *_PORT variables in the environment unless a command sets one:\n" + _ask(qs)
+              + "\nIf it is not reachable from the host at a fixed TCP port, or not running at all, answer NONE; if there are "
+              "several ports, list them all." + _instr(len(qs)))
+    return Item(f"{BLOCK}.compose_port.L{level}.{seed}", BLOCK, "compose_port", [{"role": "user", "content": prompt}],
+                multi_check([_set_check7(w) for _c, w in runs]), max_tokens=32000,
+                meta={"expected": [", ".join(sorted(w)) or "NONE" for _c, w in runs], "level": level,
+                      "commands": [c for c, _w in runs], "files": dict(files), "service": svc, "container_port": tport})
+
+
+# -- nginx: which upstream, and which URI it receives ------------------------------------------------------------------
+
+def _ngx_sub(rx: str, repl: str, uri: str, args: str) -> tuple[str, str]:
+    """nginx `rewrite`: the WHOLE URI becomes the replacement ($n = captures). New arguments in it come first and the old
+    ones are appended after '&', unless the replacement ends with '?'."""
+    m = re.search(rx, uri)
+    new = re.sub(r"\$(\d)", lambda g: m.group(int(g.group(1))) or "", repl)
+    if "?" not in new:
+        return new, args
+    path, _, nargs = new.partition("?")
+    if new.endswith("?"):
+        return path, nargs.rstrip("?")
+    return path, nargs + ("&" + args if args else "")
+
+
+def ngx_proxy(server_rw: list[tuple], locs: list[tuple], request: str) -> tuple[str, str]:
+    """(upstream, request URI it receives) per the nginx docs (ngx_http_rewrite_module, proxy_pass):
+    - server-level rewrites run once, in order, before the location search (`last`/`break` stop them);
+    - location search as in _nginx_select, on the normalized URI (merge_slashes on);
+    - location rewrites in order: `last` searches the locations again with the new URI, `break` stays in this location,
+      no flag goes on with the next rewrite and, if the URI changed, searches again after the last one (max 10 rounds);
+    - proxy_pass with a URI replaces the part of the URI the (prefix or exact) location matched - after `break` the URI
+      is ignored and the whole changed URI is sent; without a URI the request goes as the client sent it, or as the
+      normalized changed URI if a rewrite changed it; the arguments follow after '?'."""
+    raw = request
+    path, _, args = raw.partition("?")
+    uri = re.sub(r"/{2,}", "/", path)
+    changed = False
+    for rx, repl, flag in server_rw:
+        if re.search(rx, uri):
+            uri, args = _ngx_sub(rx, repl, uri, args)
+            changed = True
+            if flag in ("last", "break"):
+                break
+    for _ in range(10):
+        loc = _nginx_select(locs, uri)
+        if loc is None:
+            return "404", ""
+        body = loc[2]
+        again = broke = False
+        for rx, repl, flag in body.get("rw", []):
+            if re.search(rx, uri):
+                uri, args = _ngx_sub(rx, repl, uri, args)
+                changed = True
+                if flag == "break":
+                    broke = True
+                    break
+                again = True
+                if flag == "last":
+                    break
+        if again:
+            continue
+        up, puri = body["proxy"]
+        q = ("?" + args) if args else ""
+        if puri is None:
+            return up, (raw if not changed else uri + q)
+        if broke:
+            return up, uri + q
+        return up, puri + uri[len(loc[1]):] + q
+    return "500", ""
+
+
+def _proxy_check(up: str, path: str):
+    """'<upstream> <URI>' (also 'http://<upstream><URI>'): the upstream alone earns half."""
+    def check(text: str, _t=None) -> float:
+        a = (final_answer(text) or "").replace("`", " ").replace("*", " ")
+        a = re.sub(r"https?://([\w.-]+)(?=/)", r"\1 ", a)
+        toks = [t.strip(".,;:()'\"") for t in a.split()]
+        got_up = next((t for t in toks if re.fullmatch(r"[\w-]+", t) and t.lower() not in ("upstream", "uri", "path", "to")), None)
+        got_path = next((t for t in toks if t.startswith("/")), None)
+        if got_up != up:
+            return 0.0
+        return 1.0 if got_path == path else 0.5
+    return check
+
+
+def nginx_78(seed: int, level: int) -> Item:
+    r = rng(BLOCK, f"nginx{level}", seed)
+    u = [f"{c}_pool" for c in r.sample(["blue", "green", "amber", "violet", "teal", "coral", "slate", "olive", "ruby", "indigo"], 9)]
+    api, app, static, old, legacy, v1 = r.choice(["api", "svc"]), r.choice(["app", "shop", "portal"]), \
+        r.choice(["static", "assets"]), r.choice(["old", "archive"]), r.choice(["legacy", "classic"]), r.choice(["v1", "beta"])
+    shop, store = r.choice([("cart", "store"), ("buy", "market")])
+    internal, base, v2 = r.choice(["internal", "rest"]), r.choice(["base", "srv"]), r.choice(["v2", "next"])
+    word, word2, img, n = r.choice(["users", "orders", "items"]), r.choice(["report", "invoice", "profile"]), \
+        r.choice(["logo", "banner", "avatar"]), r.randint(2, 9)
+    tail = r.choice(["s", "x", "data"])
+    server_rw = [(rf"^/{v1}/(.*)$", f"/{api}/$1", None)]
+    if level >= 8:
+        server_rw.append((r"^/search/(\w+)$", f"/{api}/find?q=$1", "last"))
+    img_rx = ("~*", r"\.(png|jpe?g)$", {"proxy": (u[4], None)})
+    locs = [("", "/", {"proxy": (u[0], None)}),
+            ("", f"/{api}/", {"proxy": (u[1], f"/{internal}/")}),
+            ("", f"/{app}", {"proxy": (u[2], "/")}),
+            ("^~", f"/{static}/", {"proxy": (u[3], None)}),
+            img_rx,
+            ("", f"/{old}/", {"rw": [(rf"^/{old}/(.*)$", f"/{api}/$1", "last")], "proxy": (u[0], None)}),
+            ("", f"/{legacy}/", {"rw": [(rf"^/{legacy}/(.*)$", f"/{v2}/$1", "break")], "proxy": (u[5], f"/{base}/")}),
+            ("=", "/health", {"proxy": (u[6], "/status")})]
+    if level >= 8:
+        locs += [("", f"/{shop}/", {"rw": [(rf"^/{shop}/(.*)$", f"/{store}/$1", None), (rf"^/{store}/(.*)\.php$", f"/{legacy}/$1", None)],
+                                    "proxy": (u[7], None)}),
+                 ("~", rf"^/{api}/.*\.(json|jpg)$", {"proxy": (u[8], None)})]
+    r.shuffle(locs)
+    ext = r.choice(["PNG", "JPG", "Png"])
+    # the same request shapes at a level, each through two or three rules
+    if level < 8:
+        reqs = [f"/{v1}/{word}?page={n}",          # server rewrite, then proxy_pass with a URI; the arguments follow
+                f"/{old}/{img}.{ext}",              # a regex beats the longest prefix (no ^~), so the rewrite never runs
+                f"/{legacy}/{word2}?id={n}",        # rewrite ... break: proxy_pass's URI is ignored
+                f"/{app}{tail}/{word}",             # 'location /app' also matches /apps...; 'proxy_pass http://x/' cuts 4 chars
+                f"/{v1}/{img}.jpg"]                 # server rewrite into a regex location: the changed URI is sent
+    else:
+        reqs = [f"/search/{word}?page={n}",         # server rewrite with new arguments: the old ones are appended
+                f"/{shop}/{word2}.php",             # two rewrites without a flag, then the locations are searched again
+                f"/{shop}/{word2}",                 # the first rewrite matches, the second not: search again, not this proxy_pass
+                f"/{static}//{img}.css",            # ^~ and proxy_pass without a URI: sent as the client sent it
+                f"/{api}/{img}.jpg",                # two regex locations match: the first in the file wins
+                f"/{legacy}/{word2}?id={n}"]
+    r.shuffle(reqs)
+    expected = [ngx_proxy(server_rw, locs, q) for q in reqs]
+    conf = ["server {", "    listen 80;", "    server_name example.lan;"]
+    for rx, repl, flag in server_rw:
+        conf.append(f"    rewrite {rx} {repl}{' ' + flag if flag else ''};")
+    for mod, pat, body in locs:
+        inner = [f"        rewrite {rx} {repl}{' ' + flag if flag else ''};" for rx, repl, flag in body.get("rw", [])]
+        up, puri = body["proxy"]
+        inner.append(f"        proxy_pass http://{up}{puri or ''};")
+        conf.append(f"    location {mod + ' ' if mod else ''}{pat} {{\n" + "\n".join(inner) + "\n    }")
+    conf.append("}")
+    prompt = ("Here is an nginx server block (nginx 1.26, default settings otherwise):\n\n```nginx\n" + "\n".join(conf)
+              + "\n```\n\nA client sends these requests for Host example.lan, exactly as written. For each, which upstream "
+              "finally handles it, and which URI (path and query string) is in the request line nginx sends to it? Answer "
+              "as `<upstream> <URI>`, e.g. `blue_pool /x/y?z=1`.\n" + _ask([f"GET {q}" for q in reqs]) + _instr(len(reqs)))
+    return Item(f"{BLOCK}.nginx_route.L{level}.{seed}", BLOCK, "nginx_route", [{"role": "user", "content": prompt}],
+                multi_check([_proxy_check(up, p) for up, p in expected]), max_tokens=32000,
+                meta={"expected": [f"{up} {p}" for up, p in expected], "uris": reqs, "level": level})
+
+
+# -- policy routing as wg-quick sets it up: suppress_prefixlength, not fwmark, throw / blackhole / unreachable ----------
+
+def route_lookup7(rules: list[dict], tables: dict, pkt: dict) -> str:
+    """Linux fib_rules_lookup: rules by priority; selectors from/to/fwmark[/mask]/iif all must match, `not` inverts the
+    whole match. A matching rule looks its table up: the most specific route, then the lowest metric. No route there or a
+    `throw` route: the next rule. A `blackhole`/`unreachable`/`prohibit` route or rule: dropped (no further rules).
+    `suppress_prefixlength N`: a found route with prefix length <= N is ignored and the next rule is tried."""
+    for rule in sorted(rules, key=lambda x: x["prio"]):
+        ok = ((not rule.get("from") or ipaddress.ip_address(pkt["src"]) in ipaddress.ip_network(rule["from"]))
+              and (not rule.get("to") or ipaddress.ip_address(pkt["dst"]) in ipaddress.ip_network(rule["to"]))
+              and (rule.get("mark") is None or ((rule["mark"] ^ pkt.get("mark", 0)) & rule.get("mask", 0xffffffff)) == 0)
+              and (not rule.get("iif") or rule["iif"] == pkt.get("iif")))
+        if rule.get("not"):
+            ok = not ok
+        if not ok:
+            continue
+        if rule.get("action"):
+            return "none"
+        hits = [rt for rt in tables.get(rule["table"], []) if ipaddress.ip_address(pkt["dst"]) in ipaddress.ip_network(rt["net"])]
+        if not hits:
+            continue
+        plen = max(ipaddress.ip_network(rt["net"]).prefixlen for rt in hits)
+        best = min((rt for rt in hits if ipaddress.ip_network(rt["net"]).prefixlen == plen), key=lambda rt: rt.get("metric", 0))
+        if best.get("type") == "throw":
+            continue
+        if best.get("type") in ("blackhole", "unreachable", "prohibit"):
+            return "none"
+        if rule.get("suppress") is not None and plen <= rule["suppress"]:
+            continue
+        return best["dev"]
+    return "none"
+
+
+def _rule_line(rule: dict) -> str:
+    s = f"{rule['prio']}:\t" + ("not " if rule.get("not") else "") + f"from {rule.get('from') or 'all'}"
+    if rule.get("to"):
+        s += f" to {rule['to']}"
+    if rule.get("mark") is not None:
+        s += f" fwmark {rule['mark']:#x}" + (f"/{rule['mask']:#x}" if rule.get("mask") is not None else "")
+    if rule.get("iif"):
+        s += f" iif {rule['iif']}"
+    s += f" {rule['action']}" if rule.get("action") else f" lookup {rule['table']}"
+    if rule.get("suppress") is not None:
+        s += f" suppress_prefixlength {rule['suppress']}"
+    return s
+
+
+def _route_line(rt: dict) -> str:
+    net = "default" if rt["net"] == "0.0.0.0/0" else rt["net"]
+    if rt.get("type"):
+        return f"{rt['type']} {net}"
+    return f"{net} dev {rt['dev']}" + (f" metric {rt['metric']}" if rt.get("metric") else " scope link")
+
+
+def routing_78(seed: int, level: int) -> Item:
+    r = rng(BLOCK, f"subnet{level}", seed)
+    lan = ipaddress.ip_network(f"192.168.{r.randint(1, 250)}.0/24")
+    vpn = ipaddress.ip_network(f"10.{r.randint(1, 250)}.{r.randint(0, 250)}.0/24")
+    far = ipaddress.ip_network(f"172.{r.randint(16, 31)}.{r.randint(0, 250)}.0/24")
+    far_sup = far.supernet(new_prefix=16)
+    carve = list(far.subnets(new_prefix=26))[r.randint(0, 3)]
+    wan, lan_if, eth, wg, tun = r.choice(["wan0", "ppp0"]), r.choice(["lan0", "br-lan"]), r.choice(["eth1", "eth2"]), \
+        r.choice(["wg0", "wg1"]), r.choice(["tun0", "tun1"])
+    wgmark = 0xca6c   # wg-quick's default: 51820
+    tables = {"main": [{"net": "0.0.0.0/0", "dev": wan, "metric": 100}, {"net": str(lan), "dev": lan_if, "metric": 0},
+                       {"net": str(far_sup), "dev": eth, "metric": 50}],
+              "100": [{"net": str(far), "dev": tun, "metric": 10}, {"net": str(carve), "type": "throw"}],
+              "51820": [{"net": "0.0.0.0/0", "dev": wg}]}
+    rules = [{"prio": 0, "table": "local"}, {"prio": 100, "from": str(vpn), "table": "100"},
+             {"prio": 32764, "table": "main", "suppress": 0}, {"prio": 32765, "not": True, "mark": wgmark, "table": "51820"},
+             {"prio": 32766, "table": "main"}, {"prio": 32767, "table": "default"}]
+    blk = ipaddress.ip_network(f"203.0.113.{r.choice([0, 64, 128])}/26")
+    if level >= 8:   # a mark class that bypasses the tunnel (with a blocked range) and a table that walls VPN peers off the LAN
+        tables["300"] = [{"net": "0.0.0.0/0", "dev": wan, "metric": 10}, {"net": str(blk), "type": "blackhole"}]
+        tables["200"] = [{"net": str(lan), "type": "unreachable"}]
+        rules += [{"prio": 110, "mark": 0x100, "mask": 0xf00, "table": "300"}, {"prio": 120, "iif": wg, "table": "200"}]
+    public = lambda: f"{r.choice([8, 1, 9, 185, 151])}.{r.randint(0, 255)}.{r.randint(0, 255)}.{r.randint(1, 254)}"
+
+    def host_in(net, avoid=None):
+        while True:
+            a = ipaddress.ip_address(int(net.network_address) + r.randint(2, net.num_addresses - 2))
+            if avoid is None or a not in avoid:
+                return str(a)
+    router_wan = f"{r.choice([81, 88, 95])}.{r.randint(0, 255)}.{r.randint(0, 255)}.{r.randint(1, 254)}"
+    lanh, vpnh = host_in(lan), host_in(vpn)
+    pk = {"lan_out": {"src": lanh, "dst": public(), "iif": lan_if},                       # main's default suppressed -> the tunnel
+          "lan_far": {"src": host_in(lan), "dst": host_in(far_sup, far), "iif": lan_if},  # a /16 is not suppressed by 0
+          "wg_own": {"src": router_wan, "dst": public(), "mark": wgmark, "iif": "lo"},    # the tunnel's own packets: main
+          "vpn_carve": {"src": vpnh, "dst": host_in(carve), "iif": wg},                  # throw: falls through to main's /16
+          "vpn_far": {"src": host_in(vpn), "dst": host_in(far, carve), "iif": wg}}       # table 100
+    if level >= 8:
+        pk.update({"mark_out": {"src": host_in(lan), "dst": public(), "mark": r.choice([0x100, 0x1a5, 0x1c0, 0x13f]), "iif": lan_if},
+                   "mark_blk": {"src": host_in(lan), "dst": host_in(blk), "mark": r.choice([0x101, 0x1f0, 0x180]), "iif": lan_if},
+                   "mark_miss": {"src": host_in(lan), "dst": public(), "mark": r.choice([0x200, 0x2a5, 0x010, 0xf00]), "iif": lan_if},
+                   "peer_lan": {"src": vpnh, "dst": host_in(lan), "iif": wg}})           # table 100: no route; 200: unreachable
+    names = ["lan_out", "lan_far", "wg_own", "vpn_carve", "vpn_far"] if level < 8 else \
+        ["mark_out", "mark_blk", "mark_miss", "wg_own", "vpn_carve", "peer_lan"]
+    r.shuffle(names)
+    pkts = [pk[n] for n in names]
+    expected = [route_lookup7([x for x in rules if x.get("table") != "local"], tables, p) for p in pkts]
+    rl = "\n".join(_rule_line(x) for x in sorted(rules, key=lambda x: x["prio"]))
+    tl = "\n\n".join(f"$ ip route show table {t}\n" + "\n".join(_route_line(rt) for rt in rts) for t, rts in tables.items())
+
+    def desc(p):
+        where = "sent by the router itself" if p["iif"] == "lo" else f"arriving on {p['iif']}"
+        return f"A packet from {p['src']} to {p['dst']}, {where}, " + (f"firewall mark {p['mark']:#x}" if p.get("mark") else "no firewall mark")
+    prompt = (f"A Linux router (kernel 6.x) has these policy routing rules and tables:\n\n```\n$ ip rule show\n{rl}\n\n{tl}\n```\n\n"
+              "None of the destinations below is one of the router's own addresses. Through which interface does the router "
+              "send each of these packets? If it drops the packet or has no route for it, answer NONE.\n"
+              + _ask([desc(p) for p in pkts]) + _instr(len(pkts)))
+    return Item(f"{BLOCK}.subnet.L{level}.{seed}", BLOCK, "subnet", [{"role": "user", "content": prompt}],
+                multi_check([_word_check(e) for e in expected]), max_tokens=32000,
+                meta={"expected": expected, "packets": [dict(p, name=n) for n, p in zip(names, pkts)], "level": level})
+
+
+# -- chmod: GNU mode_compile / mode_adjust ported, directories keep setuid/setgid ------------------------------------------
+
+_ALLM = 0o7777
+
+
+def gnu_chmod(mode: int, spec: str, is_dir: bool = False, umask: int = 0o022) -> int:
+    """GNU chmod (gnulib modechange.c, mode_compile + mode_adjust) for levels 7-8, checked against GNU chmod 9 on random
+    specs (tests/test_techhelp.py). Beyond chmod_apply: a directory keeps setuid/setgid unless the clause names them
+    (`g=rx`, `755` and even `0755` keep setgid; `00755`, `=755`, `g-s` clear it); `o=...` clears the sticky bit;
+    `g=u` / `o=g` copy bits; several operators in one clause (`g=u-w`); operator + octal (`=750`, `-6000`); X looks at
+    the mode as the clauses before it in the same command left it."""
+    new = mode & _ALLM
+    for op, flag, affected, value, mentioned in _gnu_compile(spec):
+        omit = (0o6000 if is_dir else 0) & ~mentioned
+        if flag == "copy":
+            value &= new
+            value |= (0o444 if value & 0o444 else 0) | (0o222 if value & 0o222 else 0) | (0o111 if value & 0o111 else 0)
+        elif flag == "X" and ((new & 0o111) or is_dir):
+            value |= 0o111
+        value &= (affected if affected else ~umask & _ALLM) & ~omit
+        if op == "=":
+            new = (new & (((~affected & _ALLM) if affected else 0) | omit)) | value
+        elif op == "+":
+            new |= value
+        else:
+            new &= ~value
+    return new & _ALLM
+
+
+def _gnu_compile(spec: str) -> list[tuple]:
+    if re.fullmatch(r"[0-7]+", spec):
+        m = int(spec, 8)
+        return [("=", "plain", _ALLM, m, ((m & 0o6000) | 0o1777) if len(spec) < 5 else _ALLM)]
+    out = []
+    for clause in spec.split(","):
+        m = re.fullmatch(r"([ugoa]*)((?:[-+=](?:[0-7]+|[ugo]|[rwxXst]*))+)", clause)
+        if not m:
+            raise ValueError(f"invalid mode: {spec!r}")
+        affected = 0
+        for w in m.group(1):
+            affected |= {"u": 0o4700, "g": 0o2070, "o": 0o1007, "a": _ALLM}[w]
+        for op, arg in re.findall(r"([-+=])([0-7]+|[ugo]|[rwxXst]*)", m.group(2)):
+            mentioned, flag = 0, "copy"
+            if arg[:1].isdigit():
+                affected = mentioned = _ALLM
+                value, flag = int(arg, 8), "plain"
+            elif arg in ("u", "g", "o"):
+                value = {"u": 0o700, "g": 0o070, "o": 0o007}[arg]
+            else:
+                value, flag = 0, "plain"
+                for p in arg:
+                    value |= {"r": 0o444, "w": 0o222, "x": 0o111, "s": 0o6000, "t": 0o1000}.get(p, 0)
+                    if p == "X":
+                        flag = "X"
+            out.append((op, flag, affected, value, mentioned or ((affected & value) if affected else value)))
+    return out
+
+
+def chmod_78(seed: int, level: int) -> Item:
+    r = rng(BLOCK, f"chmod{level}", seed)
+    um = r.choice([0o022, 0o027, 0o077, 0o002])
+    ops = {"oct3": ["755", "770", "750", "775"], "oct4": ["0770", "0775", "0755", "0750"],
+           "oct5": ["00775", "02750", "=770", "=2750", "00750"], "fileoct": ["0750", "2755", "4750", "0644", "0754"],
+           "who_eq": ["g=rx", "g=rwx", "u=rwx,g=rx,o=", "go=rx"], "who_o": ["o=rx", "o=rwx", "o=", "o=r"],
+           "bare_d": ["+w", "-w", "=rwx", "+rX", "=rx", "-x"], "bare_f": ["+w", "-w", "+x", "+rX", "-x", "-rwx"],
+           "X": ["go+X", "o+X", "a+X"], "special": ["u+s", "g+s", "ug+s"], "special_d": ["g+s", "u+s", "+s"],
+           "copy": ["g=u", "o=g", "go=u"], "t": ["+t"], "minus_sp": ["-6000", "g-s"],
+           "multi": ["g=u-w", "u=rwX,go=u-w", "a=rX,u+w", "o=g-x"], "xsame": ["u+x,go+X", "a-x,u+X", "go-x,a+X"]}
+    # (path, is a directory, start modes, the first step, the other steps in a random order): a numeric mode first, so
+    # every later step still shows in the result (a numeric mode or a bare '=' on a file as the last step would erase them)
+    objs = {7: [("shared/", True, [0o2775, 0o2770, 0o2750], "oct3", ["who_eq", "bare_d", "X"]),
+                ("deploy.sh", False, [0o755, 0o750, 0o775, 0o700], "fileoct", ["special", "copy", "bare_f"]),
+                ("tmp/", True, [0o1777, 0o1775, 0o3777, 0o3770], "oct4", ["who_o", "t", "minus_sp"])],
+            8: [("shared/", True, [0o2775, 0o2770, 0o2750], "oct3", ["who_eq", "bare_d", "multi", "X"]),
+                ("run.sh", False, [0o755, 0o750, 0o775, 0o700], "fileoct", ["special", "copy", "bare_f", "xsame"]),
+                ("tmp/", True, [0o1777, 0o1775, 0o3777, 0o3770], "oct4", ["who_o", "t", "minus_sp", "bare_d"]),
+                ("cache/", True, [0o2775, 0o3775, 0o2750], "oct5", ["special_d", "multi", "who_eq", "bare_d"])]}[level]
+    blocks, exp, files = [], [], []
+    for path, is_dir, starts, first, rest in objs:
+        start = r.choice(starts)
+        rest = list(rest)
+        r.shuffle(rest)
+        kinds = [first] + rest
+        steps = []
+        for k in kinds:
+            steps.append(r.choice([o for o in ops[k] if o not in steps]))
+        mode = start
+        for st in steps:
+            mode = gnu_chmod(mode, st, is_dir, um)
+        what = f"directory `{path}`" if is_dir else f"file `{path}`"
+        blocks.append(f"The {what} has mode {start:04o}:\n```\n" + "\n".join(f"chmod {st} {path}" for st in steps) + "\n```")
+        exp.append(mode)
+        files.append({"path": path, "start": f"{start:04o}", "steps": steps, "is_dir": is_dir, "expected": f"{mode:04o}"})
+    prompt = (f"On Linux, as the owner (who is also in each one's group), with GNU coreutils 9 chmod, the shell's umask is "
+              f"{um:04o}. These commands run in order, each on its own path:\n\n" + "\n\n".join(blocks)
+              + "\n\nWhat is each one's mode afterwards, as four octal digits (e.g. 2755)? Ignore chmod's warnings.\n"
+              + _ask([f"`{f['path']}`" for f in files]) + _instr(len(files)))
+    return Item(f"{BLOCK}.chmod_seq.L{level}.{seed}", BLOCK, "chmod_seq", [{"role": "user", "content": prompt}],
+                multi_check([_octal_check7(m) for m in exp]), max_tokens=32000,
+                meta={"expected": [f"{m:04o}" for m in exp], "files": files, "umask": f"{um:04o}", "level": level})
+
+
+# -- logs: one incident seen through five different clocks ---------------------------------------------------------------
+
+# UTC offsets in minutes during September 2026 (checked against zoneinfo in tests/test_techhelp.py): London is on BST,
+# Sydney not yet on daylight time (from 4 October), Phoenix never is, Kolkata and Kathmandu are off by 30 / 45 minutes
+TZ_SEPT = {"Europe/London": 60, "America/New_York": -240, "Australia/Sydney": 600, "Asia/Kolkata": 330,
+           "America/Phoenix": -420, "Asia/Kathmandu": 345}
+
+
+def log_78(seed: int, level: int) -> Item:
+    """The root cause's dependents fail within seconds of each other on hosts whose clocks read differently: UTC, a
+    numeric offset, a clock that chronyd later finds behind, syslog in a named time zone without an offset, and (level
+    8) dmesg seconds since boot. They name their upstream by address only (an inventory maps it); level 8 adds a failure
+    one step further down, an unrelated late failure, and the root cause's UTC time."""
+    r = rng(BLOCK, f"log{level}", seed)
+    svcs = ["postgres", "redis", "api", "worker", "nginx", "minio", "keycloak", "grafana", "queue", "search"]
+    pick = r.sample(svcs, 8)
+    root, deps, herring, unrel = pick[0], pick[1:5], pick[5], pick[6]
+    tzname = r.choice(sorted(TZ_SEPT))
+    tz_d = timezone(timedelta(minutes=TZ_SEPT[tzname]))
+    tz_b = timezone(timedelta(hours=r.choice([-7, -5, 2, 3, 9])))
+    skew = r.randint(45, 200)
+    t0 = datetime(2026, 9, r.randint(1, 25), r.randint(0, 23), r.randint(0, 59), r.randint(0, 59), tzinfo=timezone.utc)
+    boot = t0 - timedelta(seconds=r.randint(20000, 400000))
+    frac = r.randint(50, 449) / 1000   # dmesg: the kill happened frac s after t0 (floor and round agree)
+    port = {s: CONVENTIONAL[s] for s in svcs}
+    # level 7: root on box-d (named zone); dependents on box-b, box-a, box-c in true order. Level 8: root on box-e (dmesg),
+    # the fan-out on box-d, box-a, box-c, and one more on box-b that depended on the second one
+    if level < 8:
+        hosts = {root: "box-d", deps[0]: "box-b", deps[1]: "box-a", deps[2]: "box-c"}
+        fail = [deps[0], deps[1], deps[2]]
+    else:
+        hosts = {root: "box-e", deps[0]: "box-d", deps[1]: "box-a", deps[2]: "box-c", deps[3]: "box-b"}
+        fail = [deps[0], deps[1], deps[2], deps[3]]
+    hosts.setdefault(herring, "box-a")
+    hosts.setdefault(unrel, "box-a")
+    for s in svcs:
+        hosts.setdefault(s, r.choice(["box-a", "box-b", "box-c"]))
+    ip = {h: f"10.0.{i + 1}.{r.randint(10, 60)}" for i, h in enumerate(["box-a", "box-b", "box-c", "box-d", "box-e"])}
+    addr = {s: f"{ip[hosts[s]]}:{port[s]}" for s in svcs}
+    pid = {s: r.randint(200, 9000) for s in svcs + ["chronyd"]}
+    ev = []   # (true time, host, service, level, message)
+    gaps = [r.randint(2, 6) for _ in fail]
+    times, t = [], t0 + timedelta(seconds=r.randint(1, 3))
+    for g in gaps:
+        t += timedelta(seconds=g)
+        times.append(t)
+    causes = {"disk": "could not write to /var/lib/data: No space left on device", "perm": "open /etc/ssl/private/server.key: permission denied",
+              "port": f"could not bind to 0.0.0.0:{port[root]}: Address already in use"}
+    if level < 8:
+        ev.append((t0, "box-d", root, "error", causes[r.choice(sorted(causes))]))
+        ev.append((t0 + timedelta(seconds=1), "box-d", root, "error", f"{root}.service: Main process exited, status=1/FAILURE"))
+    else:
+        rss = r.randint(3_000_000, 9_000_000)
+        ev.append((t0, "box-e", root, "kernel", f"Out of memory: Killed process {pid[root]} ({root}) total-vm:{rss + r.randint(10**5, 10**6)}kB, "
+                                                  f"anon-rss:{rss}kB, file-rss:0kB, shmem-rss:0kB, UID:{r.randint(100, 999)} pgtables:{r.randint(8000, 20000)}kB oom_score_adj:0"))
+    phr = ["dial tcp {a}: connect: connection refused", "upstream {a} unreachable: no route to host",
+           "request to {a} failed: connection reset by peer", "health check of {a} failed: timeout after 2s"]
+    for i, (d, tt) in enumerate(zip(fail, times)):
+        up = deps[1] if (level >= 8 and i == 3) else root
+        ev.append((tt, hosts[d], d, "error", r.choice(phr).format(a=addr[up]) + ", giving up"))
+    rh_t = t0 - timedelta(seconds=r.randint(60, 150))   # an earlier error that recovered
+    ev.append((rh_t, hosts[herring], herring, "error", f"connection to {addr[r.choice([s for s in svcs if s not in (root, herring)])]} timed out, retrying in 5s"))
+    ev.append((rh_t + timedelta(seconds=6), hosts[herring], herring, "info", "connected, resuming"))
+    if level >= 8:   # an unrelated failure after everything else
+        ev.append((times[-1] + timedelta(seconds=r.randint(4, 9)), hosts[unrel], unrel, "error",
+                   f"failed to rotate /var/log/{unrel}/{unrel}.log: Disk quota exceeded, exiting"))
+    noise = [("info", "health check ok"), ("info", "config reloaded"), ("warn", "slow request 812ms"), ("info", "rotating logs"),
+             ("warn", "high memory usage 87%"), ("info", "checkpoint complete")]
+    alive = [s for s in svcs if s not in (root, *fail, unrel)]
+    for _ in range(14 if level < 8 else 16):
+        s = r.choice(alive)
+        lv, msg = r.choice(noise)
+        ev.append((t0 + timedelta(seconds=r.randint(-240, 30)), hosts[s], s, lv, msg))
+    s = next((x for x in alive if hosts[x] == "box-b"), None)
+    if s:   # box-b logs something before the incident too
+        ev.append((t0 - timedelta(seconds=r.randint(5, 200)), "box-b", s, "info", "health check ok"))
+    ev.append((times[-1] + timedelta(seconds=r.randint(200, 400)), "box-c", "chronyd", "warn",
+               f"System clock is {skew} seconds behind NTP time, stepping the clock forward"))
+    if level >= 8:
+        for _ in range(3):
+            ev.append((t0 + timedelta(seconds=r.randint(-300, -2)), "box-e", "kernel", "kernel",
+                       r.choice(["eth0: Link is Up - 10Gbps/Full", "audit: type=1400 apparmor=\"STATUS\"",
+                                 "EXT4-fs (nvme0n1p2): mounted filesystem", "systemd-journald[412]: Time spent on flushing"])))
+    ev.sort(key=lambda e: e[0])
+    logs = {}
+    for tt, host, s, lv, msg in ev:
+        if host == "box-e":
+            if lv != "kernel":
+                continue
+            mono = (tt - boot).total_seconds() + (frac if s == root else r.randint(0, 999999) / 1e6)
+            logs.setdefault(host, []).append(f"[{mono:12.6f}] {msg}")
+            continue
+        if host == "box-d":   # traditional syslog: local time, the day padded with a space, no year or offset
+            lt = tt.astimezone(tz_d)
+            logs.setdefault(host, []).append(f"{lt:%b} {lt.day:2d} {lt:%H:%M:%S} box-d {s}[{pid[s]}]: {lv.upper()} {msg}")
+            continue
+        shown = tt.astimezone(tz_b) if host == "box-b" else (tt - timedelta(seconds=skew) if host == "box-c" else tt)
+        logs.setdefault(host, []).append(f"{shown.strftime('%Y-%m-%dT%H:%M:%S%z')} {host} {s}[{pid[s]}]: {lv.upper()} {msg}")
+    heads = {"box-a": "box-a (journalctl -o short-iso)", "box-b": "box-b (journalctl -o short-iso)",
+             "box-c": "box-c (journalctl -o short-iso)", "box-d": f"box-d (/var/log/syslog, local time; /etc/timezone is {tzname})",
+             "box-e": f"box-e (dmesg; the kernel booted at {boot.strftime('%Y-%m-%dT%H:%M:%SZ')})"}
+    blocks = "\n\n".join(f"{heads[h]}:\n```\n" + "\n".join(logs[h]) + "\n```" for h in sorted(logs))
+    inv = "\n".join(f"- {s}: {addr[s]}" for s in sorted(svcs, key=lambda x: addr[x]))
+    last = fail[-1]
+    elapsed = (times[-1] - t0).total_seconds() - (frac if level >= 8 else 0)
+    qs = ["Which service is the root cause - the one that failed first and made the others fail?",
+          "Which service failed next, as the first consequence of the root cause?",
+          "Which service was the last to fail as a consequence of the root cause?",
+          "How many seconds passed between the root cause failing and that last consequence (to the nearest second)?"]
+    exp = [root, fail[0], last, str(round(elapsed))]
+    checks = [_word_check(root), _word_check(fail[0]), _word_check(last), _num_check7(round(elapsed), 1)]
+    if level >= 8:
+        qs.append("At what UTC time did the root cause fail? Answer as HH:MM:SS.")
+        exp.append(t0.strftime("%H:%M:%S"))
+        checks.append(_word_check(exp[-1]))
+    prompt = (f"My stack stopped working. Each machine logs with its own clock and format. Services and the addresses they "
+              f"listen on:\n{inv}\n\nThe logs:\n\n{blocks}\n\nAnswer the service questions with the service name only.\n"
+              + _ask(qs) + _instr(len(qs)))
+    return Item(f"{BLOCK}.log_root.L{level}.{seed}", BLOCK, "log_root", [{"role": "user", "content": prompt}],
+                multi_check(checks), max_tokens=32000,
+                meta={"expected": exp, "level": level, "tz": tzname, "skew": skew, "hosts": {s: hosts[s] for s in [root, *fail]}})
+
+
 KINDS = {"compose_port": compose_port, "nginx_route": nginx_route, "subnet": subnet, "chmod_seq": chmod_seq, "log_root": log_root}
 QUICK = list(KINDS)
-MAX_LEVEL = 6
+MAX_LEVEL = 8

@@ -80,6 +80,124 @@ for q, rights, wrongs in cases:
         check(f"wrong {q['text'][:40]!r} <- {a!r}", V(q, a) == "wrong", V(q, a))
 check("idk credit", K.credit(cases[0][0], "UNKNOWN") == K.IDK)
 
+# ---- levels 7-8: combined questions, every answer derived from bank entries --------------------------------------------
+import ast
+import re
+import shutil
+
+bq = {(q["kind"], q["text"]): q for q in K.bank()["questions"]}
+
+
+def codes_int(phrase):
+    """The number a codes phrase asks for, looked up in the bank independently of knowledge._codes_facts."""
+    m = re.fullmatch(r"the default (TCP|UDP) port of (.+)", phrase)
+    if m:
+        return bq[("codes", f"What is the default {m.group(1)} port of {m.group(2)}?")]["accept"]["int"]
+    m = re.fullmatch(r"the errno number of (E\w+) on Linux", phrase)
+    if m:
+        return bq[("codes", phrase.replace("the errno", "What is the errno") + "?")]["accept"]["int"]
+    m = re.fullmatch(r"the number of signal (SIG\w+) on x86-64 Linux", phrase)
+    if m:
+        return bq[("codes", f"What is the number of signal {m.group(1)} on x86-64 Linux?")]["accept"]["int"]
+    m = re.fullmatch(r"the exit status bash reports for a process killed by (SIG\w+)", phrase)
+    if m:
+        return 128 + bq[("codes", f"What is the number of signal {m.group(1)} on x86-64 Linux?")]["accept"]["int"]
+    m = re.fullmatch(r'the HTTP status code with the reason phrase "(.+)"', phrase)
+    if m:
+        return bq[("codes", f'Which HTTP status code has the reason phrase "{m.group(1)}"?')]["accept"]["int"]
+    m = re.fullmatch(r'the errno number that goes with the error message "(.+)" on Linux', phrase)
+    names = bq[("codes", f'Which errno name goes with the error message "{m.group(1)}" on Linux?')]["accept"]["names"]
+    return next(bq[("codes", f"What is the errno number of {n} on Linux?")]["accept"]["int"] for n in names
+                if ("codes", f"What is the errno number of {n} on Linux?") in bq)
+
+
+combos = {"python": {}, "shell": {}}
+n = 0
+for kind, gen in K.KINDS.items():
+    for level in (7, 8):
+        for seed in range(1, 61):
+            a, b = gen(seed, level), gen(seed, level)
+            n += 1
+            qs = a.meta["questions"]
+            nq, nf = len(qs), sum(q["fake"] for q in qs)
+            check(f"{kind} L{level} s{seed} deterministic", a.messages == b.messages)
+            check(f"{kind} L{level} s{seed} 10 questions, 2 fake", nq == 10 and nf == 2)
+            check(f"{kind} L{level} s{seed} shape", sorted(len(q.get("parts", [1])) for q in qs if not q["fake"])
+                  == ([1] * 4 + [2] * 4 if level == 7 else [1] * 2 + [2] * 3 + [3] * 3))
+            check(f"{kind} L{level} s{seed} oracle", a.check(K.oracle(a)) == 1.0, K.oracle(a))
+            idk = sum(q.get("idk", K.IDK) for q in qs) / nq
+            check(f"{kind} L{level} s{seed} all UNKNOWN", abs(a.check("ANSWERS\n" + "\n".join(f"{i}. UNKNOWN" for i in range(1, nq + 1))) - idk) < 1e-9)
+            check(f"{kind} L{level} s{seed} empty", a.check("") == 0.0)
+            check(f"{kind} L{level} s{seed} bluff", a.check("ANSWERS\n" + "\n".join(f"{i}. 12345zz" for i in range(1, nq + 1))) == 0.0)
+            half = "ANSWERS\n" + "\n".join(f"{i}. {'12345zz' if q['fake'] else e}" for i, (q, e) in enumerate(zip(qs, a.meta["expected"]), 1))
+            check(f"{kind} L{level} s{seed} invented", abs(a.check(half) - (nq - nf) / nq) < 1e-9)
+            bd = K.breakdown(a, half)
+            check(f"{kind} L{level} s{seed} breakdown", bd["right"] == nq - nf and bd["invented"] == nf, bd)
+            # every part is a bank fact (or a codes fact derived from them), used once per item, and the answer follows
+            seen = []
+            for q in qs:
+                if q.get("src") != "combo":
+                    seen.append(q["text"])
+                    continue
+                seen += q["parts"]
+                if kind == "codes":
+                    want = tuple(codes_int(p) for p in q["parts"])
+                    check(f"codes combo {q['text'][:50]}", q["accept"]["repr"] == ", ".join(map(str, want)), q["accept"])
+                    continue
+                ps = [bq[(kind, p)] for p in q["parts"]]
+                check(f"{kind} combo parts real", all(not p["fake"] and p["level"] >= 5 for p in ps))
+                if kind == "python":
+                    exc = next((p["accept"]["exc"] for p in ps if p["accept"].get("exc")), None)
+                    want = f"raises {exc[0]}" if exc else "(" + ", ".join(p["accept"]["repr"] for p in ps) + ")"
+                    check(f"python combo {q['text'][:50]}", K.oracle_answer(q) == want, (K.oracle_answer(q), want))
+                    check(f"python combo parses {q['text'][:50]}", isinstance(ast.parse(q["text"], mode="eval").body, ast.Tuple))
+                else:
+                    want = " ".join(p["accept"]["texts"][0] for p in ps)
+                    check(f"shell combo {q['text'][:50]}", q["accept"]["texts"] == [K._ws(want)], q["accept"])
+                    check(f"shell combo form {q['text'][:50]}", q["text"] == 'echo "' + " ".join(f"$({p})" for p in q["parts"]) + '"')
+                combos[kind][q["text"]] = q
+            check(f"{kind} L{level} s{seed} no fact twice", len(seen) == len(set(seen)), seen)
+            if kind == "codes":
+                keys = [re.sub(r"^the (?:number of signal|exit status bash reports for a process killed by) ", "sig ", p) for q in qs
+                        for p in q.get("parts", [])]
+                keys = [k.split(" on ")[0] for k in keys]
+                check(f"codes L{level} s{seed} no signal twice", len(keys) == len(set(keys)), keys)
+                status = [int(m) for q in qs if not q.get("parts") for m in re.findall(r"exited with status (\d+)", q["text"])]
+                killed = [codes_int(p) for q in qs for p in q.get("parts", []) if "killed by" in p]
+                check(f"codes L{level} s{seed} status not given away", not set(status) & set(killed), (status, killed))
+print(f"{n} level 7-8 items generated")
+
+# python combos on the real interpreters, as the bank was built (every 3.12+ CPython found here, two hash seeds)
+texts = sorted(combos["python"])
+ran = []
+for py in ("python3.12", "python3.13", "python3.14"):
+    if not shutil.which(py):
+        continue
+    for hs in ("0", "1"):
+        os.environ["PYTHONHASHSEED"] = hs
+        res = K._remote(K._PY_RUNNER, [K.PY_MODULES, texts], None, py)
+        for t, r_ in zip(texts, res):
+            got = ("raises " + r_["exc"][0]) if r_.get("exc") else r_.get("repr")
+            check(f"{py} runs {t[:60]}", K.verdict(combos["python"][t], got) == "right", f"ran: {got}, ours: {K.oracle_answer(combos['python'][t])}")
+        ran.append(f"{py}/{hs}")
+os.environ.pop("PYTHONHASHSEED", None)
+print(f"{len(texts)} python combos run on {', '.join(ran) or 'no local CPython 3.12+'}")
+
+# grading of combined answers
+pyq = K._combine("python", [q_of("python", "~-5"), q_of("python", '"{:.0f}".format(2.5)')], 7)
+for ans, want in [("(4, '2')", "right"), ('(4, "2")', "right"), ("4, '2'", "right"), ("(4, 2)", "wrong"), ("(4, '3')", "wrong"),
+                  ("UNKNOWN", "idk"), ("raises ValueError", "wrong")]:
+    check(f"python combo answer {ans!r}", V(pyq, ans) == want, V(pyq, ans))
+pye = K._combine("python", [q_of("python", "~-5"), q_of("python", 'int("3.5")')], 7)
+check("python combo raises", V(pye, "raises ValueError") == "right" and V(pye, "(4, 3)") == "wrong")
+cq = K._combine("codes", [{"int": 39, "phrase": "a", "key": "a"}, {"int": 425, "phrase": "b", "key": "b"}], 7)
+for ans, want in [("39, 425", "right"), ("(39, 425)", "right"), ("39,425", "right"), ("425, 39", "wrong"), ("39", "wrong"),
+                  ("UNKNOWN", "idk")]:
+    check(f"codes combo answer {ans!r}", V(cq, ans) == want, V(cq, ans))
+sq = K._combine("shell", [q_of("shell", "seq -w 8 10 | head -1"), q_of("jq", "echo '[1,2]' | jq 'add / length'")], 7)
+for ans, want in [("08 1.5", "right"), ("`08 1.5`", "right"), ("08  1.5", "right"), ("8 1.5", "wrong")]:
+    check(f"shell combo answer {ans!r}", V(sq, ans) == want, V(sq, ans))
+
 # answer block parsing: bold numbers, a header, a later correction wins, the reasoning above is ignored
 txt = "1. maybe 3\nlet me think\n**ANSWERS**\n**1.** 2\n2) `x`\n- 3: y\n"
 got = K.answers(txt, 3)
