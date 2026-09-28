@@ -243,6 +243,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     ranks = rank_ranges(local)
     q = [j for j in queue_state() if j["model"] not in {r["id"] for r in local}]
     sd = shape_data(local, host)
+    names0 = {r["id"]: model_name(r) for r in local}
 
     # the answer first: computed from the data, no editorial text
     def best(key, label, fmt, cid=""):
@@ -261,6 +262,15 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
 
     def pop(label: str, title: str, text: str) -> str:
         return f'<span class="tip">{label}<span class="pop"><b>{esc(title)}</b>{esc(text)}</span></span>'
+    # what llmbox's settings are worth: the biggest measured gains over stock llama.cpp, same model, same box
+    opts = {k: v for k, v in optimize_records(host).items() if k in {r["id"] for r in local}}
+    gain = lambda o: o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1
+    top = sorted(opts.items(), key=lambda kv: -gain(kv[1]))[:3]
+    optline = ("" if not top or gain(top[0][1]) < 0.15 else
+               '<section class="optl"><span class="sc">What the settings are worth</span><span class="q">same model, same PC: stock llama.cpp → llmbox settings</span>'
+               + "".join(f'<a href="recipe-{esc(rid)}.html"><b>{esc(names0[rid])}</b> {o["summary"]["stock"]["decode"]:.0f} → {o["summary"]["llmbox"]["decode"]:.0f} tok/s '
+                         f'<em>{gain(o) * 100:+.0f}%</em></a>' for rid, o in top)
+               + '<a class="more" href="method.html#settings">all models →</a></section>')
     head = ("<tr><th>#</th><th class='l'>MODEL</th><th data-sort='score'>" + pop("SCORE ↕", "Score · % of frontier",
             "How close the model gets to Claude Opus 5.5 on the same tasks (Opus = 100%). The small number under it is the capability "
             "on a 0-100 scale, the weighted average of the blocks to the right. Click a column to sort.") + "</th>"
@@ -339,7 +349,7 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
  <span class="bl" id="bwl">speed</span><select id="bw" aria-label="RAM speed"></select>
  <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
  <span id="boxnote" class="q">speeds measured on this box</span></section>
-<section class="picks">{picks}</section>
+<section class="picks">{picks}</section>{optline}
 <section class="panel rankp"><div class="lbl">Ranking <span class="faint">· suite v{esc(suite_version)}</span></div>
  <div class="rhead"><div class="seg" role="group" aria-label="rank by"><span class="sc">Rank by</span>{presets}</div>
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
@@ -399,6 +409,8 @@ _HOME_CSS = """
 @media (max-width:760px){.newbie .nb{grid-template-columns:1fr}.newbie .gl{grid-template-columns:1fr}.newbie dd{margin-bottom:6px}}
 .boxbar .bl{font-size:12px;color:var(--muted);margin-left:6px}
 .picks .pk{overflow-wrap:anywhere}
+.optl{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 22px;padding:12px 18px;border:1px solid var(--line);border-top:0;font-size:13px}
+.optl .q{font-size:12px}.optl a{color:var(--soft)}.optl a b{color:var(--ink);font-weight:500}.optl em{font-style:normal;color:var(--amber)}.optl .more{margin-left:auto;color:var(--muted)}
 .boxbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;border:1px solid var(--line);background:var(--panel)}
 .boxbar .sc{margin-right:4px}
 .boxbar select,.boxbar input{background:#0b0c09;color:var(--ink);border:1px solid var(--line);padding:6px 8px;font:13px "IBM Plex Mono"}
@@ -1419,12 +1431,12 @@ def _optimize_table(opts: dict, ranked: set | None = None) -> str:
     import statistics as _st
     gains = [o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1 for _, o in rows]
     deep = [o["summary"]["llmbox"]["deep"] / o["summary"]["stock"]["deep"] - 1 for _, o in rows if o["summary"]["stock"].get("deep") and o["summary"]["llmbox"].get("deep")]
-    link = lambda rid: f'<a href="recipe-{esc(rid)}.html">{esc(rid)}</a>' if ranked is None or rid in ranked else esc(rid)
+    link = lambda rid: f'<a href="recipe-{esc(rid)}.html">{esc(_name_of(opts[rid]))}</a>' if ranked is None or rid in ranked else esc(_name_of(opts[rid]))
     tr = "".join(f'<tr><td class="l">{link(rid)}</td><td>{o["summary"]["stock"]["decode"]:.0f}</td>'
                  f'<td>{o["summary"]["llmbox"]["decode"]:.0f}</td><td>{(o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1) * 100:+.0f}%</td>'
                  f'<td>{o["summary"]["stock"].get("deep") or 0:.0f}</td><td>{o["summary"]["llmbox"].get("deep") or 0:.0f}</td>'
                  f'<td class="q">{esc(" ".join(o["summary"].get("tuned_flags") or []) or "defaults")}</td></tr>' for rid, o in rows)
-    return (f"<h2>What the settings do</h2><p>Every model on the reference box, measured twice back to back: once the way "
+    return (f"<h2 id='settings'>What the settings do</h2><p>Every model on the reference box, measured twice back to back: once the way "
             f"<code>llama-server -m model.gguf -c &lt;context&gt;</code> runs it with llama.cpp's own defaults, once with its llmbox recipe (placement of the "
             f"weights, KV cache type, speculative decoding with the model's MTP head where it has one, batch sizes, then <code>llmbox tune</code>). Same file, "
             f"same context. Median: <b>{_st.median(gains) * 100:+.0f}%</b> in a short chat"
