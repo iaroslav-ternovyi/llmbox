@@ -15,6 +15,7 @@ import re
 from .common import Item, final_answer, num, rng
 
 BLOCK = "tools"
+MAX_LEVEL = 8   # v0.11: dedupe, bulk_discount and reconcile have levels 1-8; the other kinds grow the CRM world past 5
 CITIES = ["Madrid", "Valencia", "Porto", "Lyon", "Graz", "Tartu"]
 TIERS = ["gold", "silver", "bronze"]
 FIRST = ["Lucía", "Marco", "Hanna", "Pierre", "Olga", "Tomás", "Inés", "Yusuf", "Mei", "Jonas", "Sara", "Omar",

@@ -170,6 +170,8 @@ class Bank:
     dev: dict = field(default_factory=dict)        # calibration models -> {block: deviation}
     neff: dict = field(default_factory=dict)       # family -> effective number of independent answers in one task
     prior: tuple = PRIOR                            # theta prior: the calibration models' mean and sd
+    scale: list = field(default_factory=list)       # families the capability averages over (answered by MIN_SCALE_MODELS+)
+    provisional: list = field(default_factory=list)  # families with guessed parameters: adaptive runs may pick them, no score
 
     def n(self, fam: str) -> float:
         return self.neff.get(fam, 1.0)
@@ -270,6 +272,10 @@ def calibrate_blocks(resp: list[Resp], weights: dict, iters: int = 6000, lr: flo
         bank.seconds[f] = statistics.median(r.seconds for r in rs)
         bank.block[f] = f.split(".")[0]
     bank.neff = effective_n(bank, resp)
+    by = {}
+    for r in resp:
+        by.setdefault(r.family, set()).add(r.model)
+    bank.scale = sorted(f for f in fams if len(by[f]) >= MIN_SCALE_MODELS)
     ths = list(th.values())
     if len(ths) >= 3:
         bank.prior = (statistics.mean(ths), max(1.5, statistics.stdev(ths) * 2))   # wide: new models may be outside
@@ -464,6 +470,47 @@ def score_rows(bank: Bank, rows: list[dict], prior: tuple | None = None) -> dict
 
 # ---- persistence --------------------------------------------------------------------------------------------------
 
+def with_provisional(bank: Bank, families: list[str], step: float = 0.6) -> Bank:
+    """A copy of the bank that also knows `families` it has no answers for (new levels 7-8, a rewritten kind), with
+    guessed parameters so an adaptive run can pick them: difficulty extrapolated from the kind's calibrated levels
+    (+step per level; the block's median at the kind's median level when the kind has none), discrimination and seconds
+    from the kind (or block). They stay out of the capability scale until a recalibration has answers from enough models."""
+    import copy
+    nb = copy.deepcopy(bank)
+    for f in families:
+        if f in nb.a:
+            continue
+        blk, kind, lv = f.rsplit(".", 2)
+        L = int(lv[1:])
+        same = [(int(g.rsplit(".", 1)[1][1:]), g) for g in bank.a if g.startswith(f"{blk}.{kind}.L")]
+        inblk = [g for g in bank.a if bank.block[g] == blk] or list(bank.a)
+        if same:
+            near = min(same, key=lambda x: abs(x[0] - L))
+            b0, L0, ref = bank.b[near[1]], near[0], [g for _, g in same]
+        else:
+            b0, L0, ref = statistics.median(bank.b[g] for g in inblk), statistics.median(int(g.rsplit(".", 1)[1][1:]) for g in inblk), inblk
+        nb.b[f] = b0 + step * (L - L0)
+        nb.a[f] = statistics.median(bank.a[g] for g in ref)
+        nb.seconds[f] = statistics.median(bank.seconds[g] for g in ref) * (1 + 0.25 * max(0, L - L0))
+        nb.block[f] = blk
+        nb.neff[f] = 1.0
+        nb.provisional.append(f)
+    if not nb.scale:
+        nb.scale = sorted(f for f in bank.a)
+    return nb
+
+
+def subset(bank: Bank, fams: set) -> Bank:
+    """The bank restricted to some families (the calibrated ones, during an adaptive run with provisional families)."""
+    import copy
+    nb = copy.copy(bank)
+    for k in ("a", "b", "seconds", "block", "neff"):
+        setattr(nb, k, {f: v for f, v in getattr(bank, k).items() if f in fams})
+    nb.provisional = []
+    nb.scale = [f for f in bank.scale if f in fams]
+    return nb
+
+
 def bank_path(content_hash: str) -> str:
     return os.path.join(HOME, "irt", f"bank-{content_hash}.json")
 
@@ -473,7 +520,7 @@ def save(bank: Bank, content_hash: str, n_models: int) -> str:
     os.makedirs(os.path.dirname(p), exist_ok=True)
     json.dump({"content_hash": content_hash, "n_models": n_models, "a": bank.a, "b": bank.b, "seconds": bank.seconds,
                "block": bank.block, "theta": bank.theta, "weights": bank.weights, "tau": bank.tau, "dev": bank.dev,
-               "neff": bank.neff, "prior": list(bank.prior)},
+               "neff": bank.neff, "prior": list(bank.prior), "scale": bank.scale},
               open(p, "w"), indent=1)
     return p
 
@@ -484,7 +531,8 @@ def load(content_hash: str) -> Bank | None:
         return None
     d = json.load(open(p))
     return Bank(a=d["a"], b=d["b"], seconds=d["seconds"], block=d["block"], theta=d["theta"], weights=d["weights"],
-                tau=d.get("tau", TAU), dev=d.get("dev", {}), neff=d.get("neff", {}), prior=tuple(d.get("prior", PRIOR)))
+                tau=d.get("tau", TAU), dev=d.get("dev", {}), neff=d.get("neff", {}), prior=tuple(d.get("prior", PRIOR)),
+                scale=d.get("scale") or [])
 
 
 # ---- block offsets: one capability plus a shrunk per-block deviation ---------------------------------------------------
@@ -495,6 +543,9 @@ def load(content_hash: str) -> Bank | None:
 # The next task is the one that shrinks the 95% interval of the weighted capability the most per expected second.
 
 TAU = 1.0   # the real deviations are large (Nex: agentic 100, writing 59)
+# a family enters the capability scale once this many models answered it: before that its difficulty is a guess from a
+# few answers, and the scale (the average expected score over the block's families) would move with every new run
+MIN_SCALE_MODELS = 3
 
 
 def _grid_post(bank: Bank, obs: list[tuple[str, float]], mu: float, sd: float) -> list[float]:
@@ -526,7 +577,8 @@ def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple | None
         cdf.append(acc)
     thetas = [GRID[min(len(GRID) - 1, next(i for i, c in enumerate(cdf) if c >= (k + 0.5) / draws))] for k in range(draws)]
     coarse = [(-4.0 + 0.1 * i) for i in range(101)]
-    fams = {blk: [f for f in bank.a if bank.block[f] == blk] for blk in bank.weights}
+    on_scale = set(bank.scale) if bank.scale else {f for f in bank.a if f not in bank.provisional}
+    fams = {blk: [f for f in bank.a if bank.block[f] == blk and f in on_scale] for blk in bank.weights}
     mine = {blk: [(f, x) for f, x in obs if bank.block[f] == blk] for blk in bank.weights}
     wsum = sum(w for blk, w in bank.weights.items() if fams[blk])
     caps, per = [], {blk: [] for blk in bank.weights if fams[blk]}

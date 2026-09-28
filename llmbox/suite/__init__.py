@@ -15,7 +15,10 @@ from __future__ import annotations
 from . import agentic, code, explain, knowledge, longctx, reasoning, sessions, techhelp, tools, writing
 from .common import Item
 
-VERSION = "0.10"
+VERSION = "0.11-dev1"
+# v0.11: tools dedupe / bulk_discount graded by level with the discount policy part of the job (v0.10 hid it: only the
+# frontier guessed it, and 15% of the score hung on one yes/no task), levels 7-8 (headroom above the frontier reference);
+# answers to unchanged task families count across versions (llmbox/famfp.py), so only changed families need new runs.
 # v0.10: weights for people who download and run local models (developers and enthusiasts; docs/usage-research.md):
 # coding 30 (agentic 20 + single-file functions 10), agents/tools 15, tech help for their own machines 15 ("homelab" is the
 # third-largest local use), knowledge and "I don't know" 10 and explanations 10 (information seeking and advice are the
@@ -70,7 +73,7 @@ def _level_for(block: str, kind: str, level: int) -> int:
 QUICK_ITEMS = [
     ("agentic", "cart", 5), ("agentic", "ledger", 3), ("agentic", "inventory", 3), ("agentic", "shipping", 3),
     ("code", "rooms", 5), ("code", "lru", 5), ("code", "csv", 5),
-    ("tools", "conditional", 5), ("tools", "reminders", 4), ("tools", "dedupe", 6), ("tools", "bulk_discount", 6),
+    ("tools", "conditional", 5), ("tools", "dedupe", 5), ("tools", "bulk_discount", 5), ("tools", "bulk_discount", 7),   # v0.11
     ("techhelp", "compose_port", 5), ("techhelp", "compose_port", 6), ("techhelp", "nginx_route", 6), ("techhelp", "log_root", 5),
     ("techhelp", "subnet", 6), ("techhelp", "chmod_seq", 5),
     ("knowledge", "python", 5), ("knowledge", "shell", 5), ("knowledge", "codes", 5), ("knowledge", "codes", 6),   # 8 questions each, 2 made up
@@ -107,6 +110,31 @@ def build(tier: str = "quick", seed0: int = 0, blocks: list[str] | None = None) 
     lc = sorted((it for it in items if it.block == "longctx"), key=lambda it: (it.meta.get("level", 0), it.id.split(".")[-1]))
     it_lc = iter(lc)
     return [next(it_lc) if it.block == "longctx" else it for it in items]
+
+
+def max_level(block: str, kind: str) -> int:
+    """The highest level a kind generates: the module's MAX_LEVEL (5 by default); a bug-fix project as far as its
+    bugs_per_level table goes; trivial code kinds stop at 2."""
+    if block == "code" and kind in code.SIMPLE:
+        return 2
+    if block == "agentic":
+        meta = getattr(BLOCKS[block][kind], "__closure__", None) and next(
+            (c.cell_contents for c in BLOCKS[block][kind].__closure__ if isinstance(c.cell_contents, dict) and "prompt" in c.cell_contents), None)
+        if meta and meta.get("bugs_per_level"):
+            return len(meta["bugs_per_level"])
+        return 5
+    return getattr(MODULES[block], "MAX_LEVEL", 5)
+
+
+def families(kinds: set | None = None) -> list[str]:
+    """Every task family (block.kind.Llevel) the suite can generate; with kinds: only of those block.kind pairs."""
+    out = []
+    for b, ks in BLOCKS.items():
+        for k in ks:
+            if kinds is not None and f"{b}.{k}" not in kinds:
+                continue
+            out += [f"{b}.{k}.L{lv}" for lv in range(1, max_level(b, k) + 1)]
+    return out
 
 
 def content_hash() -> str:

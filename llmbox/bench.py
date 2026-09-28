@@ -404,6 +404,9 @@ def speed_probe(base_url: str, model: str, depths: tuple = (2000, 32000, 96000),
             "method": PROBE_METHOD}
 
 
+EXPLORE = 6   # provisional families tried per adaptive run (v0.11: new tools levels and levels 7-8)
+
+
 def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, target: float = 5.0, prior: tuple | None = None,
                  seed0: int = 7000, api_key: str | None = None, progress=print, jsonl_path: str | None = None,
                  min_per_block: int = 1, max_per_family: int = 2) -> dict:
@@ -412,6 +415,11 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
     interval of the capability is within +-target points or the time budget is spent. The capability is reported on
     the quick suite's scale (expected weighted score of its task families at the estimated theta)."""
     from . import irt
+    # provisional families (guessed parameters, llmbox/irt.py with_provisional) are explored, not scored: every third
+    # task at most, EXPLORE per run; the estimate and the stopping rule use the calibrated families only
+    prov = set(bank.provisional)
+    full_bank, bank = bank, irt.subset(bank, set(bank.a) - prov) if prov else bank
+    explored: list = []
     obs, rows, counts, per_fam = [], [], {}, {}
     out = open(jsonl_path, "a") if jsonl_path else None
     trace_dir = os.path.join(TRACES, os.path.splitext(os.path.basename(jsonl_path))[0]) if jsonl_path else None
@@ -423,11 +431,20 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         spent = time.time() - t0
         # explanations are graded by the reader after the loop: until then they count as answered at their predicted
         # score, so the selection neither re-picks explain for lack of news nor stops on an interval it cannot have yet
-        if spent >= budget_min * 60 or (obs and (sel["hi"] - sel["lo"]) / 2 <= target):
+        on_target = bool(obs) and (sel["hi"] - sel["lo"]) / 2 <= target
+        if spent >= budget_min * 60 or (on_target and (not prov or len(explored) >= min(EXPLORE, len(prov)))):
             break
         short = [b for b in bank.weights if counts.get(b, 0) < min_per_block]
         cost = irt.cost_model(bank, [(r["family"], r["seconds"]) for r in rows])
-        if short:   # every block gets its minimum first, cheapest informative family of that block
+        if prov and not short and len(explored) < EXPLORE and (n % 3 == 2 or on_target):   # a new family near this model's level
+            fam = irt.next_family(full_bank, sel["theta"], set(bank.a) | set(explored), slowness)
+            if fam:
+                explored.append(fam)
+        else:
+            fam = None
+        if fam:
+            pass
+        elif short:   # every block gets its minimum first, cheapest informative family of that block
             full = {f for f in bank.a if bank.block[f] not in short or per_fam.get(f, 0) >= max_per_family}
             fam = irt.next_family(bank, sel["theta"], full, slowness, cost=cost)
         else:
@@ -445,14 +462,14 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
             out.flush()
         per_fam[fam] = per_fam.get(fam, 0) + 1
         counts[blk] = counts.get(blk, 0) + 1
-        if not row.get("error") and not row.get("pending"):   # explanations are scored by the reader after the loop
+        if not row.get("error") and not row.get("pending") and fam not in prov:   # explain: scored by the reader after the loop
             obs.append((fam, max(0.0, min(1.0, float(row["score"])))))
         ratios = [r["seconds"] / bank.seconds[r["family"]] for r in rows if bank.seconds.get(r["family"])]
         slowness = statistics.median(ratios) if ratios else 1.0
         est = irt.block_estimate(bank, obs, prior)
         cap, lo, hi = est["capability"], est["lo"], est["hi"]
         pend = [(r["family"], bank.p(r["family"], est["blocks"].get(bank.block[r["family"]], {}).get("eta", est["theta"])))
-                for r in rows if r.get("pending")]
+                for r in rows if r.get("pending") and r["family"] in bank.a]
         sel = irt.block_estimate(bank, obs + pend, prior) if pend else est
         cap, lo, hi = sel["capability"], sel["lo"], sel["hi"]
         progress(f"  [{n:3d}] {row['score']:.2f} {row['seconds']:6.1f}s  {fam:26s} -> {cap:5.1f} ({lo:.0f}-{hi:.0f})  "
@@ -461,7 +478,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
     if pend:
         items = [suite.BLOCKS[r["family"].split(".")[0]][r["family"].split(".")[1]](int(r["id"].rsplit(".", 1)[1]), int(r["family"].split(".")[2][1:])) for r in pend]
         grade_deferred(base_url, items, rows, out, progress)
-        obs += [(r["family"], max(0.0, min(1.0, float(r["score"])))) for r in pend if not r.get("pending")]
+        obs += [(r["family"], max(0.0, min(1.0, float(r["score"])))) for r in pend if not r.get("pending") and r["family"] not in prov]
         est = irt.block_estimate(bank, obs, prior)
         cap, lo, hi = est["capability"], est["lo"], est["hi"]
     if out:
@@ -470,6 +487,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
     s.update({"capability": round(cap, 1), "capability_ci95": [round(lo, 1), round(hi, 1)],
               "blocks": {b: round(100 * v["score"], 1) for b, v in est["blocks"].items()},
               "irt": {"theta": round(est["theta"], 3), "sd": round(est["theta_sd"], 3), "prior": list(prior or bank.prior), "items": len(rows),
+                      "explored": explored,
                       "families": per_fam, "block_n": {b: v["n"] for b, v in est["blocks"].items()}}})
     return {"suite": {"version": suite.VERSION, "tier": "adaptive", "seed0": seed0, "content_hash": suite.content_hash(),
                       "weights": suite.WEIGHTS, "budget_min": budget_min, "target": target}, "summary": s, "rows": rows}

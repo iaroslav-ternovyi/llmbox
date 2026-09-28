@@ -278,6 +278,10 @@ def cmd_bench(a: argparse.Namespace) -> None:
         bank = irt.load(_suite.content_hash()) or irt.load(a.bank or "")
         if not bank:
             raise SystemExit("no calibrated task bank for this suite: run `llmbox irt calibrate` (or pass --bank <content hash>)")
+        # task families the bank has no answers for yet (new levels, rewritten kinds) join with guessed parameters, for
+        # the kinds the suite already measures (quick items and calibrated kinds): the run's answers calibrate them later
+        known = {f.rsplit(".", 1)[0] for f in bank.a} | {f"{b_}.{k_}" for b_, k_, _l in _suite.QUICK_ITEMS}
+        bank = irt.with_provisional(bank, _suite.families(known))
         pr = tuple(float(x) for x in a.prior.split(",")) if a.prior else None   # default: the bank's population prior
         res = bench.run_adaptive(a.endpoint, a.model, bank, budget_min=a.budget, target=a.target, prior=pr,
                                  seed0=7000 + 1000 * a.seed,   # --seed: fresh instances for a repeated adaptive run
