@@ -141,8 +141,8 @@ def rescore(rec: dict) -> dict:
     tasks and their scores do not). The number the run published is kept as summary.capability_published."""
     rows = [r for r in rec.get("rows") or [] if not r.get("pending")]
     s = rec.get("summary") or {}
-    if not rows or s.get("weights_used") == suite.WEIGHTS:
-        return rec
+    if not rows or s.get("weights_used") == suite.WEIGHTS or (rec.get("suite") or {}).get("tier") == "adaptive":
+        return rec   # an adaptive run's capability is the IRT estimate, not the mean of its rows
     new = dict(s, capability=round(capability(rows), 1), capability_ci95=[round(x, 1) for x in capability_ci(rows)],
                capability_published=s.get("capability_published", s.get("capability")), weights_used=dict(suite.WEIGHTS))
     return dict(rec, summary=new)

@@ -224,7 +224,8 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
             feed.append(f"<li><span class='live'>●</span> <b>{esc(j['model'])}</b> <span class='q'>{f"measuring {j['done']}/{j['total']}" if j['total'] else "starting"}</span><span class='when'>now</span></li>")
     for rec in sorted(report.results.load_all(host) + report.results.load_all("cloud"), key=lambda x: x.get("created", ""), reverse=True):
         su, s = rec.get("suite", {}), rec.get("summary", {})
-        if rec.get("kind") != "suite" or su.get("version") != suite_version or su.get("tier") != tier or su.get("blocks"):
+        if rec.get("kind") != "suite" or su.get("version") != suite_version or report.scale(su.get("tier")) != report.scale(tier) \
+                or su.get("blocks"):
             continue   # only results comparable with the ranking above
         rid = (rec.get("recipe") or {}).get("id", "?")
         cloud = (rec.get("host") or {}).get("id") == "cloud"
@@ -486,7 +487,9 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
             except ValueError:
                 continue
             su = rec.get("suite") or {}
-            if rec.get("kind") != "suite" or su.get("version") != suite_version or su.get("tier") != tier or su.get("blocks"):
+            from . import report as _report
+            if rec.get("kind") != "suite" or su.get("version") != suite_version or _report.scale(su.get("tier")) != _report.scale(tier) \
+                    or su.get("blocks"):
                 continue
             from . import bench
             rec = bench.rescore(rec)   # current suite weights: the task scores are the run's, the weighting is today's

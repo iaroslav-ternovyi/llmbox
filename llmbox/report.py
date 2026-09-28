@@ -39,6 +39,11 @@ def _vkey(v) -> tuple:
     return nums + ((0,) if "-" in str(v) else (1,))
 
 
+def scale(tier: str | None) -> str | None:
+    """Tiers that report on the same scale: an adaptive run estimates the quick suite's capability (llmbox/irt.py)."""
+    return "quick" if tier in ("quick", "adaptive") else tier
+
+
 def rows(host: str | None = None, suite_version: str | None = None, tier: str | None = None) -> list[dict]:
     out = []
     recs = results.load_all(host) + (results.load_all("cloud") if host and host != "cloud" else [])
@@ -50,7 +55,7 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
         su, s = rec.get("suite", {}), rec.get("summary", {})
         if suite_version and su.get("version") != suite_version:
             continue
-        if tier and su.get("tier") != tier:
+        if tier and scale(su.get("tier")) != scale(tier):
             continue
         r = rec.get("recipe") or {}
         m = rec.get("model") or {}
@@ -70,12 +75,12 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
     # newest result per (recipe id, host, suite version, tier)
     best: dict = {}
     for x in sorted(out, key=lambda x: x["created"]):
-        best[(x["id"], x["host"].get("id"), x["suite"].get("version"), x["suite"].get("tier"))] = x
+        best[(x["id"], x["host"].get("id"), x["suite"].get("version"), scale(x["suite"].get("tier")))] = x
     rs = sorted(best.values(), key=lambda x: (x.get("partial", False), -(x["capability"] or 0)))   # partial runs listed last
     # 100% = the best frontier reference on the same suite version and tier (per block as well)
     for x in rs:
         refs = [r for r in rs if r["host"].get("id") == "cloud" and r["suite"].get("version") == x["suite"].get("version")
-                and r["suite"].get("tier") == x["suite"].get("tier")]
+                and scale(r["suite"].get("tier")) == scale(x["suite"].get("tier"))]
         if refs:
             ref = max(refs, key=lambda r: r["capability"] or 0)
             x["ref"] = ref["id"]
