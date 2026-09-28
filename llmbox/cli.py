@@ -249,6 +249,7 @@ def cmd_bench(a: argparse.Namespace) -> None:
             raise SystemExit("no calibrated task bank for this suite: run `llmbox irt calibrate` (or pass --bank <content hash>)")
         pr = tuple(float(x) for x in a.prior.split(",")) if a.prior else None   # default: the bank's population prior
         res = bench.run_adaptive(a.endpoint, a.model, bank, budget_min=a.budget, target=a.target, prior=pr,
+                                 seed0=7000 + 1000 * a.seed,   # --seed: fresh instances for a repeated adaptive run
                                  api_key=None, progress=lambda m: print(m, flush=True), jsonl_path=jl)
     else:
         res = bench.run(a.endpoint, a.model, tier=a.tier, seed0=a.seed, blocks=a.block, jsonl_path=jl,
