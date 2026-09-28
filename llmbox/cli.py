@@ -169,6 +169,26 @@ def cmd_irt(a: argparse.Namespace) -> None:
         for m, t in sorted(bank.theta.items(), key=lambda x: -x[1]):
             dv = bank.dev.get(m, {})
             print(f"  {m:22s} theta {t:5.2f}  " + " ".join(f"{b[:4]} {v:+.1f}" for b, v in dv.items()))
+    elif a.action == "rescore":   # adaptive runs again with the current bank; fixed runs: the IRT estimate beside their own
+        bank = irt.load(ch)
+        if not bank:
+            raise SystemExit(f"no bank for {ch}: run `llmbox irt calibrate` first")
+        import glob as _g
+        for path in a.paths or sorted(_g.glob(os.path.join(hosts.HOME, "results", "*", "*-suite-*.json"))):
+            rec = json.load(open(path))
+            su = rec.get("suite") or {}
+            if su.get("content_hash") not in hs or su.get("blocks"):
+                continue
+            sc = irt.score_rows(bank, rec["rows"])
+            s = rec["summary"]
+            rid = (rec.get("recipe") or {}).get("id") or "?"
+            print(f"{os.path.basename(path)[:17]} {rid:18s} {su.get('tier'):8s} run {s['capability']:5.1f} "
+                  f"({s['capability_ci95'][0]:.0f}-{s['capability_ci95'][1]:.0f})  irt {sc['capability']:5.1f} ({sc['ci95'][0]:.0f}-{sc['ci95'][1]:.0f})  n {sc['n']}")
+            if a.write and su.get("tier") == "adaptive":
+                s.setdefault("capability_published", s["capability"])
+                s.update(capability=sc["capability"], capability_ci95=sc["ci95"], blocks=sc["blocks"])
+                s.setdefault("irt", {})["rescored_with"] = {"content_hash": ch, "models": len(bank.theta), "tau": bank.tau}
+                json.dump(rec, open(path, "w"), indent=1)
     elif a.action == "report":
         bank = irt.load(ch) or irt.calibrate(resp, suite.WEIGHTS)
         print(f"{'family':28s} {'a':>5s} {'b':>6s} {'sec':>6s} {'info/min at 0.5':>16s}")
@@ -574,7 +594,9 @@ def main(argv: list[str] | None = None) -> None:
     pp.add_argument("--endpoint", default="http://192.0.2.10:8080")
     pp.set_defaults(fn=cmd_probe)
     ir = sub.add_parser("irt", help="task-family calibration (IRT) for adaptive runs: calibrate / report / simulate")
-    ir.add_argument("action", choices=["calibrate", "report", "simulate"])
+    ir.add_argument("action", choices=["calibrate", "report", "simulate", "rescore"])
+    ir.add_argument("paths", nargs="*", help="rescore: result files (default: every run of this suite content)")
+    ir.add_argument("--write", action="store_true", help="rescore: store the new estimate in adaptive results")
     ir.add_argument("--content-hash", help="suite content hash (default: this suite)")
     ir.add_argument("--budget", type=float, default=45, help="simulate: minutes")
     ir.set_defaults(fn=cmd_irt)

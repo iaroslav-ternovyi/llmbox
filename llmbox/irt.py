@@ -343,6 +343,17 @@ def simulate(bank: Bank, truth: dict, true_seconds: dict, prior: tuple = PRIOR, 
     return traj
 
 
+def score_rows(bank: Bank, rows: list[dict], prior: tuple | None = None) -> dict:
+    """The IRT estimate from a run's graded rows (any tier): capability with its 95% interval and the block scores.
+    Rows of families the bank does not know, pending rows and errors are left out."""
+    obs = [(family_of(r["id"]), max(0.0, min(1.0, float(r["score"])))) for r in rows
+           if not r.get("pending") and not r.get("error") and family_of(r["id"]) in bank.a]
+    est = block_estimate(bank, obs, prior)
+    return {"capability": round(est["capability"], 1), "ci95": [round(est["lo"], 1), round(est["hi"], 1)],
+            "blocks": {b: round(100 * v["score"], 1) for b, v in est["blocks"].items()}, "theta": round(est["theta"], 3),
+            "n": len(obs)}
+
+
 # ---- persistence --------------------------------------------------------------------------------------------------
 
 def bank_path(content_hash: str) -> str:
