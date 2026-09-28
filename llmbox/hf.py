@@ -59,8 +59,25 @@ class GGUFFile:
         return f"{HF}/{self.repo}/resolve/main/{urllib.parse.quote(part)}"
 
 
-def list_gguf(repo: str) -> list[GGUFFile]:
-    entries = _get_json(f"{HF}/api/models/{repo}/tree/main?recursive=true")
+def _tree(repo: str, ttl: int = 0) -> list:
+    """The repo's file listing; with ttl > 0 cached on disk (~/.llmbox/hf/tree/) - a site build lists ~150 repos and
+    Hugging Face answers 429 to a second build within minutes."""
+    url = f"{HF}/api/models/{repo}/tree/main?recursive=true"
+    if not ttl:
+        return _get_json(url)
+    import time as _t
+    from .hosts import HOME
+    cp = os.path.join(HOME, "hf", "tree", repo.replace("/", "__") + ".json")
+    if os.path.exists(cp) and _t.time() - os.path.getmtime(cp) < ttl:
+        return json.load(open(cp))
+    d = _get_json(url)
+    os.makedirs(os.path.dirname(cp), exist_ok=True)
+    json.dump(d, open(cp, "w"))
+    return d
+
+
+def list_gguf(repo: str, ttl: int = 0) -> list[GGUFFile]:
+    entries = _tree(repo, ttl)
     files: dict[str, GGUFFile] = {}
     for e in entries:
         path = e.get("path", "")

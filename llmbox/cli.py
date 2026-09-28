@@ -129,6 +129,13 @@ def cmd_tune(a: argparse.Namespace) -> None:
         tune.run(a.host, rid)
 
 
+def cmd_optimize(a: argparse.Namespace) -> None:
+    from . import optimize
+    for rid in a.recipes:
+        print(f"== {rid}", flush=True)
+        optimize.run(a.host, rid, retune=a.retune, out=lambda m: print(m, flush=True), endpoint=a.endpoint)
+
+
 def cmd_probe(a: argparse.Namespace) -> None:
     """Re-measure only the 1-stream speed of a served recipe (after tune); quality stays from its suite run."""
     import json as _json
@@ -587,6 +594,12 @@ def main(argv: list[str] | None = None) -> None:
     tp.add_argument("--host", default="box")
     tp.add_argument("--plan", action="store_true", help="list the variants only, measure nothing")
     tp.set_defaults(fn=cmd_tune)
+    op = sub.add_parser("optimize", help="tune (if not yet), apply, then stock llama.cpp vs llmbox back to back, then re-probe; box must be idle")
+    op.add_argument("recipes", nargs="+")
+    op.add_argument("--host", default="box")
+    op.add_argument("--retune", action="store_true", help="tune again even if the recipe was tuned before")
+    op.add_argument("--endpoint", default="http://192.0.2.10:8080")
+    op.set_defaults(fn=cmd_optimize)
     pp = sub.add_parser("probe", help="re-measure only the 1-stream speed of a served recipe (e.g. after tune)")
     pp.add_argument("model", help="llama-swap id")
     pp.add_argument("--host", default="box")

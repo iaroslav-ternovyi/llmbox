@@ -905,30 +905,23 @@ _GRADING = {   # how each block is graded (from the suite modules' own descripti
 
 
 def new_page(rs: list[dict], data: dict, host: str) -> str | None:
-    """Models on Hugging Face nobody has measured here: speed predicted for the visitor's box, the expected score from
-    measured relatives (same architecture and size), and the four commands that measure one."""
+    """What came out in the last six months that runs on the visitor's box: releases, fine-tunes and remixes pulled by
+    enough people (llmbox/candidates.py), each with the file this box runs well (4-bit first, a smaller quantization
+    when the 4-bit file does not fit), its predicted speed, and its score - measured here when it was, otherwise the
+    range expected from public benchmarks. Measured models are listed with their result, not hidden."""
+    import datetime as _dt
     from . import candidates as C, estimate as E, fit as F, recipe as rc
     cs = C.load()
     if not cs:
         return None
-    measured = {}
-    in_campaign = set()
-    for rid in rc.ids(host):
-        try:
-            r = rc.load(host, rid)
-            in_campaign.add(r["model"].get("hf_repo"))
-        except (OSError, ValueError):
-            continue
-    for r in rs:
-        try:
-            measured[r["id"]] = (F.shape_for(rc.load(host, r["id"])), r.get("vs_ref"))
-        except (OSError, ValueError, SystemExit):
-            continue
+    cutoff = (_dt.date.today() - _dt.timedelta(days=C.RECENT_DAYS)).isoformat()
     from . import eci
     table = eci.load()
     ref_cap = next((r["capability"] / (r["vs_ref"] / 100) for r in rs if r.get("vs_ref")), None)
     by_base: dict = {}
     chains: dict = {}
+    measured: dict = {}   # candidate key -> measured row
+    by_name: dict = {}    # the same without the org: a repo whose base tags could not be read still matches its model
     for r in rs:
         try:
             repo = rc.load(host, r["id"])["model"].get("hf_repo") or ""
@@ -939,55 +932,89 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
         hit = eci.match(repo, table) if not eci.is_remix(repo) else None
         if hit:
             by_base.setdefault(hit[0], (hit[1]["eci"], []))[1].append((r["id"], r["capability"]))
+        measured.setdefault(C.key_of(repo), []).append(dict(r, repo=repo))
+        by_name.setdefault(C._key(re.sub(r"-gguf(-mtp)?$", "", repo, flags=re.I)).split("/")[-1], []).append(dict(r, repo=repo))
     anchors = ([(f"{eci.FRONTIER_PROXY} (stands in for the reference)", table[eci.FRONTIER_PROXY]["eci"], ref_cap)]
                if ref_cap and eci.FRONTIER_PROXY in table else [])
     anchors += [(f"{name} via {', '.join(i for i, _ in ms)}", e, sum(c for _, c in ms) / len(ms)) for name, (e, ms) in by_base.items()]
     pred = eci.predictor(table, anchors, ref_cap) if ref_cap else None
-    rows = []
+    kv = "q8_0"
+
+    def shp(sh: E.ModelShape) -> dict:
+        return {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
+                "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used,
+                "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv), "cpuEff": sh.expert_cpu_eff,
+                "kvB": sh.kv_bytes_per_token(kv), "ctx": sh.context_length or 32768, "k2": 1, "kd": 1, "deepK": 32}
+
+    def expected(repo: str):
+        hit = eci.match(repo, table) if pred else None
+        if not hit:
+            return None
+        mid, lo, hi = pred(hit[1]["eci"], hit[1]["lo"], hit[1]["hi"])
+        return {"mid": round(mid), "lo": round(lo), "hi": round(hi), "name": hit[0], "eci": hit[1]["eci"], "remix": eci.is_remix(repo)}
+
+    def mrow(m: dict) -> dict:
+        sp = m["speed"] or {}
+        return {"rid": m["id"], "vs": m.get("vs_ref"), "cap": m["capability"], "t2": sp.get("decode_tps"),
+                "td": float(report._deep(sp)) if report._deep(sp) != "-" else None}
+
+    rows, seen = [], set()
     for c in cs:
-        if c["repo"] in in_campaign:
-            continue
         sh = E.ModelShape(**c["shape"])
         own = C.base_chain(c["repo"])
         roots = set(own[:2]) | {re.sub(r"-gguf$", "", c["repo"], flags=re.I)}   # the repo and the model it packages
+        lin = c.get("lineage") or {"kind": "release", "of": None, "model": c["base"]}
+        key = C._key(lin.get("model") or c["base"])
+        ms = (measured.get(key) or measured.get(C._key(c["base"])) or by_name.get(key.split("/")[-1])
+              or by_name.get(C._key(re.sub(r"-gguf(-mtp)?$", "", c["repo"], flags=re.I)).split("/")[-1]) or [])
+        seen |= {m["id"] for m in ms}
         # measured fine-tunes of this model (declared on Hugging Face): context, not a prediction - they are other models
-        rel = [(rid, (r.get("vs_ref") or 0)) for r in rs for rid in [r["id"]] if rid in chains and roots & set(chains[rid][1:])]
-        guess = None
-        hit = eci.match(c["repo"], table) if pred else None
-        if hit:
-            mid, lo, hi = pred(hit[1]["eci"], hit[1]["lo"], hit[1]["hi"])
-            guess = {"mid": round(mid), "lo": round(lo), "hi": round(hi), "name": hit[0], "eci": hit[1]["eci"], "remix": eci.is_remix(c["repo"])}
-        kv = "q8_0"
-        rows.append({"repo": c["repo"], "rid": C.recipe_id(c["repo"]), "quant": c["quant"], "gb": round(c["bytes"] / 1e9, 1),
+        rel = [(rid, (r.get("vs_ref") or 0)) for r in rs for rid in [r["id"]] if rid in chains and roots & set(chains[rid][1:]) and rid not in {m["id"] for m in ms}]
+        rows.append({"repo": c["repo"], "rid": C.recipe_id(c["repo"]), "released": c.get("released") or c.get("created"),
                      "dl": c["downloads"], "total": round(sh.total_params / 1e9, 1), "active": round(sh.active_params / 1e9, 1),
-                     "arch": sh.arch, "mtp": bool(sh.n_mtp_layers), "rel": rel, "guess": guess,
-                     "sh": {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
-                            "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used,
-                            "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv), "cpuEff": sh.expert_cpu_eff,
-                            "kvB": sh.kv_bytes_per_token(kv), "ctx": sh.context_length or 32768, "k2": 1, "kd": 1, "deepK": 32}})
+                     "kind": lin["kind"], "of": lin.get("of"), "rel": rel, "guess": expected(c["repo"]),
+                     "measured": [mrow(m) for m in ms], "bytes0": c["bytes"], "sh": shp(sh),
+                     "ladder": [{"file": x["file"], "quant": x["quant"], "bytes": x["bytes"]} for x in (c.get("ladder") or [{"file": c["file"], "quant": c["quant"], "bytes": c["bytes"]}])]})
+    # measured models released in the window that the popularity cut left out: listed with their result
+    for r in rs:
+        if r["id"] in seen or r["id"] not in data["recipes"]:
+            continue
+        try:
+            rec = rc.load(host, r["id"])
+        except (OSError, ValueError):
+            continue
+        repo = rec["model"].get("hf_repo") or ""
+        rel_day = C.released(repo) if repo else None
+        if not rel_day or rel_day < cutoff:
+            continue
+        sh = F.shape_for(rec)
+        lin = C.lineage(repo)
+        rows.append({"repo": repo, "rid": r["id"], "released": rel_day, "dl": None, "total": round(sh.total_params / 1e9, 1),
+                     "active": round(sh.active_params / 1e9, 1), "kind": lin["kind"], "of": lin.get("of"), "rel": [],
+                     "guess": expected(repo), "measured": [mrow(r)], "bytes0": sh.total_bytes or 1, "sh": shp(sh),
+                     "ladder": [{"file": rec["model"].get("file") or "", "quant": _quant(rec["model"].get("file") or ""), "bytes": sh.total_bytes or 1}]})
     body = f"""
-<section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / not tested yet</div><h1>Not tested yet</h1>
- <p class="q" style="margin-top:6px">Popular models on Hugging Face that have no run here. Speed is predicted for <b id="boxname">the reference box</b>
- from each model's file (<a href="index.html">pick your box</a>); the expected score comes only from measured models with the same
- architecture and size. Measure one and it moves into the ranking.</p></div></section>
-<section class="panel"><div class="lbl">{len(rows)} models · most downloaded and trending GGUF · click a column to sort</div>
- <div class="tw"><table class="cand"><tr><th class="l">MODEL</th><th data-sort="size">SIZE ↕<br><span class="faint">total · active</span></th><th data-sort="exp">EXPECTED SCORE ↕</th>
- <th data-sort="speed">TOK/S ON YOUR BOX ↕<br><span class="faint">predicted</span></th><th>FILE</th><th data-sort="dl">DOWNLOADS ↕<br><span class="faint">30 days</span></th><th></th></tr>
+<section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / new</div><h1>New models for your box</h1>
+ <p class="q" style="margin-top:6px">Released in the last six months and pulled by enough people, one entry per model: releases, fine-tunes
+ and uncensored remixes, labelled. Fit and speed are for <b id="boxname">the reference box</b> (<a href="index.html">pick your box</a>):
+ when the 4-bit file does not fit, the largest 3- or 2-bit file that does is shown. Measured models show their result; the rest show
+ the range expected from public benchmarks.</p></div></section>
+<section class="panel"><div class="lbl"><span id="count">{len(rows)}</span> models · click a column to sort</div>
+ <div class="nf"><label><input type="checkbox" id="fitonly" checked> only what runs on this box</label>
+  <label><input type="checkbox" id="nouncens"> hide uncensored remixes</label></div>
+ <div class="tw"><table class="cand"><tr><th class="l">MODEL</th><th data-sort="rel">RELEASED ↕</th><th data-sort="size">SIZE ↕<br><span class="faint">total · active</span></th>
+ <th data-sort="exp">SCORE ↕<br><span class="faint">measured or expected</span></th><th data-sort="speed">TOK/S ON YOUR BOX ↕<br><span class="faint">chat · 32k</span></th>
+ <th>FILE</th><th data-sort="dl">DOWNLOADS ↕<br><span class="faint">30 days</span></th><th></th></tr>
  <tbody id="rows"></tbody></table></div></section>"""
     note = ("<section class='panel pad'><div class='lbl'>Where the expected score comes from</div><p class='q' style='max-width:900px;line-height:1.7'>"
-            "Measured relatives first: models with the same architecture and size measured here. Otherwise the model's "
+            "A measured model shows its own score. Otherwise the model's "
             "<a href='https://epoch.ai/benchmarks'>Epoch Capabilities Index</a> (one number fitted over many public benchmarks), put on our scale by a "
             "straight line through models that have both: " + "; ".join(f"{esc(n)}: ECI {e:.0f} = {c / ref_cap * 100:.0f}%" for n, e, c in anchors)
-            + ". Two or three anchors make it rough, hence the wide range; every model measured here adds one. A remix (abliterated, merged, renamed) "
-            "gets its base model's range. ECI data: Epoch AI, 'Capabilities &amp; benchmarking', epoch.ai/benchmarks, CC BY 4.0.</p></section>") if pred else (
-        "<section class='panel pad'><div class='lbl'>Where the expected score will come from</div><p class='q' style='max-width:900px;line-height:1.7'>"
-        "From the <a href='https://epoch.ai/benchmarks'>Epoch Capabilities Index</a>, put on our scale by models measured here that are themselves in the "
-        "index. A fine-tune does not count: it is a different model. The frontier reference is the only such model so far; the first base models are in "
-        "the queue, and the predictions appear when they finish. Fine-tunes of a model that were measured here are listed with it, as context. "
-        "ECI data: Epoch AI, 'Capabilities &amp; benchmarking', epoch.ai/benchmarks, CC BY 4.0.</p></section>")
+            + ". A fine-tune or remix gets its base model's range: training can move it either way. A 3- or 2-bit file scores lower than the 4-bit "
+            "one the range is for. ECI data: Epoch AI, 'Capabilities &amp; benchmarking', epoch.ai/benchmarks, CC BY 4.0.</p></section>") if pred else ""
     body += note
     js = PLAN_JS + "\nconst DATA = " + json.dumps(dict(ref=data["ref"], gpus=data["gpus"], ramKinds=data["ramKinds"], rows=rows, eciReady=bool(pred))) + ";\n" + _NEW_JS
-    return _page("llmbox · not tested yet", "NEW", body, _NEW_CSS, js)
+    return _page("llmbox · new models", "NEW", body, _NEW_CSS, js)
 
 
 _NEW_CSS = """
@@ -995,44 +1022,65 @@ _NEW_CSS = """
 .cand tr.nofit td{opacity:.45}.cand .rel{display:block;font-size:10.5px;color:var(--muted)}
 .cand .go{font-size:11px;padding:5px 10px;white-space:nowrap}
 th[data-sort]{cursor:pointer;user-select:none}th[data-sort]:hover,th[data-sort].on{color:var(--amber)}
-.cand .guess{color:var(--soft)}
+.cand .guess{color:var(--soft)}.cand .kind{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:1px 5px;margin-left:6px;border:1px solid var(--line);color:var(--muted);vertical-align:2px}
+.cand .kind.release{color:var(--amber);border-color:var(--amber-dim)}.cand .kind.uncensored{color:#c46a5a;border-color:#5a2e26}
+.cand .when{white-space:nowrap}.cand .low{color:#c49a5a}
+.nf{display:flex;flex-wrap:wrap;gap:18px;padding:10px 16px 0;font-size:12.5px;color:var(--muted)}.nf input{accent-color:#FFB000;vertical-align:-2px;margin-right:6px}
 .cmds{background:#0b0c09;border:1px solid var(--line);padding:12px 14px;margin:4px 0 8px;text-align:left;font-size:12.5px;line-height:1.8;color:var(--soft)}
 .cmds code{display:block;color:var(--amber)}.cmds code:before{content:"$ ";color:var(--faint)}
 """
 _NEW_JS = r"""
 const $ = s => document.querySelector(s);
-const box = savedBox(DATA) || { name: "the reference box", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
+const saved = savedBox(DATA);
+const box = saved || { name: "the reference box", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
 $("#boxname").textContent = box.name === "the reference box" ? `the reference box (${DATA.ref.gpu} · ${Math.round(DATA.ref.ram / 1024)} GB · ${DATA.ref.rambw} GB/s)` : `your box (${box.name} · ${Math.round(box.ram / 1024)} GB · ${box.rambw} GB/s)`;
-const fmtDl = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : n;
+const fmtDl = n => n == null ? "—" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : n;
 const cap = v => v > 200 ? "200+" : "~" + Math.round(v);   // above ~200 the formula ignores per-token overheads
-const rows = DATA.rows.map(r => { const f = forBox(r.sh, box);
-  const exp = r.guess ? { mid: r.guess.mid, lo: r.guess.lo, hi: r.guess.hi, src: "eci" } : null;
-  return Object.assign({}, r, { f, fits: f.fits, exp, speed: f.fits ? f.t2 : 0 }); });
-const tile = v => `<span class="tile pred ${v >= 50 ? "hi" : v >= 25 ? "mid" : "lo"}">${cap(v)}</span>`;
-function expCell(r) {
-  const ft = r.rel.length ? `<span class="rel">fine-tunes measured: ${r.rel.map(x => x[0] + " " + Math.round(x[1]) + "%").join(", ")}</span>` : "";
-  if (!r.exp) return `<span class="q">—</span>` + (ft || `<span class="rel">${DATA.eciReady ? "not in the public index" : "prediction after the first base models are measured"}</span>`);
-  return `<span class="guess">~${r.exp.mid}%</span><span class="rel" title="Epoch Capabilities Index of ${r.guess.name}: ${r.guess.eci.toFixed(1)}">${r.exp.lo}–${r.exp.hi} · from ECI${r.guess.remix ? " of its base" : ""}</span>` + ft;
+const bits = q => { const m = q.replace("UD-", "").toUpperCase().match(/(?:I?Q|BF|F)(\d+)/); return m ? +m[1] : 16; };
+const ago = d => { const n = Math.round((Date.now() - new Date(d)) / 864e5); return n < 1 ? "today" : n < 45 ? `${n} d ago` : `${Math.round(n / 30)} mo ago`; };
+function pick(r) {   // the file this box runs well: 4-bit first, then the largest 3- or 2-bit file; 32k context or more
+  let first = null;
+  for (const f of r.ladder) {
+    const k = f.bytes / r.bytes0, sh = Object.assign({}, r.sh, { nonexp: r.sh.nonexp * k, exp: r.sh.exp * k, embed: r.sh.embed * k });
+    const p = forBox(sh, box);
+    if (p.fits && !first) first = { f, p };
+    if (p.fits && p.ctx >= 32768) return { f, p };
+  }
+  return first || { f: r.ladder[0], p: null };
 }
-let sortKey = "default", sortDir = -1;
-const keys = { exp: r => r.exp ? r.exp.mid : -1, speed: r => r.speed, size: r => r.total, dl: r => r.dl,
-  default: r => (r.fits ? 1e9 : 0) + (r.exp ? r.exp.mid * 1e6 : 0) + r.dl / 1e3 };
+const rows = DATA.rows.map(r => { const c = pick(r), m = r.measured[0];
+  const onRef = !saved && m && m.t2;   // on the reference box a measured model shows what was measured
+  const t2 = onRef ? m.t2 : c.p ? c.p.t2 : 0, td = onRef ? m.td : c.p ? c.p.td : 0;
+  const score = m ? m.vs : r.guess ? r.guess.mid : null;
+  return Object.assign({}, r, { c, m, fits: !!c.p, t2, td, onRef, score, low: c.p && bits(c.f.quant) < 4 }); });
+function scoreCell(r) {
+  const ft = r.rel.length ? `<span class="rel">fine-tunes measured: ${r.rel.map(x => x[0] + " " + Math.round(x[1]) + "%").join(", ")}</span>` : "";
+  if (r.m) return `<span class="tile ${r.m.vs >= 85 ? "hi" : r.m.vs >= 50 ? "mid" : "lo"}">${Math.round(r.m.vs)}%<small>${r.m.cap.toFixed(1)}</small></span><span class="rel">measured: <a href="recipe-${r.m.rid}.html">${r.m.rid}</a></span>` + ft;
+  if (!r.guess) return `<span class="q">—</span>` + (ft || `<span class="rel">not in the public index</span>`);
+  return `<span class="guess">~${r.guess.mid}%</span><span class="rel" title="Epoch Capabilities Index of ${r.guess.name}: ${r.guess.eci.toFixed(1)}">${r.guess.lo}–${r.guess.hi} · from ECI${r.guess.remix || r.kind !== "release" ? " of its base" : ""}</span>` + ft;
+}
+const tile = v => `<span class="tile pred ${v >= 50 ? "hi" : v >= 25 ? "mid" : "lo"}">${cap(v)}</span>`;
+let sortKey = "rel", sortDir = -1;
+const keys = { rel: r => +new Date(r.released), exp: r => r.score ?? -1, speed: r => r.t2 || 0, size: r => r.total, dl: r => r.dl || 0 };
 function render() {
-  const k = keys[sortKey];
-  const list = rows.slice().sort((a, b) => sortDir * (k(a) - k(b)) || (b.dl - a.dl));
-  $("#rows").innerHTML = list.map((r, i) => `<tr class="${r.fits ? "" : "nofit"}"><td class="l"><span class="m">${r.repo.split("/")[1].replace(/-GGUF$/i, "")}</span><a class="repo" href="https://huggingface.co/${r.repo}" rel="noopener">${r.repo}</a></td>` +
-    `<td>${r.total}B · ${r.active}B</td><td>${expCell(r)}</td>` +
-    `<td>${r.fits ? tile(r.f.t2) + `<span class="rel">${cap(r.f.td)} at 32k · ${Math.round(r.f.ctx / 1024)}k ctx</span>` : `<span class="red">✗ too big</span>`}</td>` +
-    `<td><span class="q">${r.quant} · ${r.gb} GB</span></td><td>${fmtDl(r.dl)}</td>` +
-    `<td><button class="btn go" data-i="${i}">TEST IT</button></td></tr>` +
-    `<tr class="cmdrow" id="c${i}" hidden><td colspan="7"><div class="cmds">Draft the recipe, download and fit it, tune the speed, run the suite (~2 h):` +
-    `<code>llmbox recipe new ${r.repo} --write</code><code>llmbox install ${r.rid} --apply</code><code>llmbox tune ${r.rid}</code>` +
-    `<code>llmbox bench ${r.rid} --recipe ${r.rid} --speed-probe</code></div></td></tr>`).join("");
-  document.querySelectorAll(".go").forEach(b => b.addEventListener("click", () => { const c = $("#c" + b.dataset.i); c.hidden = !c.hidden; }));
+  const k = keys[sortKey], fitOnly = $("#fitonly").checked, noU = $("#nouncens").checked;
+  const list = rows.filter(r => (!fitOnly || r.fits) && (!noU || r.kind !== "uncensored")).sort((a, b) => sortDir * (k(a) - k(b)) || ((b.dl || 0) - (a.dl || 0)));
+  $("#count").textContent = list.length;
+  $("#rows").innerHTML = list.map((r, i) => `<tr class="${r.fits ? "" : "nofit"}"><td class="l"><span class="m">${r.repo.split("/")[1].replace(/-GGUF(-MTP)?$/i, "")}<span class="kind ${r.kind}">${r.kind}</span></span>` +
+    (r.of ? `<span class="rel">trained from ${r.of}</span>` : "") + `<a class="repo" href="https://huggingface.co/${r.repo}" rel="noopener">${r.repo}</a></td>` +
+    `<td class="when" title="${r.released}">${ago(r.released)}</td><td>${r.total}B · ${r.active}B</td><td>${scoreCell(r)}</td>` +
+    `<td>${r.fits ? (r.onRef ? `<span class="tile ${r.t2 >= 50 ? "hi" : r.t2 >= 25 ? "mid" : "lo"}">${Math.round(r.t2)}</span><span class="rel">${r.td ? Math.round(r.td) + " at 32k · " : ""}measured</span>` : tile(r.t2) + `<span class="rel">${cap(r.td)} at 32k · ${Math.round(r.c.p.ctx / 1024)}k ctx</span>`) : `<span class="red">✗ too big</span>`}</td>` +
+    `<td><span class="q">${r.c.f.quant} · ${(r.c.f.bytes / 1e9).toFixed(1)} GB</span>${r.low ? `<span class="rel low">${bits(r.c.f.quant)}-bit: expect a lower score than 4-bit</span>` : ""}</td><td>${fmtDl(r.dl)}</td>` +
+    `<td>${r.m ? `<a class="btn go" href="recipe-${r.m.rid}.html">RESULTS</a>` : `<button class="btn go" data-i="${i}">TEST IT</button>`}</td></tr>` +
+    (r.m ? "" : `<tr class="cmdrow" id="c${i}" hidden><td colspan="8"><div class="cmds">Draft the recipe for this file, download it, tune the speed, run the 40-minute adaptive test:` +
+    `<code>llmbox recipe new ${r.repo} --file ${r.c.f.file.split("/").pop()} --write</code><code>llmbox install ${r.rid} --apply</code><code>llmbox optimize ${r.rid}</code>` +
+    `<code>llmbox bench ${r.rid} --recipe ${r.rid} --adaptive --budget 40 --speed-probe</code></div></td></tr>`)).join("");
+  document.querySelectorAll(".go[data-i]").forEach(b => b.addEventListener("click", () => { const c = $("#c" + b.dataset.i); c.hidden = !c.hidden; }));
   document.querySelectorAll("th[data-sort]").forEach(th => th.classList.toggle("on", th.dataset.sort === sortKey));
 }
 document.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("click", () => {
   sortDir = sortKey === th.dataset.sort ? -sortDir : -1; sortKey = th.dataset.sort; render(); }));
+["#fitonly", "#nouncens"].forEach(s => $(s).addEventListener("change", render));
 render();
 """
 
