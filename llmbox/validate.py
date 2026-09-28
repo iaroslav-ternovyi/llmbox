@@ -206,7 +206,10 @@ def oracle(it: Item) -> str | None:
         return _agentic_oracle(it)
     if it.block == "writing":
         return _writing_oracle(it)
-    return None   # code: the expected outputs ARE the reference implementation; checked via null + frontier
+    if it.block == "code":   # levels 7-8: the reference implementation that computed the hidden tests (Python or JS port)
+        from .suite import code
+        return code.oracle(it)
+    return None   # code levels 1-6: the expected outputs ARE the reference implementation; checked via null + frontier
 
 
 def _variants(text: str) -> list[str]:
