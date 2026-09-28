@@ -129,6 +129,15 @@ def cmd_tune(a: argparse.Namespace) -> None:
         tune.run(a.host, rid)
 
 
+def cmd_grade_pending(a: argparse.Namespace) -> None:
+    from . import pending
+    todo = a.results or pending.records()
+    print(f"{len(todo)} result(s) with pending explanations")
+    for f in todo:
+        print(f"== {os.path.basename(f)}")
+        print("  done" if pending.grade(f) else "  still pending")
+
+
 def cmd_optimize(a: argparse.Namespace) -> None:
     from . import optimize
     for rid in a.recipes:
@@ -600,6 +609,9 @@ def main(argv: list[str] | None = None) -> None:
     tp.add_argument("--host", default="box")
     tp.add_argument("--plan", action="store_true", help="list the variants only, measure nothing")
     tp.set_defaults(fn=cmd_tune)
+    gp = sub.add_parser("grade-pending", help="grade explanations that cloud runs left pending (reader on the box; box must be free)")
+    gp.add_argument("results", nargs="*", help="result files (default: every one with pending rows)")
+    gp.set_defaults(fn=cmd_grade_pending)
     op = sub.add_parser("optimize", help="tune (if not yet), apply, then stock llama.cpp vs llmbox back to back, then re-probe; box must be idle")
     op.add_argument("recipes", nargs="+")
     op.add_argument("--host", default="box")

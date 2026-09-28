@@ -67,6 +67,12 @@ def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, de
                            for c in (res.get("tool_calls") or [])][:400]}
 
 
+def reader_now(base_url: str) -> bool:
+    """Grade explanations at the end of the run, or leave them pending for the queue (llmbox/pending.py): a cloud run's
+    reader is on the box, which may be busy with speed work, so it waits for a free moment. LLMBOX_READER_NOW=1 forces now."""
+    return not str(base_url).startswith("claude-code") or os.environ.get("LLMBOX_READER_NOW") == "1"
+
+
 def grade_deferred(base_url: str, items: list, rows: list[dict], out=None, progress=print) -> None:
     """Score the rows whose grading needs the reader model (suite/explain.py), in place. Run after all other items so
     the served model is swapped for the reader once. A reader failure leaves the row pending with an error; a resumed
@@ -263,7 +269,10 @@ def run(base_url: str, model: str, tier: str = "quick", seed0: int = 0, blocks: 
             out.flush()
         progress(f"  [{i:3d}/{len(items)}] {row['score']:4.2f}  {row['seconds']:6.1f}s  {it.id}"
                  + (f"  ERROR {row['error'][:80]}" if row["error"] else ""))
-    grade_deferred(base_url, suite.build(tier, seed0, blocks), rows, out, progress)
+    if reader_now(base_url):
+        grade_deferred(base_url, suite.build(tier, seed0, blocks), rows, out, progress)
+    elif any(r.get("pending") for r in rows):
+        progress("  explanations left pending: the queue grades them with the reader when the box is free")
     s = summarize(rows, time.time() - t0)
     if parallel > 1:   # per-request speeds were measured under contention: the caller replaces them with a 1-stream probe
         s["parallel"] = parallel
@@ -474,7 +483,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         cap, lo, hi = sel["capability"], sel["lo"], sel["hi"]
         progress(f"  [{n:3d}] {row['score']:.2f} {row['seconds']:6.1f}s  {fam:26s} -> {cap:5.1f} ({lo:.0f}-{hi:.0f})  "
                  f"{(time.time() - t0) / 60:5.1f} min")
-    pend = [r for r in rows if r.get("pending")]
+    pend = [r for r in rows if r.get("pending")] if reader_now(base_url) else []
     if pend:
         items = [suite.BLOCKS[r["family"].split(".")[0]][r["family"].split(".")[1]](int(r["id"].rsplit(".", 1)[1]), int(r["family"].split(".")[2][1:])) for r in pend]
         grade_deferred(base_url, items, rows, out, progress)

@@ -112,6 +112,27 @@ def gpu_ok(host: str) -> bool:
         return False
 
 
+_PENDING_TRIED: dict = {}
+
+
+def _grade_pending() -> bool:
+    """Between jobs, with nothing else on the box: grade the explanations cloud runs left pending (llmbox/pending.py).
+    True when it graded something."""
+    from . import pending
+    now = time.time()
+    todo = [f for f in pending.records() if now - _PENDING_TRIED.get(f, 0) > 1800]   # a failing reader: retry every 30 min
+    if not todo or not gpu_ok("box"):
+        return False
+    done = 0
+    for f in todo:
+        _PENDING_TRIED[f] = now
+        event(f"grading pending explanations of {os.path.basename(f)} with the reader")
+        ok = pending.grade(f, progress=lambda m: None)
+        event(f"  {'graded' if ok else 'still pending (reader failed)'}: {os.path.basename(f)}")
+        done += ok
+    return done > 0
+
+
 def _other_bench_running() -> bool:
     """Another benchmark on the box from this machine. Frontier reference runs (--endpoint claude-code...) do not touch
     the box and do not count."""
@@ -251,13 +272,15 @@ def run(until_empty: bool = False) -> None:
                     waiting = reason
                 time.sleep(60)
                 continue
-            if job is None:
+            if _other_bench_running():
+                reason = "another benchmark is running on this machine"
+            elif _grade_pending():
+                continue   # graded some cloud run's explanations with the reader: look again
+            elif job is None:
                 if until_empty:
                     event("queue empty - worker exits")
                     return
                 reason = "queue empty"
-            elif _other_bench_running():
-                reason = "another benchmark is running on this machine"
             elif not gpu_ok(job["host"]):
                 reason = f"waiting for the GPU on {job['host']}"
             else:
