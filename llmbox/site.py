@@ -331,7 +331,8 @@ const $ = s => document.querySelector(s);
 const fmt = v => v.toFixed(0);
 const kfmt = c => `${Math.round(c / 1024)}k`;
 function sameClass(hw) { const r = DATA.ref; return hw.gpu === r.gpu && Math.abs(hw.rambw - r.rambw) / r.rambw < 0.15 && hw.ram >= r.ram * 0.9; }
-function tile(v, small, pred) { const c = v >= 85 ? "hi" : v >= 50 ? "mid" : "lo";
+function tile(v, small, pred) { if (v == null) return `<span class="tile">—<small>${small}</small></span>`;   // no reference on this scale: no percent, the rest of the page still draws
+  const c = v >= 85 ? "hi" : v >= 50 ? "mid" : "lo";
   return `<span class="tile ${c}${pred ? " pred" : ""}">${pred ? "~" : ""}${fmt(v)}<small>${small}</small></span>`; }
 function weighted(b, w) { let s = 0, n = 0; for (const k in w) { s += (b[k] || 0) * w[k]; n += w[k]; } return n ? s / n : 0; }
 function scatter(pts) {   // up = smarter, right = faster. Numbered dots + a list: names never drift away from their dot

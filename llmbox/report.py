@@ -83,17 +83,17 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
             "_rows": rec.get("rows") or [], "_hash": su.get("content_hash"),
         })
     if suite_version is None and out:  # default: only the newest suite version, results of older versions are not comparable
-        newest = max(out, key=lambda x: _vkey(x["suite"].get("version")))["suite"].get("version")
-        out = [x for x in out if x["suite"].get("version") == newest]
+        newest = max((version_of(x["suite"]) for x in out), key=_vkey)
+        out = [x for x in out if version_of(x["suite"]) == newest]
     # newest result per (recipe id, host, suite version, tier)
     best: dict = {}
     for x in sorted(out, key=lambda x: x["created"]):
-        best[(x["id"], x["host"].get("id"), x["suite"].get("version"), scale(x["suite"].get("tier")))] = x
+        best[(x["id"], x["host"].get("id"), version_of(x["suite"]), scale(x["suite"].get("tier")))] = x
     _pool(out, best)
     rs = sorted(best.values(), key=lambda x: (x.get("partial", False), -(x["capability"] or 0)))   # partial runs listed last
     # 100% = the best frontier reference on the same suite version and tier (per block as well)
     for x in rs:
-        refs = [r for r in rs if r["host"].get("id") == "cloud" and r["suite"].get("version") == x["suite"].get("version")
+        refs = [r for r in rs if r["host"].get("id") == "cloud" and version_of(r["suite"]) == version_of(x["suite"])
                 and scale(r["suite"].get("tier")) == scale(x["suite"].get("tier"))]
         if refs:
             ref = max(refs, key=lambda r: r["capability"] or 0)
