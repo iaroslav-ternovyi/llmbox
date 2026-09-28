@@ -196,7 +196,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
         best(lambda r: r["blocks"].get("longctx"), "Best for long documents", lambda r: f'long docs {r["blocks"]["longctx"]:.0f}'),
     ])
 
-    head = ("<tr><th>#</th><th class='l'>MODEL</th><th data-sort='score'>SCORE ↕</th>" + "".join(f"<th>{_tip(b)}</th>" for b in BLOCKS)
+    head = ("<tr><th>#</th><th class='l'>MODEL</th><th data-sort='score'>SCORE ↕</th>" + "".join(f"<th data-sort='{b}'>{_tip(b)}</th>" for b in BLOCKS)
             + "<th data-sort='speed'>TOK/S ↕<br><span class='faint'>chat · long ctx</span></th><th>FITS</th><th></th></tr>")
     body = []
     for i, r in enumerate(local, 1):
@@ -295,7 +295,7 @@ _HOME_CSS = """
 .seg button{background:none;border:1px solid transparent;color:var(--muted);font:12px "IBM Plex Mono";padding:5px 10px;cursor:pointer;white-space:nowrap}
 .seg button:hover{color:var(--ink)}.seg button.on{color:var(--amber);border-color:var(--amber-dim)}
 .cmp{display:flex;align-items:center;gap:12px}.cmp .btn[aria-disabled=true]{opacity:.4;pointer-events:none}
-.rank th{padding:10px 5px}.rank td{padding:10px 5px}.rank th[data-sort]{cursor:pointer;user-select:none}.rank th[data-sort]:hover,.rank th[data-sort].on{color:var(--amber)}
+.rank th{padding:10px 5px}.rank td{padding:10px 5px}.rank th[data-sort]{cursor:pointer;user-select:none}.rank th[data-sort].on .tip{color:var(--amber)}.rank th[data-sort]:hover,.rank th[data-sort].on{color:var(--amber)}
 .rank td.rk{color:var(--muted);width:44px;font-size:13px;white-space:nowrap}
 .rank td.mod{min-width:170px}.rank td.mod .m{display:block;white-space:nowrap}.rank .qt{display:block;font-size:11px;color:var(--faint)}
 .rank .tile{min-width:44px}.rank td.sco .tile{min-width:70px;font-size:20px}
@@ -368,8 +368,9 @@ function hoverScatter() {   // point at a dot or a name: that model and its rang
     el.addEventListener("mouseleave", () => { box.classList.remove("hov"); box.querySelectorAll(".pt.on").forEach(x => x.classList.remove("on")); });
   });
 }
-let hwNow = null, preset = 0, sortBy = "score";
-document.querySelectorAll(".rank th[data-sort]").forEach(th => th.addEventListener("click", () => { sortBy = th.dataset.sort;
+let hwNow = null, preset = 0, sortBy = "score", sortDir = 1;   // any column with data-sort; a second click reverses it
+document.querySelectorAll(".rank th[data-sort]").forEach(th => th.addEventListener("click", () => {
+  sortDir = sortBy === th.dataset.sort ? -sortDir : 1; sortBy = th.dataset.sort;
   document.querySelectorAll(".rank th[data-sort]").forEach(t => t.classList.toggle("on", t === th)); render(); }));
 const measured = {};
 document.querySelectorAll("tr[data-rid]").forEach(r => measured[r.dataset.rid] = r.querySelector(".spd").innerHTML);
@@ -394,8 +395,9 @@ function render() {
     if (p.t2 && (!fastest || p.t2 > fastest.t2)) fastest = p;
   }
   const tb = document.querySelector(".rank tbody") || document.querySelector(".rank"), refRow = document.querySelector(".rank tr.ref");
-  const by = sortBy === "speed" ? (a, b) => (b.t2 || 0) - (a.t2 || 0) : (a, b) => b.vs - a.vs;
-  const ranked = pts.slice().sort((a, b) => b.vs - a.vs).map(p => p.id);
+  const key = sortBy === "speed" ? p => p.t2 || 0 : sortBy === "score" ? p => p.vs ?? -1 : p => p.blocks[sortBy] ?? -1;
+  const by = (a, b) => sortDir * (key(b) - key(a)) || (b.vs ?? -1) - (a.vs ?? -1);
+  const ranked = pts.slice().sort((a, b) => (b.vs ?? -1) - (a.vs ?? -1)).map(p => p.id);
   pts.slice().sort(by).forEach((p) => { const i = ranked.indexOf(p.id); const row = document.querySelector(`tr[data-rid="${p.id}"]`);
     row.querySelector(".rk").textContent = preset ? i + 1 : (p.rank[0] === p.rank[1] ? p.rank[0] : `${p.rank[0]}–${p.rank[1]}`); tb.insertBefore(row, refRow); });
   if (fastest && $("#fastest")) { $("#fastest .pk").textContent = fastest.id; $("#fastest .pk").href = `recipe-${fastest.id}.html`;
