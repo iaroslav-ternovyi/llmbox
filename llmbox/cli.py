@@ -158,7 +158,10 @@ def cmd_irt(a: argparse.Namespace) -> None:
     if not resp:
         raise SystemExit(f"no full runs of suite content {ch}; pass --content-hash")
     if a.action == "calibrate":
-        bank = irt.calibrate_blocks(resp, suite.WEIGHTS)
+        tau, cv = irt.choose_tau(resp, suite.WEIGHTS) if len(models) >= 4 else (1.0, {})
+        bank = irt.calibrate_blocks(resp, suite.WEIGHTS, fixed_tau=tau)
+        if cv:
+            print("tau by cross-validation (held-out log-likelihood): " + ", ".join(f"{k}: {v:.1f}" for k, v in cv.items()))
         print(f"calibrated {len(bank.a)} families on {len(models)} models ({len(resp)} answers), tau {bank.tau:.2f} "
               f"-> {irt.save(bank, ch, len(models))}")
         for m, t in sorted(bank.theta.items(), key=lambda x: -x[1]):
