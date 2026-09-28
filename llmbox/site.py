@@ -159,6 +159,16 @@ GPUS = [("RTX 3060 12 GB", 12288, 360), ("RTX 3090 24 GB", 24576, 936), ("RTX 40
         ("RTX 4070 12 GB", 12282, 504), ("RTX 4070 Ti Super 16 GB", 16376, 672), ("RTX 4080 16 GB", 16376, 717),
         ("RTX 4090 24 GB", 24564, 1008), ("RTX 5060 Ti 16 GB", 16311, 448), ("RTX 5070 12 GB", 12227, 672),
         ("RTX 5070 Ti 16 GB", 16303, 896), ("RTX 5080 16 GB", 16303, 960), ("RTX 5090 32 GB", 32607, 1792)]
+# Apple Silicon: unified memory, so no VRAM/RAM split - (name, 0, memory bandwidth GB/s, "mac", largest memory GB).
+# Bandwidth: Apple's specs (M5 Pro 307, M5 Max 460 / 614: apple.com newsroom 2026-03). Nothing is measured on a Mac here.
+MACS = [("Mac M1", 0, 68, "mac", 16), ("Mac M1 Pro", 0, 200, "mac", 32), ("Mac M1 Max", 0, 400, "mac", 64), ("Mac M1 Ultra", 0, 800, "mac", 128),
+        ("Mac M2", 0, 100, "mac", 24), ("Mac M2 Pro", 0, 200, "mac", 32), ("Mac M2 Max", 0, 400, "mac", 96), ("Mac M2 Ultra", 0, 800, "mac", 192),
+        ("Mac M3", 0, 100, "mac", 24), ("Mac M3 Pro", 0, 150, "mac", 36), ("Mac M3 Max 30-core GPU", 0, 300, "mac", 96),
+        ("Mac M3 Max 40-core GPU", 0, 400, "mac", 128), ("Mac M3 Ultra", 0, 819, "mac", 512),
+        ("Mac M4", 0, 120, "mac", 32), ("Mac M4 Pro", 0, 273, "mac", 64), ("Mac M4 Max 32-core GPU", 0, 410, "mac", 36),
+        ("Mac M4 Max 40-core GPU", 0, 546, "mac", 128), ("Mac M5", 0, 153, "mac", 32), ("Mac M5 Pro", 0, 307, "mac", 64),
+        ("Mac M5 Max 32-core GPU", 0, 460, "mac", 128), ("Mac M5 Max 40-core GPU", 0, 614, "mac", 128)]
+GPUS = GPUS + MACS
 RAM_KINDS = [("DDR4-3200", 40), ("DDR5-5600", 60), ("DDR5-6400", 75), ("DDR5-8000", 88)]
 
 
@@ -275,7 +285,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
 <h1 class="q1">What should I run on my box?</h1>
 <section class="boxbar"><span class="sc">Your box</span>
  <select id="gpu" aria-label="GPU"><option value="">reference box ({esc(ref_box)})</option></select>
- <select id="ram" aria-label="System RAM"><option value="16">16 GB RAM</option><option value="32">32 GB RAM</option><option value="48">48 GB RAM</option><option value="64" selected>64 GB RAM</option><option value="96">96 GB RAM</option><option value="128">128 GB RAM</option><option value="192">192 GB RAM</option></select>
+ <select id="ram" aria-label="System RAM or a Mac's unified memory"><option value="8">8 GB</option><option value="16">16 GB</option><option value="24">24 GB</option><option value="32">32 GB</option><option value="36">36 GB</option><option value="48">48 GB</option><option value="64" selected>64 GB</option><option value="96">96 GB</option><option value="128">128 GB</option><option value="192">192 GB</option><option value="256">256 GB</option><option value="512">512 GB</option></select>
  <select id="bw" aria-label="RAM speed"></select>
  <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
  <span id="boxnote" class="q">speeds measured on this box</span></section>
@@ -441,13 +451,16 @@ function readBox() {
   ["#ram", "#bw", "#bwn"].forEach(s => $(s).disabled = !g);
   if (!g) { hwNow = null; $("#boxnote").textContent = "speeds measured on this box"; try { localStorage.removeItem("llmbox-box"); } catch (e) {} history.replaceState(null, "", location.pathname); render(); return; }
   const bw = parseFloat($("#bwn").value) || parseFloat($("#bw").value);
-  hwNow = { gpu: g[0].replace(/ \d+ GB$/, ""), vram: g[1], vrambw: g[2], ram: parseInt($("#ram").value) * 1024, rambw: bw };
-  $("#boxnote").textContent = sameClass(hwNow) ? "same class as the reference box: measured speeds" : "speeds predicted for this box (dashed)";
+  hwNow = boxFrom(g, parseInt($("#ram").value), bw);
+  ["#bw", "#bwn"].forEach(s => $(s).disabled = !!hwNow.mac);   // a Mac's memory speed comes with the chip
+  $("#boxnote").textContent = hwNow.mac ? "Mac: rough, for MLX-class engines (llama.cpp on Metal is often slower) - nothing here is measured on a Mac" :
+    sameClass(hwNow) ? "same class as the reference box: measured speeds" : "speeds predicted for this box (dashed)";
   try { localStorage.setItem("llmbox-box", JSON.stringify({ gpu: $("#gpu").value, ram: $("#ram").value, bw: $("#bw").value, bwn: $("#bwn").value })); } catch (e) {}
   history.replaceState(null, "", `#gpu=${encodeURIComponent(g[0])}&ram=${$("#ram").value}&bw=${bw}`);
   render();
 }
-for (const g of DATA.gpus) $("#gpu").insertAdjacentHTML("beforeend", `<option>${g[0]}</option>`);
+$("#gpu").insertAdjacentHTML("beforeend", `<optgroup label="NVIDIA + system RAM">${DATA.gpus.filter(g => g[3] !== "mac").map(g => `<option>${g[0]}</option>`).join("")}</optgroup>`
+  + `<optgroup label="Mac (unified memory)">${DATA.gpus.filter(g => g[3] === "mac").map(g => `<option>${g[0]}</option>`).join("")}</optgroup>`);
 for (const r of DATA.ramKinds) $("#bw").insertAdjacentHTML("beforeend", `<option value="${r[1]}">${r[0]} · ${r[1]} GB/s</option>`);
 $("#bw").value = String(DATA.ramKinds.reduce((a, r) => Math.abs(r[1] - DATA.ref.rambw) < Math.abs(a - DATA.ref.rambw) ? r[1] : a, DATA.ramKinds[0][1]));
 ["#gpu", "#ram", "#bwn"].forEach(s => $(s).addEventListener("change", readBox));
@@ -476,22 +489,34 @@ PLAN_JS = r"""
 function plan(sh, hw, ctx, depth, buf = 2100) {   // buf: compute buffer MiB for -ub 2048 / 1024 / 512 = 2100 / 1300 / 900
   const mib = 1 / 1048576, kv = sh.kvB * ctx + sh.rec, gpuFixed = (sh.nonexp + kv) * mib + buf + 700, free = hw.vram - gpuFixed;
   let gf, ramUsed, fits, perCpu, perGpu;
-  if (!sh.moe) { const need = gpuFixed + sh.embed * mib; fits = need <= hw.vram; gf = 1; ramUsed = sh.embed * mib; perGpu = sh.nonexp; perCpu = 0; }
+  if (hw.mac) { const fr = sh.moe ? sh.nUsed / sh.nExp : 1; fits = gpuFixed + ((sh.moe ? sh.exp : 0) + sh.embed) * mib <= hw.vram; gf = 1;
+                ramUsed = 0; perCpu = 0; perGpu = sh.nonexp + (sh.moe ? sh.exp * fr : 0); }   // unified memory: all of it on the GPU
+  else if (!sh.moe) { const need = gpuFixed + sh.embed * mib; fits = need <= hw.vram; gf = 1; ramUsed = sh.embed * mib; perGpu = sh.nonexp; perCpu = 0; }
   else { gf = Math.max(0, Math.min(1, free / (sh.exp * mib))); const cpuExp = sh.exp * (1 - gf); ramUsed = (cpuExp + sh.embed) * mib;
          fits = free > -1 && ramUsed + 4096 <= hw.ram; const fr = sh.nUsed / sh.nExp; perCpu = cpuExp * fr; perGpu = sh.nonexp + sh.exp * gf * fr; }
-  const tps = d => 1 / (perCpu / (hw.rambw * 1e9 * 0.8 * sh.cpuEff) + (perGpu + sh.kvB * d) / (hw.vrambw * 1e9 * 0.75) + sh.layers * 0.025 / 1000);
+  // Metal: ~80% of the memory bandwidth, ~0.1 ms per layer per token (fitted to community M4 Pro / M5 Max runs of 35B-A3B MoE
+  // models, llm-bench.io 2026-09: 70-86 and 113-141 tok/s); CUDA: 75% and 0.025 ms (the reference box)
+  const eff = hw.mac ? 0.8 : 0.75, ovh = hw.mac ? 0.1 : 0.025;
+  const tps = d => 1 / (perCpu / (hw.rambw * 1e9 * 0.8 * sh.cpuEff) + (perGpu + sh.kvB * d) / (hw.vrambw * 1e9 * eff) + sh.layers * ovh / 1000);
   return { fits, gf, ramUsed, vram: Math.min(hw.vram, gpuFixed + (sh.moe ? sh.exp * gf * mib : sh.embed * mib)), t2: tps(2000), td: tps(Math.min(depth, ctx)) };
 }
 function forBox(sh, hw) {   // as llmbox fit: the recipe's context if it fits, else halve it; a smaller prompt batch before a smaller context
   let p = null, ctx = sh.ctx;
   for (let c = sh.ctx; c >= 8192 && !(p && p.fits); c = c / 2)
     for (const buf of [2100, 1300, 900]) { p = plan(sh, hw, c, sh.deepK * 1000, buf); ctx = c; if (p.fits) break; }
-  return Object.assign(p, { ctx, t2: p.t2 * sh.k2, td: p.td * sh.kd });
+  // the reference box's measured/predicted ratio is about that box (experts streamed over PCIe, its MTP gain): not a Mac's
+  return Object.assign(p, { ctx, t2: p.t2 * (hw.mac ? 1 : sh.k2), td: p.td * (hw.mac ? 1 : sh.kd) });
 }
+function boxFrom(g, ramGB, rambw) {   // a picker entry and the RAM fields -> what plan() needs
+  if (g[3] === "mac") { const mem = Math.min(ramGB, g[4]) * 1024;   // macOS lets the GPU use ~2/3 (small Macs) to 3/4 of unified memory
+    return { name: g[0], gpu: g[0], mac: true, mem, vram: mem * (mem >= 36864 ? 0.75 : 0.67), vrambw: g[2], ram: 0, rambw: g[2] }; }
+  return { name: g[0], gpu: g[0].replace(/ \d+ GB$/, ""), vram: g[1], vrambw: g[2], ram: ramGB * 1024, rambw };
+}
+function boxLabel(b) { return b.mac ? `${b.name} · ${Math.round(b.mem / 1024)} GB unified · ${b.rambw} GB/s` : `${b.name} · ${Math.round(b.ram / 1024)} GB · ${b.rambw} GB/s`; }
 function savedBox(DATA) {
   try { const s = JSON.parse(localStorage.getItem("llmbox-box") || "null"); if (!s || !s.gpu) return null;
     const g = DATA.gpus.find(x => x[0] === s.gpu); if (!g) return null;
-    return { name: s.gpu, gpu: g[0].replace(/ \d+ GB$/, ""), vram: g[1], vrambw: g[2], ram: parseInt(s.ram) * 1024, rambw: parseFloat(s.bwn) || parseFloat(s.bw) }; } catch (e) { return null; }
+    return boxFrom(g, parseInt(s.ram), parseFloat(s.bwn) || parseFloat(s.bw)); } catch (e) { return null; }
 }
 """
 TAB_LINKS = {"MODELS": "index.html", "NEW": "new.html", "COMPARE": "#", "METHOD": "method.html"}   # build() points COMPARE at the top pair
@@ -1250,7 +1275,7 @@ _NEW_JS = r"""
 const $ = s => document.querySelector(s);
 const saved = savedBox(DATA);
 const box = saved || { name: "the reference box", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
-$("#boxname").textContent = box.name === "the reference box" ? `the reference box (${DATA.ref.gpu} · ${Math.round(DATA.ref.ram / 1024)} GB · ${DATA.ref.rambw} GB/s)` : `your box (${box.name} · ${Math.round(box.ram / 1024)} GB · ${box.rambw} GB/s)`;
+$("#boxname").textContent = box.name === "the reference box" ? `the reference box (${DATA.ref.gpu} · ${Math.round(DATA.ref.ram / 1024)} GB · ${DATA.ref.rambw} GB/s)` : `your box (${boxLabel(box)})`;
 const fmtDl = n => n == null ? "—" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : n;
 const cap = v => v > 200 ? "200+" : "~" + Math.round(v);   // above ~200 the formula ignores per-token overheads
 const bits = q => { const m = q.replace("UD-", "").toUpperCase().match(/(?:I?Q|BF|F)(\d+)/); return m ? +m[1] : 16; };
@@ -1520,7 +1545,7 @@ _HW_JS = r"""
 const $ = s => document.querySelector(s);
 const saved = savedBox(DATA);
 const box = saved || { name: "reference box", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
-if (saved) $("#advbox").textContent = `What would make your box faster · ${box.name} · ${Math.round(box.ram / 1024)} GB · ${box.rambw} GB/s`;
+if (saved) $("#advbox").textContent = `What would make your box faster · ${boxLabel(box)}`;
 const cur = forBox(DATA.sh, box);
 const low = hw => forBox(DATA.sh, hw).gf > 0.6;   // most experts on the GPU: outside the measured regime
 function card(title, hw, note) {
@@ -1539,8 +1564,8 @@ $("#boxlbl").textContent = `Boxes · each with ${Math.round(ram / 1024)} GB RAM 
 const m = DATA.measured, rows = [];
 rows.push({ name: `${m.gpu} · ${Math.round(m.ram / 1024)} GB · ${m.rambw} GB/s`, measured: true, t2: m.t2, td: m.td, f: forBox(DATA.sh, { gpu: m.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: m.ram, rambw: m.rambw }) });
 for (const g of DATA.gpus) {
-  const hw = { gpu: g[0], vram: g[1], vrambw: g[2], ram, rambw }, f = forBox(DATA.sh, hw);
-  rows.push({ name: g[0], measured: false, t2: f.t2, td: f.td, f, low: low(hw), mine: saved && saved.name === g[0] });
+  const hw = boxFrom(g, g[3] === "mac" ? g[4] : ram / 1024, rambw), f = forBox(DATA.sh, hw);
+  rows.push({ name: g[3] === "mac" ? `${g[0]} · ${g[4]} GB` : g[0], measured: false, t2: f.t2, td: f.td, f, low: hw.mac || low(hw), mine: saved && saved.name === g[0] });
 }
 rows.sort((a, b) => b.t2 - a.t2);
 const T = (v, pred) => `<span class="tile ${v >= 50 ? "hi" : v >= 25 ? "mid" : "lo"}${pred ? " pred" : ""}">${pred ? "~" : ""}${Math.round(v)}</span>`;
