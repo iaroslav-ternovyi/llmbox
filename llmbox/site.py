@@ -1022,7 +1022,6 @@ def method_page(ref: dict | None) -> str:
                    f'<td>{len(per.get(b, []))}</td><td class="l q">{esc(_GRADING[b].format(**counts))}</td></tr>' for b in BLOCKS)
     n = len(suite.QUICK_ITEMS)
     n6 = sum(1 for *_x, lvl in suite.QUICK_ITEMS if lvl >= 6)
-    nboot = inspect.signature(bench.capability_ci).parameters["n_boot"].default
     ref_name = (ref or {}).get("recipe", {}).get("id") or "the frontier model"
     ref_cap = (ref or {}).get("summary", {}).get("capability")
     body = f'''
@@ -1039,17 +1038,22 @@ Only the model differs.</p>
 <h2>The tasks</h2>
 <div class="tw"><table><tr><th class="l">BLOCK</th><th>WEIGHT</th><th>TASKS</th><th class="l">WHAT AND HOW IT IS GRADED</th></tr>{rows}</table></div>
 <p>The weights are those of suite v{esc(suite.VERSION.split("-")[0])}, set for people who download and run local models, mostly developers.
-Saved runs are re-weighted with them, and each task keeps the score it got. Three more blocks join with the v{esc(suite.VERSION.split("-")[0])} campaign:
-tech help for your own machine, knowledge with "I don't know", and explanations a reader can act on.</p>
-<p>Each kind of task has difficulty levels. The quick suite uses hard ones (level 5), a few normal ones (level 3) so that weak models
+Saved runs are re-weighted with them, and each task keeps the score it got.</p>
+<p>Each kind of task has difficulty levels. The quick suite uses hard ones (levels 4–5), a few easier ones so that weak models
 still register, and {n6} expert tasks (level 6) that local models rarely solve, so the frontier has room above them.
-Tasks are generated from a seed: a new seed gives fresh tasks of the same difficulty, so a model cannot have seen the answers.</p>
+Tasks are generated from a seed: a new seed gives fresh tasks that test the same rules with other names, numbers and files,
+so a model cannot have seen the answers. Most tasks ask several questions and give credit per question, test or constraint.</p>
 
 <h2>How sure the numbers are</h2>
-<p>With about thirty tasks, one lucky or unlucky task moves the score by a few points. The range next to each score is a 95% interval:
-tasks are resampled within each block {nboot:,} times and the middle 95% of the results is shown.</p>
-<p>When two ranges overlap, the difference is not settled, and both models share a rank range such as <b>1–2</b>. More runs narrow the
-ranges. Verdicts: 85% of the frontier or more is excellent, 70% very good, 50% good.</p>
+<p>A model's score is estimated from every answer it gave, in every run on these tasks, with item response theory. Each task family
+(kind × level) has a measured difficulty and sharpness, calibrated on all measured models; a model has an overall level plus its own
+strength or weakness per block. The score is the expected weighted result on the quick suite at that level, and the range next to it
+is its 95% interval. Every further run adds answers and narrows the range.</p>
+<p>A run is either <b>fixed</b> (every task family once: 40–110 minutes, depending on the model's speed) or <b>adaptive</b> (40 minutes:
+after each task, the next one is the task that narrows the range most per second of this model's time, and tasks it always or never
+solves are skipped). Measured on fresh tasks: six runs of one model, three of each kind, agreed within ±2.6 points.</p>
+<p>When two ranges overlap, the difference is not settled, and both models share a rank range such as <b>1–2</b>.
+Verdicts: 85% of the frontier or more is excellent, 70% very good, 50% good.</p>
 
 <h2>Speed</h2>
 <p>Speed is measured with one conversation at a time, the way one person uses the model: a fresh prompt of real code at about 2k, 30k
