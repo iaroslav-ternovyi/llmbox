@@ -61,7 +61,7 @@ print(json.dumps(out))
 
 
 def _run(families: list[str], pythonpath: str | None) -> dict:
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONHASHSEED="0")   # a set printed into metadata must not change the print
     if pythonpath:
         env["PYTHONPATH"] = pythonpath
     cwd = pythonpath or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

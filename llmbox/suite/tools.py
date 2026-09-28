@@ -434,7 +434,8 @@ def dunning(seed: int, level: int = 3) -> Item:
             else:
                 good += got == [want]
         return good / (len(judged) + stray)
-    return _item("dunning", seed, user, check, w, {"expected": {k: [str(x) for x in v] for k, v in exp.items()},
+    return _item("dunning", seed, user, check, w, {"expected": {k: [str(sorted(x)) if isinstance(x, frozenset) else str(x) for x in v]
+                                                                for k, v in exp.items()},   # sorted: a set's order changes per process
                                                     "traps": sorted(traps), "level": level})
 
 
