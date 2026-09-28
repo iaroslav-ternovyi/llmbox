@@ -441,6 +441,11 @@ SAME_TASKS = {"e9f84b50bd85": "8168e071e372",    # v0.10-dev7 (billing questions
               "8713ad469067": "8168e071e372"}    # v0.10-dev7.1-7.3 -> v0.10 (the version string only)
 
 
+# released suite contents (canonical hash -> version): runs of an older tag with the same tasks count as that release
+# even after the working tree has moved on to the next version
+RELEASES = {"8168e071e372": "0.10"}
+
+
 def canonical(content_hash: str | None) -> str | None:
     return SAME_TASKS.get(content_hash, content_hash)
 

@@ -48,7 +48,10 @@ def version_of(su: dict) -> str | None:
     from . import irt, suite
     if "hash" not in _CURRENT:
         _CURRENT["hash"] = irt.canonical(suite.content_hash())
-    return suite.VERSION if su.get("content_hash") and irt.canonical(su["content_hash"]) == _CURRENT["hash"] else su.get("version")
+    ch = irt.canonical(su.get("content_hash")) if su.get("content_hash") else None
+    if ch and ch == _CURRENT["hash"]:
+        return suite.VERSION
+    return irt.RELEASES.get(ch) or su.get("version")
 
 
 def scale(tier: str | None) -> str | None:

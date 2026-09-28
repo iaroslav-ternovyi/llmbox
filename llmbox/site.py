@@ -192,6 +192,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     rs = report.rows(host, suite_version=suite_version, tier=tier)
     ref = next((r for r in rs if r["host"].get("id") == "cloud"), None)
     local = [r for r in rs if r["host"].get("id") != "cloud" and not r.get("partial")]
+    clouds = [r for r in rs if r["host"].get("id") == "cloud" and not r.get("partial")]
     hw = next((r["host"] for r in local), {})
     ref_box = f'{hw.get("gpu", "").replace("NVIDIA GeForce ", "")} · {hw.get("ram_gib", "?")} GB · {hw.get("ram_read_gbs", "?")} GB/s'
     ranks = rank_ranges(local)
@@ -225,9 +226,12 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
                     + "".join(f"<td class='b'>{_tile(r['blocks'].get(b))}</td>" for b in BLOCKS)
                     + f"<td class='spd'>{_tile(tps, f'{deep} long') if tps else '—'}</td><td class='fit'>—</td>"
                     f"<td><label class='pick2' title='pick two to compare'><input type='checkbox' value='{esc(r['id'])}'></label></td></tr>")
-    if ref:
-        body.append("<tr class='ref'><td class='rk'>ref</td><td class='l mod'><span class='m'>" + esc(ref["id"]) + "</span><span class='qt'>cloud · the 100% mark</span></td>"
-                    + "<td class='sco'>100%</td>" + "".join(f"<td class='b'>{ref['blocks'].get(b, 0):.0f}</td>" for b in BLOCKS) + "<td>cloud</td><td></td><td></td></tr>")
+    # cloud models: context for the local ones (same tasks, same scale), not places in a ranking of what runs on a box
+    for r in clouds:
+        note = "cloud · the 100% mark" if ref and r["id"] == ref["id"] else "cloud · for comparison"
+        body.append(f"<tr class='cloud' data-rid='{esc(r['id'])}'><td class='rk'>☁</td><td class='l mod'><span class='m'>{esc(r['id'])}</span><span class='qt'>{note}</span></td>"
+                    f"<td class='sco'>{_tile(r.get('vs_ref'), f'{r['capability']:.1f}', big=True)}</td>" + "".join(f"<td class='b'>{_tile(r['blocks'].get(b))}</td>" for b in BLOCKS)
+                    + "<td class='spd'>cloud</td><td class='fit'>—</td><td></td></tr>")
     qline = ""
     run = next((j for j in q if j["status"] == "running"), None)
     nxt = [j["model"] for j in q if j is not run]
@@ -258,7 +262,9 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     presets = "".join(f'<button class="{"on" if i == 0 else ""}" data-p="{i}" title="{esc(" · ".join(f"{LABEL[b].lower()} {v}" for b, v in w.items()))}">{esc(n)}</button>' for i, (n, w) in enumerate(PRESETS))
     data = dict(shape_data(local, host), presets=[w for _, w in PRESETS], refBlocks=(ref or {}).get("blocks") or {},
                 points=[{"id": r["id"], "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": r["speed"].get("decode_tps"),
-                         "td": float(report._deep(r["speed"])) if report._deep(r["speed"]) != "-" else None, "rank": list(ranks[r["id"]])} for r in local])
+                         "td": float(report._deep(r["speed"])) if report._deep(r["speed"]) != "-" else None, "rank": list(ranks[r["id"]])} for r in local]
+                + [{"id": r["id"], "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": None, "td": None,
+                    "rank": None, "cloud": True} for r in clouds])
     compare_tab = f"compare-{local[0]['id']}-vs-{local[1]['id']}.html" if len(local) > 1 else "#"
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>llmbox · What should I run on my box?</title><link rel="stylesheet" href="osc.css"><style>{_HOME_CSS}</style></head><body>
@@ -315,7 +321,7 @@ _HOME_CSS = """
 .cmp{display:flex;align-items:center;gap:12px}.cmp .btn[aria-disabled=true]{opacity:.4;pointer-events:none}
 .rank th{padding:10px 5px}.rank td{padding:10px 5px}.rank th[data-sort]{cursor:pointer;user-select:none}.rank th[data-sort].on .tip{color:var(--amber)}.rank th[data-sort]:hover,.rank th[data-sort].on{color:var(--amber)}
 .rank td.rk{color:var(--muted);width:44px;font-size:13px;white-space:nowrap}
-.rank tr.gs td{border-top:2px dashed rgba(255,176,0,.6)}.rank td.rk{cursor:help}
+.rank tr.gs td{border-top:2px dashed rgba(255,176,0,.6)}.rank tr.cloud td{opacity:.62}.rank tr.cloud td.rk{font-size:15px}.rank td.rk{cursor:help}
 .rnote{padding:8px 16px 0;font-size:12px;color:var(--faint)}
 .rank td.mod{min-width:170px}.rank td.mod .m{display:block;white-space:nowrap}.rank .qt{display:block;font-size:11px;color:var(--faint)}
 .rank .tile{min-width:44px}.rank td.sco .tile{min-width:70px;font-size:20px}
@@ -403,6 +409,7 @@ function render() {
     if (!row) continue;
     row.querySelector(".sco").innerHTML = tile(p.vs, p.cap.toFixed(1)).replace("<small>", "%<small>");
     row.classList.remove("nofit");
+    if (p.cloud) continue;   // no box to predict for
     if (sh && hwNow && !sameClass(hwNow)) {
       const f = forBox(sh, hwNow); p.t2 = f.t2; p.td = f.td; p.pred = true;
       row.querySelector(".spd").innerHTML = f.fits ? tile(f.t2, `~${fmt(f.td)} long`, true) : "—";
@@ -417,12 +424,13 @@ function render() {
   const tb = document.querySelector(".rank tbody") || document.querySelector(".rank"), refRow = document.querySelector(".rank tr.ref");
   const key = sortBy === "speed" ? p => p.t2 || 0 : sortBy === "score" ? p => p.vs ?? -1 : p => p.blocks[sortBy] ?? -1;
   const by = (a, b) => sortDir * (key(b) - key(a)) || (b.vs ?? -1) - (a.vs ?? -1);
-  const ranked = pts.slice().sort((a, b) => (b.vs ?? -1) - (a.vs ?? -1)).map(p => p.id);
+  const ranked = pts.filter(p => !p.cloud).sort((a, b) => (b.vs ?? -1) - (a.vs ?? -1)).map(p => p.id);
   const byScore = !preset && sortBy === "score" && sortDir === 1;   // group lines only make sense in the score order they were cut in
   let prevG = null;
   pts.slice().sort(by).forEach((p) => { const i = ranked.indexOf(p.id); const row = document.querySelector(`tr[data-rid="${p.id}"]`);
+    if (p.cloud) { tb.insertBefore(row, null); return; }
     row.querySelector(".rk").textContent = preset ? i + 1 : p.rank[0];
-    row.classList.toggle("gs", byScore && prevG !== null && p.rank[3] !== prevG); prevG = p.rank[3]; tb.insertBefore(row, refRow); });
+    row.classList.toggle("gs", byScore && prevG !== null && p.rank[3] !== prevG); prevG = p.rank[3]; tb.insertBefore(row, null); });
   if (fastest && $("#fastest")) { $("#fastest .pk").textContent = fastest.id; $("#fastest .pk").href = `recipe-${fastest.id}.html`;
     $("#fastest .pv").textContent = `${fastest.pred ? "~" : ""}${fmt(fastest.t2)} tok/s${fastest.pred ? " predicted" : ""}`; }
   $("#scatter").innerHTML = scatter(pts);
