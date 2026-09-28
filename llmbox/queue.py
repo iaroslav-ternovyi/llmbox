@@ -116,7 +116,12 @@ def _other_bench_running() -> bool:
     """Another benchmark on the box from this machine. Frontier reference runs (--endpoint claude-code...) do not touch
     the box and do not count."""
     out = subprocess.run(["pgrep", "-fl", "llmbox.cli bench|probe_update.py|speed_probe"], capture_output=True, text=True).stdout
-    return any(int(line.split()[0]) != os.getpid() and "claude-code" not in line for line in out.splitlines() if line.strip())
+    if any(int(line.split()[0]) != os.getpid() and "claude-code" not in line for line in out.splitlines() if line.strip()):
+        return True
+    # speed work on the box (tune / optimize / probe / speed) holds every job, cloud runs too: their explanations are
+    # graded by the reader model on the box, and a reader loaded next to a probe server ran it out of VRAM (2026-09-29)
+    out = subprocess.run(["pgrep", "-fl", "llmbox.cli (tune|optimize|probe|speed) "], capture_output=True, text=True).stdout
+    return any(int(line.split()[0]) != os.getpid() for line in out.splitlines() if line.strip())
 
 
 DENSE_POWER_LIMIT_W = 180   # gpu-box: four Xid 79 crashes, all with a dense model near 250 W (2026-09-14..26)
