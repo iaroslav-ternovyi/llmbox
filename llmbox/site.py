@@ -541,7 +541,7 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
     for (h, rid), recs in runs.items():   # the number of a model = the IRT estimate over all its runs (report._pool)
         tgt = ref if h == "cloud" and ref is not None and (ref.get("recipe") or {}).get("id") == rid else out.get(rid) if h != "cloud" else None
         if tgt is not None:
-            _pool_summary(tgt, recs, h)
+            _pool_summary(tgt, recs, h, current=suite_version == _suite.VERSION)
     return {"local": out, "ref": ref}
 
 
@@ -580,9 +580,9 @@ def _optimize_panel(o: dict | None) -> str:
             f'Found by <code>llmbox tune</code> on this box: {esc(flags)}.</p></section>')
 
 
-def _pool_summary(rec: dict, recs: list[dict], where: str = "box") -> None:
+def _pool_summary(rec: dict, recs: list[dict], where: str = "box", current: bool = False) -> None:
     from . import irt, report as _report
-    p = _report.ranked_now((rec.get("recipe") or {}).get("id") or "?", where)
+    p = _report.ranked_now((rec.get("recipe") or {}).get("id") or "?", where) if current else None
     if p:   # the current suite: every answer that still counts, from any run (report.current_pool)
         s = rec["summary"]
         rec["summary"] = dict(s, capability=p["score"]["capability"], capability_ci95=p["score"]["ci95"], blocks=p["score"]["blocks"],
@@ -665,28 +665,30 @@ def _telemetry_panel(t: dict | None, title: str = "Hardware during the run") -> 
 
 
 def _star(blocks: dict, ref_blocks: dict, lost: dict, W: int = 400) -> str:
-    """Six-axis star with the reference outline; each axis label has a hover listing the tasks this recipe lost there."""
+    """Star with one axis per block and the reference outline; each axis label has a hover listing the tasks this recipe
+    lost there. (It was drawn for six blocks: with nine the rings stayed hexagons and labels landed on each other.)"""
     import math
-    cx, cy, R = W / 2, 150, 105
-    pt = lambda i, v: (cx + R * v / 100 * math.cos(math.radians(-90 + 60 * i)), cy + R * v / 100 * math.sin(math.radians(-90 + 60 * i)))
-    ring = lambda f: " ".join(f"{x:.1f},{y:.1f}" for x, y in (pt(i, f) for i in range(6)))
+    n = len(BLOCKS)
+    cx, cy, R = W / 2, 165, 105
+    ang = lambda i: math.radians(-90 + 360 / n * i)
+    pt = lambda i, v: (cx + R * v / 100 * math.cos(ang(i)), cy + R * v / 100 * math.sin(ang(i)))
+    ring = lambda f: " ".join(f"{x:.1f},{y:.1f}" for x, y in (pt(i, f) for i in range(n)))
     poly = lambda d: " ".join(f"{x:.1f},{y:.1f}" for x, y in (pt(i, d.get(b) or 0) for i, b in enumerate(BLOCKS)))
-    spokes = "".join(f'<line x1="{cx}" y1="{cy}" x2="{pt(i,100)[0]:.1f}" y2="{pt(i,100)[1]:.1f}"/>' for i in range(6))
+    spokes = "".join(f'<line x1="{cx}" y1="{cy}" x2="{pt(i,100)[0]:.1f}" y2="{pt(i,100)[1]:.1f}"/>' for i in range(n))
     dots = "".join(f'<circle cx="{pt(i, blocks.get(b) or 0)[0]:.1f}" cy="{pt(i, blocks.get(b) or 0)[1]:.1f}" r="3.2" fill="{"#ff5a36" if (blocks.get(b) or 0) < 50 else "#FFB000"}"/>' for i, b in enumerate(BLOCKS))
-    svg = (f'<svg viewBox="0 0 {W} 300"><g stroke="#2a2c22" fill="none"><polygon points="{ring(100)}"/><polygon points="{ring(50)}"/>'
+    svg = (f'<svg viewBox="0 0 {W} 330"><g stroke="#2a2c22" fill="none"><polygon points="{ring(100)}"/><polygon points="{ring(50)}"/>'
            f'<polygon points="{ring(75)}" stroke-dasharray="2 4"/>{spokes}</g>'
            + (f'<polygon points="{poly(ref_blocks)}" fill="none" stroke="#E8E4D8" stroke-opacity=".85" stroke-dasharray="4 4" stroke-width="1.2"/>' if ref_blocks else "")
            + f'<polygon points="{poly(blocks)}" fill="rgba(255,176,0,.14)" stroke="#FFB000" stroke-width="2" filter="url(#g)"/>{dots}</svg>')
     labels = []
     for i, b in enumerate(BLOCKS):
-        x, y = pt(i, 128)
+        x, y = pt(i, 136)
         v = blocks.get(b)
         title, text, _ = TIPS[b]
         ls = "".join(f"<li>Lost: {esc(n)}</li>" for n in lost.get(b, [])) or "<li>no task lost here</li>"
-        left = x / W * 100
-        labels.append(f'<div class="ax tip" style="left:calc({left:.1f}% - 40px);top:{y - 14:.0f}px">{LABEL[b]}<b class="{"r" if v is not None and v < 50 else ""}">{"–" if v is None else f"{v:.0f}"}</b>'
+        labels.append(f'<div class="ax tip" style="left:{x / W * 100:.1f}%;top:{y / 330 * 100:.1f}%">{LABEL[b]}<b class="{"r" if v is not None and v < 50 else ""}">{"–" if v is None else f"{v:.0f}"}</b>'
                       f'<span class="pop"><b>{esc(title)}</b>{esc(text)}<ul>{ls}</ul></span></div>')
-    return f'<div class="starw">{svg}{"".join(labels)}<div class="lgd"><span class="amb">━</span> this recipe &nbsp; <span>┅</span> frontier reference</div></div>'
+    return f'<div class="starw"><div class="stari">{svg}{"".join(labels)}</div><div class="lgd"><span class="amb">━</span> this recipe &nbsp; <span>┅</span> frontier reference</div></div>'
 
 
 def _depth_name(k: float) -> str:
@@ -1311,7 +1313,7 @@ _RECIPE_CSS = """
 .line .k{font:600 15px "IBM Plex Sans Condensed"}.line em{font-style:normal;font-size:14px;color:var(--amber)}.line em.r{color:var(--red)}
 .line .s{font-size:12px;color:var(--muted)}
 .starw{position:relative;padding:18px 10px 10px}.starw svg{width:100%;height:auto;display:block}
-.ax{position:absolute;width:80px;font-size:10.5px;letter-spacing:.12em;color:var(--muted);text-align:center;line-height:1.3}.ax>b{display:block;font:400 16px "IBM Plex Mono";color:var(--ink);letter-spacing:0}.ax>b.r{color:var(--red)}
+.stari{position:relative}.ax{position:absolute;transform:translate(-50%,-50%);width:88px;font-size:10.5px;letter-spacing:.12em;color:var(--muted);text-align:center;line-height:1.3}.ax>b{display:block;font:400 16px "IBM Plex Mono";color:var(--ink);letter-spacing:0}.ax>b.r{color:var(--red)}
 .ax .pop{left:-120px;width:320px;text-align:left;letter-spacing:0;font-size:12.5px}.ax .pop b{display:block;font:500 11px "IBM Plex Mono";color:var(--amber);letter-spacing:.14em;text-transform:uppercase}
 .lgd{text-align:center;font-size:11px;color:var(--muted);margin-top:22px}
 .sw{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line2)}.sw>div{padding:14px 22px;font-size:13px;line-height:1.8}.sw>div:first-child{border-right:1px solid var(--line2)}

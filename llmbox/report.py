@@ -157,7 +157,7 @@ def _pool(out: list[dict], best: dict) -> None:
         bank = irt.bank_for(x.get("_hash"))
         if bank is None:
             continue
-        same = [y for y in out if (y["id"], y["host"].get("id"), y["suite"].get("version"), scale(y["suite"].get("tier"))) == key
+        same = [y for y in out if (y["id"], y["host"].get("id"), version_of(y["suite"]), scale(y["suite"].get("tier"))) == key
                 and irt.canonical(y.get("_hash")) == irt.canonical(x.get("_hash"))]
         sc = irt.score_rows(bank, [r for y in same for r in y["_rows"]])
         if not sc["n"]:
