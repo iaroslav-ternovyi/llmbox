@@ -1010,9 +1010,8 @@ render();
 
 
 def method_page(ref: dict | None) -> str:
-    """How the numbers are made. The figures (weights, task counts, versions, resamples, depths) come from the code."""
-    import inspect
-    from . import bench, suite
+    """How the numbers are made. The figures (weights, task counts, versions, depths) come from the code."""
+    from . import suite
     per = {}
     for b, _k, lvl in suite.QUICK_ITEMS:
         per.setdefault(b, []).append(lvl)
