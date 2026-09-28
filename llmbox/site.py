@@ -170,7 +170,9 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
             "gpus": GPUS, "ramKinds": RAM_KINDS}
 
 
-def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str = "quick") -> str:
+def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick") -> str:
+    from . import suite as _s
+    suite_version = suite_version or _s.VERSION
     rs = report.rows(host, suite_version=suite_version, tier=tier)
     ref = next((r for r in rs if r["host"].get("id") == "cloud"), None)
     local = [r for r in rs if r["host"].get("id") != "cloud" and not r.get("partial")]
@@ -224,7 +226,7 @@ def home(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str 
             feed.append(f"<li><span class='live'>●</span> <b>{esc(j['model'])}</b> <span class='q'>{f"measuring {j['done']}/{j['total']}" if j['total'] else "starting"}</span><span class='when'>now</span></li>")
     for rec in sorted(report.results.load_all(host) + report.results.load_all("cloud"), key=lambda x: x.get("created", ""), reverse=True):
         su, s = rec.get("suite", {}), rec.get("summary", {})
-        if rec.get("kind") != "suite" or su.get("version") != suite_version or report.scale(su.get("tier")) != report.scale(tier) \
+        if rec.get("kind") != "suite" or report.version_of(su) != suite_version or report.scale(su.get("tier")) != report.scale(tier) \
                 or su.get("blocks"):
             continue   # only results comparable with the ranking above
         rid = (rec.get("recipe") or {}).get("id", "?")
@@ -488,7 +490,7 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
                 continue
             su = rec.get("suite") or {}
             from . import report as _report
-            if rec.get("kind") != "suite" or su.get("version") != suite_version or _report.scale(su.get("tier")) != _report.scale(tier) \
+            if rec.get("kind") != "suite" or _report.version_of(su) != suite_version or _report.scale(su.get("tier")) != _report.scale(tier) \
                     or su.get("blocks"):
                 continue
             from . import bench
@@ -513,7 +515,7 @@ def _pool_summary(rec: dict, recs: list[dict]) -> None:
     bank = irt.bank_for((rec.get("suite") or {}).get("content_hash"))
     if bank is None:
         return
-    key = lambda r: irt.SAME_TASKS.get((r.get("suite") or {}).get("content_hash"), (r.get("suite") or {}).get("content_hash"))
+    key = lambda r: irt.canonical((r.get("suite") or {}).get("content_hash"))
     same = [r for r in recs if key(r) == key(rec)]
     sc = irt.score_rows(bank, [x for r in same for x in r.get("rows") or []])
     if sc["n"]:
@@ -777,7 +779,7 @@ def run_page(rid: str, rec: dict, ref: dict | None, flags: dict) -> str:
 <section class="panel sum">
  <div><b>{f"{vs:.0f}%" if vs is not None else "—"}</b><span>of frontier · {s["capability"]:.1f} ({s["capability_ci95"][0]:.0f}–{s["capability_ci95"][1]:.0f})</span></div>
  <div><b class="w">{s["solved"]}</b><span>of {s["items"]} tasks solved</span></div>
- <div><b>{sp.get("decode_tps"):.0f}</b><span>tok/s in a short chat · {float(report._deep(sp)):.0f} with a long context</span></div>
+ <div><b>{sp.get("decode_tps"):.0f}</b><span>tok/s in a short chat{f" · {float(report._deep(sp)):.0f} with a long context" if report._deep(sp) not in ("-", "") else ""}</span></div>
  <div><b class="w">{f"{2000/bd[0][1]['prefill_tps']:.1f} s" if bd and bd[0][1].get("prefill_tps") else "—"}</b><span>first word at 2k</span></div>
  <div><b class="w">{s["solved_per_hour"]}</b><span>solved tasks per hour</span></div>
  <div><b class="w" style="color:var(--red)">{sum(1 for f in flags.values() if f["cut"]) + sum(1 for f in flags.values() if f["loop"])}</b><span>replies flagged: {sum(1 for f in flags.values() if f["cut"])} out of thinking room, {sum(1 for f in flags.values() if f["loop"])} looped</span></div></section>
@@ -1087,7 +1089,9 @@ _METHOD_CSS = """
 """
 
 
-def build(out_dir: str, host: str = "box", suite_version: str = "0.9", tier: str = "quick") -> list[str]:
+def build(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick") -> list[str]:
+    from . import suite as _s
+    suite_version = suite_version or _s.VERSION
     """The whole site: home, a page per recipe, per run, hardware per recipe, compare per pair of measured recipes."""
     import itertools
     import json as _json

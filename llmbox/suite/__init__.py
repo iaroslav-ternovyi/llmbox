@@ -15,7 +15,7 @@ from __future__ import annotations
 from . import agentic, code, explain, knowledge, longctx, reasoning, sessions, techhelp, tools, writing
 from .common import Item
 
-VERSION = "0.10-dev7"
+VERSION = "0.10"
 # v0.10: weights for people who download and run local models (developers and enthusiasts; docs/usage-research.md):
 # coding 30 (agentic 20 + single-file functions 10), agents/tools 15, tech help for their own machines 15 ("homelab" is the
 # third-largest local use), knowledge and "I don't know" 10 and explanations 10 (information seeking and advice are the

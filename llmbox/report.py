@@ -39,6 +39,18 @@ def _vkey(v) -> tuple:
     return nums + ((0,) if "-" in str(v) else (1,))
 
 
+_CURRENT: dict = {}
+
+
+def version_of(su: dict) -> str | None:
+    """A run's suite version, where a run of an older tag with the same tasks as the current suite (llmbox/irt.py
+    SAME_TASKS) counts as the current version."""
+    from . import irt, suite
+    if "hash" not in _CURRENT:
+        _CURRENT["hash"] = irt.canonical(suite.content_hash())
+    return suite.VERSION if su.get("content_hash") and irt.canonical(su["content_hash"]) == _CURRENT["hash"] else su.get("version")
+
+
 def scale(tier: str | None) -> str | None:
     """Tiers that report on the same scale: an adaptive run estimates the quick suite's capability (llmbox/irt.py)."""
     return "quick" if tier in ("quick", "adaptive") else tier
@@ -53,7 +65,7 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
         if rec.get("kind") != "suite":
             continue
         su, s = rec.get("suite", {}), rec.get("summary", {})
-        if suite_version and su.get("version") != suite_version:
+        if suite_version and version_of(su) != suite_version:
             continue
         if tier and scale(su.get("tier")) != scale(tier):
             continue
@@ -103,7 +115,7 @@ def _pool(out: list[dict], best: dict) -> None:
         if bank is None:
             continue
         same = [y for y in out if (y["id"], y["host"].get("id"), y["suite"].get("version"), scale(y["suite"].get("tier"))) == key
-                and irt.SAME_TASKS.get(y.get("_hash"), y.get("_hash")) == irt.SAME_TASKS.get(x.get("_hash"), x.get("_hash"))]
+                and irt.canonical(y.get("_hash")) == irt.canonical(x.get("_hash"))]
         sc = irt.score_rows(bank, [r for y in same for r in y["_rows"]])
         if not sc["n"]:
             continue

@@ -152,7 +152,7 @@ def cmd_irt(a: argparse.Namespace) -> None:
     """Calibrate the task families on every full run, report them, or replay adaptive runs on recorded answers."""
     from . import irt, suite
     hs = (a.content_hash or suite.content_hash()).split(",")   # several: versions whose tasks are the same
-    ch = hs[-1]
+    ch = irt.canonical(hs[-1])   # runs of every suite content with the same tasks (irt.SAME_TASKS) share its bank
     resp = irt.responses(hs)
     models = sorted({r.model for r in resp})
     if not resp:
@@ -177,7 +177,7 @@ def cmd_irt(a: argparse.Namespace) -> None:
         for path in a.paths or sorted(_g.glob(os.path.join(hosts.HOME, "results", "*", "*-suite-*.json"))):
             rec = json.load(open(path))
             su = rec.get("suite") or {}
-            if su.get("content_hash") not in hs or su.get("blocks"):
+            if irt.canonical(su.get("content_hash")) != ch or su.get("blocks"):
                 continue
             sc = irt.score_rows(bank, rec["rows"])
             s = rec["summary"]
@@ -533,8 +533,8 @@ def cmd_traces(a) -> None:
 
 
 def cmd_site(a) -> None:
-    from . import site
-    for p in site.build(a.out, host=a.host, suite_version=a.suite_version, tier=a.tier):
+    from . import site, suite
+    for p in site.build(a.out, host=a.host, suite_version=a.suite_version or suite.VERSION, tier=a.tier):
         print(p)
 
 
@@ -695,7 +695,7 @@ def main(argv: list[str] | None = None) -> None:
     st = sub.add_parser("site", help="build the static site (home, recipe, run, hardware, compare pages) from saved results into a folder")
     st.add_argument("--out", default="~/.llmbox/site")
     st.add_argument("--host", default="box")
-    st.add_argument("--suite-version", default="0.9")
+    st.add_argument("--suite-version", help="default: the current suite version")
     st.add_argument("--tier", default="quick")
     st.set_defaults(fn=cmd_site)
 

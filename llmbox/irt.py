@@ -56,6 +56,7 @@ def responses(content_hash: str | list | None = None, hosts_: tuple = ("box", "c
     """Every graded task of every full suite run (optionally of some exact suite contents: a hash or a list of them,
     e.g. two versions whose tasks are the same and whose grader fix was applied to the older runs by regrade)."""
     hashes = {content_hash} if isinstance(content_hash, str) else set(content_hash or [])
+    hashes = set().union(*(equivalent(h) for h in hashes)) if hashes else hashes
     out = []
     for h in hosts_:
         for f in sorted(glob.glob(os.path.join(HOME, "results", h, "*.json"))):
@@ -347,14 +348,26 @@ def simulate(bank: Bank, truth: dict, true_seconds: dict, prior: tuple = PRIOR, 
     return traj
 
 
-# suite contents with the same tasks (a grader fix applied to the older runs by `llmbox regrade --reader`): one bank
-SAME_TASKS = {"e9f84b50bd85": "8713ad469067"}   # v0.10-dev7 -> dev7.1 (billing questions state the uptime)
+# suite contents with the same tasks, mapped to the canonical one whose bank they share: a grader fix applied to the older
+# runs by `llmbox regrade --reader`, or only the version string changing
+SAME_TASKS = {"e9f84b50bd85": "8168e071e372",    # v0.10-dev7 (billing questions did not state the uptime; regraded)
+              "8713ad469067": "8168e071e372"}    # v0.10-dev7.1-7.3 -> v0.10 (the version string only)
+
+
+def canonical(content_hash: str | None) -> str | None:
+    return SAME_TASKS.get(content_hash, content_hash)
+
+
+def equivalent(content_hash: str) -> set:
+    """Every suite content with the same tasks as this one (itself included)."""
+    c = canonical(content_hash)
+    return {c} | {h for h, t in SAME_TASKS.items() if t == c}
 
 
 def bank_for(content_hash: str | None) -> Bank | None:
     if not content_hash:
         return None
-    return load(SAME_TASKS.get(content_hash, content_hash))
+    return load(canonical(content_hash))
 
 
 def score_rows(bank: Bank, rows: list[dict], prior: tuple | None = None) -> dict:
