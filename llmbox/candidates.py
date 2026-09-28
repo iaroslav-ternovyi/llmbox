@@ -120,7 +120,7 @@ def discover(n: int = 60, days: int = RECENT_DAYS) -> list[dict]:
             return None
         f = sorted(files, key=D._rank)[0]
         cp = os.path.join(HOME, "shapes", os.path.basename(f.name) + ".json")
-        if os.path.exists(cp):
+        if os.path.exists(cp) and not E.stale(json.load(open(cp))):
             sh = E.ModelShape(**json.load(open(cp)))
         else:
             try:

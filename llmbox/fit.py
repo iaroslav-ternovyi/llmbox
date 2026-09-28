@@ -66,7 +66,7 @@ def shape_for(r: dict, host=None) -> E.ModelShape:
     m = r["model"]
     fname = os.path.basename(m.get("file") or m.get("path") or "")
     cp = os.path.join(SHAPES, fname + ".json")
-    if fname and os.path.exists(cp):
+    if fname and os.path.exists(cp) and not E.stale(json.load(open(cp))):
         return E.ModelShape(**json.load(open(cp)))
     sh = None
     if m.get("hf_repo") and m.get("file"):

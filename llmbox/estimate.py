@@ -55,6 +55,8 @@ class ModelShape:
     expert_bytes_by_layer: dict = field(default_factory=dict)
     nonexpert_bytes: int = 0          # everything read on the GPU per token (excl. embedding table, MTP layers)
     embed_bytes: int = 0
+    sparse_bytes: int = 0             # per-layer token tables (Gemma PLE, Qwen3.8-Flash-Next n-grams): a few rows per
+                                      # token, left mmapped on disk - neither GPU weights nor RAM the model must hold
     mtp_bytes: int = 0
     recurrent_state_bytes: int = 0    # per sequence, for hybrid SSM / linear-attention layers
     swa_layers: int = 0               # attention layers with a sliding window (their KV stops growing at swa_window)
@@ -87,6 +89,14 @@ class ModelShape:
         if self.kv_swa_dim and not self.mla_kv_dim:
             return self.kv_swa_dim * w * KV_BYTES.get(kv_type, 2.0)
         return self.swa_layers * w * self._kv_per_layer(kv_type)
+
+
+# architectures with per-layer token tables: a shape cached before sparse_bytes existed counted them as GPU weights
+SPARSE_ARCHES = {"qwen4exp", "gemma4", "gemma3n"}
+
+
+def stale(cached: dict) -> bool:
+    return cached.get("arch") in SPARSE_ARCHES and "sparse_bytes" not in cached
 
 
 def analyze(headers: list[GGUFHeader]) -> ModelShape:
@@ -124,6 +134,9 @@ def analyze(headers: list[GGUFHeader]) -> ModelShape:
             continue
         if t.name == "token_embd.weight":
             s.embed_bytes += t.nbytes
+            continue
+        if t.name.startswith("per_layer_token_embd"):
+            s.sparse_bytes += t.nbytes
             continue
         if layer is not None:
             layer_names.setdefault(layer, set()).add(t.name.split(".", 2)[2])
@@ -170,7 +183,7 @@ def analyze(headers: list[GGUFHeader]) -> ModelShape:
         s.kv_swa_dim = sum(int(heads[i] or 0) * (ks + vs) for i in range(n_layers) if has_attn[i] and swa[i])
     if win and any(swa[i] and has_attn[i] for i in range(n_layers)):
         s.swa_window, s.swa_layers = win, sum(1 for i in range(n_layers) if swa[i] and has_attn[i])
-    embed_params = sum(t.n_elements for t in tensors if t.name == "token_embd.weight")
+    embed_params = sum(t.n_elements for t in tensors if t.name == "token_embd.weight" or t.name.startswith("per_layer_token_embd"))
     mtp_params = sum(t.n_elements for t in tensors if _in(t.name, mtp_ids))
     base = s.total_params - embed_params - mtp_params
     if s.is_moe:
