@@ -42,7 +42,20 @@ def run_chat(base_url: str, model: str, messages: list[dict], tools: list[dict] 
         body = {"model": model, "messages": msgs, "max_tokens": max_tokens, **(extra or {})}
         if tools:
             body["tools"] = tools
-        r = _post(base_url.rstrip("/") + "/v1/chat/completions", body, api_key, timeout)
+        r = None
+        for attempt in range(3):   # a server error (e.g. llama.cpp cannot parse the model's tool-call format) is retried:
+            try:                   # sampling can give a valid reply the next time
+                r = _post(base_url.rstrip("/") + "/v1/chat/completions", body, api_key, timeout)
+                break
+            except ChatError as e:
+                if not str(e).startswith(("HTTP 500", "HTTP 502", "HTTP 503")) or attempt == 2:
+                    if _step:   # after some steps (e.g. a long agent session overflowing the context): stop here
+                        r = None   # and let the task be graded on the state reached, like at a deadline
+                        break
+                    raise
+        if r is None:
+            finish = "server_error"
+            break
         ch = r["choices"][0]
         msg = ch["message"]
         finish = ch.get("finish_reason")
