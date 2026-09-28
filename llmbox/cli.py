@@ -294,7 +294,7 @@ def cmd_bench(a: argparse.Namespace) -> None:
         pr = tuple(float(x) for x in a.prior.split(",")) if a.prior else None   # default: the bank's population prior
         res = bench.run_adaptive(a.endpoint, a.model, bank, budget_min=a.budget, target=a.target, prior=pr,
                                  seed0=7000 + 1000 * a.seed,   # --seed: fresh instances for a repeated adaptive run
-                                 api_key=None, progress=lambda m: print(m, flush=True), jsonl_path=jl)
+                                 api_key=None, progress=lambda m: print(m, flush=True), jsonl_path=jl, explore=a.explore)
     else:
         res = bench.run(a.endpoint, a.model, tier=a.tier, seed0=a.seed, blocks=a.block, jsonl_path=jl,
                         progress=lambda m: print(m, flush=True), resume=a.resume, rerun=a.rerun, parallel=a.parallel)
@@ -673,6 +673,8 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--budget", type=float, default=45, help="adaptive: minutes (default 45)")
     b.add_argument("--target", type=float, default=5, help="adaptive: stop when the 95%% interval is within +-this many points (default 5)")
     b.add_argument("--prior", help="adaptive: 'theta,sd' to start from (default 0,1.5); e.g. the base model's theta")
+    b.add_argument("--explore", type=int, help="adaptive: new task families (no calibration yet) to try; default 6. A strong "
+                   "cloud model calibrating new levels: 20+, every task goes to them once each block has its minimum")
     b.add_argument("--bank", help="adaptive: content hash of the calibrated bank to use (default: this suite's)")
     b.set_defaults(fn=cmd_bench)
 

@@ -418,7 +418,7 @@ EXPLORE = 6   # provisional families tried per adaptive run (v0.11: new tools le
 
 def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, target: float = 5.0, prior: tuple | None = None,
                  seed0: int = 7000, api_key: str | None = None, progress=print, jsonl_path: str | None = None,
-                 min_per_block: int = 1, max_per_family: int = 2) -> dict:
+                 min_per_block: int = 1, max_per_family: int = 2, explore: int | None = None) -> dict:
     """Adaptive run (llmbox/irt.py): after every task, the family with the most information per expected second at the
     current estimate; fresh seeds, so a family can be drawn again (at most max_per_family times). Stops when the 95%
     interval of the capability is within +-target points or the time budget is spent. The capability is reported on
@@ -428,6 +428,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
     # task at most, EXPLORE per run; the estimate and the stopping rule use the calibrated families only
     prov = set(bank.provisional)
     full_bank, bank = bank, irt.subset(bank, set(bank.a) - prov) if prov else bank
+    quota = EXPLORE if explore is None else explore   # a calibration run of a strong cloud model explores more
     explored: list = []
     obs, rows, counts, per_fam = [], [], {}, {}
     out = open(jsonl_path, "a") if jsonl_path else None
@@ -441,11 +442,11 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         # explanations are graded by the reader after the loop: until then they count as answered at their predicted
         # score, so the selection neither re-picks explain for lack of news nor stops on an interval it cannot have yet
         on_target = bool(obs) and (sel["hi"] - sel["lo"]) / 2 <= target
-        if spent >= budget_min * 60 or (on_target and (not prov or len(explored) >= min(EXPLORE, len(prov)))):
+        if spent >= budget_min * 60 or (on_target and (not prov or len(explored) >= min(quota, len(prov)))):
             break
         short = [b for b in bank.weights if counts.get(b, 0) < min_per_block]
         cost = irt.cost_model(bank, [(r["family"], r["seconds"]) for r in rows])
-        if prov and not short and len(explored) < EXPLORE and (n % 3 == 2 or on_target):   # a new family near this model's level
+        if prov and not short and len(explored) < quota and (n % 3 == 2 or on_target or quota > EXPLORE):   # a new family near this model's level
             fam = irt.next_family(full_bank, sel["theta"], set(bank.a) | set(explored), slowness)
             if fam:
                 explored.append(fam)
