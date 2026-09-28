@@ -562,6 +562,168 @@ def optimize_records(host: str) -> dict:
     return out
 
 
+# flags only the reference box needs (its port manager, RAM budget, core count, load mode)
+_BOX_ONLY = {"--port": 1, "--cache-ram": 1, "--threads": 1, "--load-mode": 1}
+# DRY flags that come with llmbox's --dry-think-only patch: without the patch they would penalize the answer too
+_DRY = {"--dry-multiplier", "--dry-base", "--dry-allowed-length", "--dry-penalty-last-n"}
+
+
+def portable_args(r: dict) -> tuple[list[str], list[str]]:
+    """The recipe's llama-server flags as anyone can run them: the model by file name, without what only the reference
+    box or llmbox's patched build needs. Returns (args, what was left out)."""
+    from . import recipe as rc
+    a = rc.server_args(r)
+    out, left = [], []
+    i = 0
+    while i < len(a):
+        x = a[i]
+        if x in _BOX_ONLY:
+            i += 1 + _BOX_ONLY[x]
+        elif x == "--dry-think-only":
+            left.append("the repetition penalty inside the thinking only (a llmbox patch)")
+            i += 1
+        elif x in _DRY and "--dry-think-only" in a:
+            i += 2
+        elif x == "--reasoning-loop":
+            left.append("the reasoning-loop detector (a llmbox patch)")
+            i += 2
+        elif x == "-m":
+            out += ["-m", "@MODEL@/" + os.path.basename(a[i + 1])]   # the caller puts its models folder in
+            i += 2
+        else:
+            out.append(x)
+            i += 1
+    return out, left
+
+
+def _cmd_lines(args: list[str], win: bool = False) -> str:
+    """One flag with its value per line, quoted for the shell (Windows: cmd.exe quoting and ^ continuations)."""
+    import shlex
+
+    def q(v: str) -> str:
+        if v == "${PORT}":   # llama-swap's macro, substituted before the command runs
+            return v
+        if v.startswith("@MODEL@/"):
+            return ("C:\\models\\" if win else "~/models/") + v[len("@MODEL@/"):]
+        if not win:
+            return shlex.quote(v)
+        return '"' + v.replace('"', '\\"') + '"' if any(c in v for c in ' "{}') else v
+    parts, cur = [], []
+    for x in args:
+        if x.startswith("-") and not x.lstrip("-").replace(".", "").isdigit() and cur:
+            parts.append(" ".join(cur))
+            cur = []
+        cur.append(q(x))
+    if cur:
+        parts.append(" ".join(cur))
+    exe = "llama-server.exe" if win else "llama-server"
+    return (" ^\n  " if win else " \\\n  ").join([exe] + parts)
+
+
+def _model_now(host: str, rid: str) -> tuple[dict, bool | None]:
+    """The recipe's model block as it is now (a repo fixed since the run) and whether that exact file is on Hugging Face
+    (None: could not ask)."""
+    from . import hf, recipe as rc
+    try:
+        m = rc.load(host, rid)["model"]
+    except (OSError, ValueError):
+        return {}, None
+    try:
+        fs = hf.list_gguf(m["hf_repo"], ttl=86400)
+        names = {f.name for f in fs} | {os.path.basename(p) for f in fs for p in f.parts}
+        return m, os.path.basename(m.get("file") or "") in names or m.get("file") in names
+    except Exception:
+        return m, None
+
+
+def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool | None = None) -> str:
+    """Run it yourself: the measured settings for llama-server (Linux, macOS, Windows), llama-swap, LM Studio and Ollama,
+    each with a copy button. Only settings with a real equivalent in an app are listed there; what it lacks is said."""
+    r = rec.get("recipe") or {}
+    m = rec.get("model") or r.get("model") or {}
+    if not r.get("placement") or not m.get("file"):
+        return ""
+    args, left = portable_args(r)
+    p, sp, smp = r["placement"], r.get("speculative") or {}, r.get("sampling") or {}
+    kw = (r.get("chat") or {}).get("template_kwargs") or {}
+    m = dict(m, **{k: v for k, v in (model_now or {}).items() if k in ("hf_repo",) and v})   # a repo fixed in the recipe since the run
+    fname, repo = os.path.basename(m["file"]), m.get("hf_repo") or ""
+    ctx = p.get("ctx") or 0
+    kv = p.get("kv_type") or "f16"
+    dl = f"https://huggingface.co/{repo}/resolve/main/{m['file']}" if repo and on_hf is not False else ""
+    swap = ("models:\n  " + rid + ":\n    cmd: |\n      "
+            + _cmd_lines(["--port", "${PORT}"] + args).replace("~/models/", "/path/to/models/").replace("\n", "\n      "))
+    names = [("temp", "Temperature", "temperature"), ("top_p", "Top P", "top_p"), ("top_k", "Top K", "top_k"),
+             ("min_p", "Min P", "min_p"), ("presence_penalty", "Presence penalty", "presence_penalty"),
+             ("repeat_penalty", "Repeat penalty", "repeat_penalty")]
+    think = ", ".join(f"{k} = {json.dumps(v)}" for k, v in kw.items())
+    max_tok = smp.get("max_tokens", 32768)
+    try:
+        from . import fit as _F
+        moe = _F.shape_for(r).is_moe
+    except Exception:
+        moe = False
+    lms = ([("Context Length", f"{ctx:,}" if ctx else "the model's maximum"), ("GPU Offload", "all layers")]
+           + ([("MoE expert weights", "on the CPU when the model is bigger than your VRAM (LM Studio's option to keep MoE expert weights on the CPU)")] if moe else [])
+           + [
+            ("Flash Attention", "on"), ("K Cache / V Cache quantization", kv if kv != "f16" else "off (f16)")]
+           + [(label, smp[k]) for k, label, _ in names if k in smp]
+           + [("Max response length", f"{max_tok:,} tokens")] + ([("Thinking (chat template)", think)] if think else []))
+    lms_txt = "\n".join(f"{k}: {v}" for k, v in lms)
+    quant = _quant(fname).split(" ")[0]
+    mf = ([f"FROM hf.co/{repo}:{quant}" if repo else f"FROM ./{fname}", f"PARAMETER num_ctx {ctx or 32768}"]
+          + [f"PARAMETER {o} {smp[k]}" for k, _, o in names if k in smp] + [f"PARAMETER num_predict {max_tok}"])
+    oll_kv = kv if kv in ("f16", "q8_0", "q4_0") else "q8_0"
+    oll = "\n".join(mf) + f"\n\n# the server:\nOLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE={oll_kv} ollama serve\n# then:\nollama create {rid} -f Modelfile"
+    lacks = ", ".join(x for x in ("MTP speculative decoding" if sp.get("type") == "draft-mtp" else "",
+                                   "the anti-loop logit bias" if "--logit-bias" in args else "",
+                                   "the thinking budget" if "--reasoning-budget" in args else "") if x)
+    left_note = (" Left out: " + "; ".join(left) + " - the model runs without it and may loop a little more often.") if left else ""
+
+    def tab(key: str, body: str, note: str, on: bool = False) -> str:
+        return (f'<div class="rp{" on" if on else ""}" data-t="{key}"><p class="q rpn">{esc(note)}</p>'
+                f'<pre class="cp">{esc(body)}</pre><button class="btn cpy" type="button">COPY</button></div>')
+    made = ("" if on_hf is not False else
+            f" This file was made on the reference box - the <a href=\"https://huggingface.co/{esc(repo)}\" rel=\"noopener\">{esc(repo)}</a> "
+            "GGUF with Qwen3.6's MTP layer grafted in for speculative decoding. With the plain file from that repo, leave out the "
+            "two --spec lines: same answers, a little slower" if "graft" in fname else
+            " This exact file is not on Hugging Face under this name")
+    head = (f'<p class="q" style="margin:0 0 12px">File <b>{esc(fname)}</b>'
+            + (f' · <a href="{esc(dl)}" rel="noopener">download it from Hugging Face</a>' if dl else "") + made
+            + ". The settings this model was measured with. On another box <code>--fit</code> places the weights for it by itself.</p>")
+    return ('<section class="panel pad run"><div class="lbl">Run it yourself</div>' + head
+            + '<div class="rtabs" role="tablist">'
+            + "".join(f'<button type="button" class="{"on" if i == 0 else ""}" data-t="{k}">{t}</button>' for i, (k, t) in
+                      enumerate([("srv", "llama-server"), ("win", "Windows"), ("swap", "llama-swap"), ("lms", "LM Studio"), ("oll", "Ollama")]))
+            + "</div>"
+            + tab("srv", _cmd_lines(args), "Linux and macOS (Metal), with a current llama.cpp." + left_note, on=True)
+            + tab("win", _cmd_lines(args, win=True), "cmd.exe, with llama-server.exe from a llama.cpp release (the CUDA build for NVIDIA cards)." + left_note)
+            + tab("swap", swap, "An entry for llama-swap's config.yaml: one server per model, started when a request asks for it.")
+            + tab("lms", lms_txt, "LM Studio on macOS or Windows: the model's load and inference settings."
+                  + (f" LM Studio has no {lacks}: expect less speed or more looping than measured here." if lacks else ""))
+            + tab("oll", oll, "Ollama: a Modelfile and the server's environment." + (f" Ollama has no {lacks}." if lacks else ""))
+            + "</section>")
+
+
+RUN_JS = r"""
+document.querySelectorAll(".run").forEach(sec => {
+  sec.querySelectorAll(".rtabs button").forEach(b => b.addEventListener("click", () => {
+    sec.querySelectorAll(".rtabs button").forEach(x => x.classList.toggle("on", x === b));
+    sec.querySelectorAll(".rp").forEach(x => x.classList.toggle("on", x.dataset.t === b.dataset.t)); }));
+  sec.querySelectorAll(".cpy").forEach(b => b.addEventListener("click", async () => {
+    const t = b.parentElement.querySelector("pre").innerText;
+    try { await navigator.clipboard.writeText(t); b.textContent = "COPIED"; } catch (e) { b.textContent = "SELECT AND COPY"; }
+    setTimeout(() => b.textContent = "COPY", 1500); }));
+});
+"""
+RUN_CSS = """
+.run .rtabs{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}.run .rtabs button{background:none;border:1px solid transparent;color:var(--muted);font:12px "IBM Plex Mono";padding:5px 10px;cursor:pointer}
+.run .rtabs button.on{color:var(--amber);border-color:var(--amber-dim)}.run .rp{display:none;position:relative}.run .rp.on{display:block}
+.run pre.cp{background:#0b0c09;border:1px solid var(--line);padding:12px 14px;font-size:12px;line-height:1.6;color:var(--soft);overflow-x:auto;white-space:pre;margin:6px 0 0}
+.run .cpy{position:absolute;top:34px;right:8px;font-size:11px;padding:4px 10px}.run .rpn{margin:0}
+"""
+
+
 def _optimize_panel(o: dict | None) -> str:
     if not o:
         return ""
@@ -734,7 +896,7 @@ def _human(v) -> str:
 
 
 def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict, flags: dict, n_measured: int, n_total: int,
-                opt: dict | None = None) -> str:
+                opt: dict | None = None, model_now: dict | None = None, on_hf: bool | None = None) -> str:
     s, sp = rec["summary"], rec["summary"]["speed"]
     bd = sp.get("by_depth") or {}
     vs = _vs(rec, ref)
@@ -814,11 +976,12 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict
  <div>{_star(s["blocks"], (ref or {}).get("summary", {}).get("blocks") or {}, lost)}</div></div>{sw}</section>
 <section class="panel pad"><div class="lbl">Speed as the context grows</div>{_depth_bars([(rid, bd)])}
  <p class="q" style="margin-top:16px">Measured on the reference box ({esc((rec["host"].get("gpu") or "").replace("NVIDIA GeForce ", ""))} · {rec["host"].get("ram_gib")} GB · {rec["host"].get("ram_read_gbs")} GB/s). <a href="hardware-{esc(rid)}.html">Other boxes →</a></p></section>
+{_run_panel(rid, rec, model_now, on_hf)}
 {_optimize_panel(opt)}
 <section class="panel recipe"><div class="lbl">Settings</div>{recipe_html}</section>
 {_telemetry_panel(rec.get("telemetry"))}
 <section class="panel runs"><div class="lbl">Runs</div>{runs_html}</section>'''
-    return _page(f"llmbox · {rid}", "MODELS", body, _RECIPE_CSS)
+    return _page(f"llmbox · {rid}", "MODELS", body, _RECIPE_CSS + RUN_CSS, RUN_JS)
 
 
 def _argv_lines(argv: list[str]) -> list[str]:
@@ -1266,7 +1429,8 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
         written.append(p)
     for rid in order:
         rec = local[rid]
-        w(f"recipe-{rid}.html", recipe_page(rid, rec, ref, local, ranks, flags[rid], len(local), n_total, opts.get(rid)))
+        now, avail = _model_now(host, rid)
+        w(f"recipe-{rid}.html", recipe_page(rid, rec, ref, local, ranks, flags[rid], len(local), n_total, opts.get(rid), now, avail))
         w(f"run-{rec['id'][:8]}.html", run_page(rid, local_run[rid], ref, flags[rid]))
         if rid in data["recipes"]:
             w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
