@@ -3,7 +3,7 @@
 Pages are built only from records: suite results, the job queue (what is being measured now) and speed probes. Nothing
 on a page is typed by hand, so the site cannot drift from the data. Structure follows what users of benchmark sites
 value: UserBenchmark (ranked tiles, your box among the same hardware), Artificial Analysis (quality x speed with a
-Pareto line), LocalScore (time to first token), LMArena (rank ranges when confidence intervals overlap).
+Pareto line), LocalScore (time to first token), LMArena (ties when a difference is inside its margin of error).
 """
 from __future__ import annotations
 
@@ -95,14 +95,30 @@ def _quant(fname: str | None) -> str:
     return (m.group(0) if m else (fname or "")[:24]) + extra
 
 
+def _se(r: dict, up: bool) -> float:
+    """Standard error of a score from its 95% interval, on the side facing the other model (intervals are skewed)."""
+    lo, hi = r["ci"]
+    return max(0.3, ((hi - r["capability"]) if up else (r["capability"] - lo)) / 1.96)
+
+
+def surely_better(a: dict, b: dict) -> bool:
+    """a is measurably better than b: the difference is outside its own 95% margin. Stricter than 'the two intervals do
+    not overlap' is loose: overlapping intervals can still hold a real difference."""
+    d = a["capability"] - b["capability"]
+    return d > 1.96 * (_se(a, False) ** 2 + _se(b, True) ** 2) ** 0.5
+
+
 def rank_ranges(rs: list[dict]) -> dict:
-    """LMArena-style rank: a model ranks between (1 + models surely better) and (models not surely worse)."""
-    out = {}
-    for r in rs:
-        lo, hi = r["ci"]
-        better = sum(1 for o in rs if o is not r and o["ci"][0] > hi)
-        not_worse = sum(1 for o in rs if o is not r and o["ci"][1] >= lo)
-        out[r["id"]] = (1 + better, 1 + not_worse)
+    """{id: (place, first tied place, last tied place, group)}: the place by score, the places a model is not
+    measurably apart from, and groups cut where the next model is measurably worse than the top of the current group."""
+    order = sorted(rs, key=lambda r: -(r["capability"] or 0))
+    out, group, head = {}, 0, None
+    for i, r in enumerate(order):
+        if head is not None and surely_better(head, r):
+            group, head = group + 1, r
+        head = head or r
+        tied = [j for j, o in enumerate(order) if o is r or not (surely_better(o, r) or surely_better(r, o))]
+        out[r["id"]] = (i + 1, min(tied) + 1, max(tied) + 1, group)
     return out
 
 
@@ -201,8 +217,9 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     body = []
     for i, r in enumerate(local, 1):
         tps, deep = r["speed"].get("decode_tps"), report._deep(r["speed"])
-        lo, hi = ranks[r["id"]]
-        body.append(f"<tr data-rid='{esc(r['id'])}'><td class='rk'>{lo if lo == hi else f'{lo}–{hi}'}</td>"
+        pl, lo, hi, grp = ranks[r["id"]]
+        tip = f"not measurably apart from places {lo}–{hi}" if lo != hi else "measurably apart from every other model"
+        body.append(f"<tr data-rid='{esc(r['id'])}' data-g='{grp}'><td class='rk' title='{tip}'>{pl}</td>"
                     f"<td class='l mod'><a class='m' href='recipe-{esc(r['id'])}.html'>{esc(r['id'])}</a><span class='qt'>{esc(_quant(r['file']))}</span></td>"
                     f"<td class='sco'>{_tile(r.get('vs_ref'), f'{r['capability']:.1f}', big=True)}</td>"
                     + "".join(f"<td class='b'>{_tile(r['blocks'].get(b))}</td>" for b in BLOCKS)
@@ -260,7 +277,8 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
 <section class="panel rankp"><div class="lbl">Ranking · suite v{esc(suite_version)} tasks · v{esc(_suite.VERSION.split("-")[0])} weights</div>
  <div class="rhead"><div class="seg" role="group" aria-label="rank by"><span class="sc">Rank by</span>{presets}</div>
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
- <div class="tw"><table class="rank">{head}{''.join(body)}</table></div>{qline}</section>
+ <div class="tw"><table class="rank">{head}{''.join(body)}</table></div>
+ <p class="rnote">Places by score. A dashed line: every model above it is measurably better than the models below; inside a group the order is not settled yet (hover a place for its tie range).</p>{qline}</section>
 <div class="below">
  <section class="panel chart"><div class="lbl">Smarter vs faster</div><div id="scatter">{_scatter(local)}</div>
   <p class="legend"><svg width="12" height="16" viewBox="0 0 12 16"><g stroke="#FFB000" stroke-opacity=".6" stroke-width="1.5"><line x1="6" y1="1" x2="6" y2="15"/><line x1="1" y1="1" x2="11" y2="1"/><line x1="1" y1="15" x2="11" y2="15"/></g></svg>
@@ -297,6 +315,8 @@ _HOME_CSS = """
 .cmp{display:flex;align-items:center;gap:12px}.cmp .btn[aria-disabled=true]{opacity:.4;pointer-events:none}
 .rank th{padding:10px 5px}.rank td{padding:10px 5px}.rank th[data-sort]{cursor:pointer;user-select:none}.rank th[data-sort].on .tip{color:var(--amber)}.rank th[data-sort]:hover,.rank th[data-sort].on{color:var(--amber)}
 .rank td.rk{color:var(--muted);width:44px;font-size:13px;white-space:nowrap}
+.rank tr.gs td{border-top:2px dashed rgba(255,176,0,.6)}.rank td.rk{cursor:help}
+.rnote{padding:8px 16px 0;font-size:12px;color:var(--faint)}
 .rank td.mod{min-width:170px}.rank td.mod .m{display:block;white-space:nowrap}.rank .qt{display:block;font-size:11px;color:var(--faint)}
 .rank .tile{min-width:44px}.rank td.sco .tile{min-width:70px;font-size:20px}
 .rank tr.ref td{color:var(--faint);font-size:13px}.rank tr.ref .m{color:var(--muted);font-weight:500}
@@ -398,8 +418,11 @@ function render() {
   const key = sortBy === "speed" ? p => p.t2 || 0 : sortBy === "score" ? p => p.vs ?? -1 : p => p.blocks[sortBy] ?? -1;
   const by = (a, b) => sortDir * (key(b) - key(a)) || (b.vs ?? -1) - (a.vs ?? -1);
   const ranked = pts.slice().sort((a, b) => (b.vs ?? -1) - (a.vs ?? -1)).map(p => p.id);
+  const byScore = !preset && sortBy === "score" && sortDir === 1;   // group lines only make sense in the score order they were cut in
+  let prevG = null;
   pts.slice().sort(by).forEach((p) => { const i = ranked.indexOf(p.id); const row = document.querySelector(`tr[data-rid="${p.id}"]`);
-    row.querySelector(".rk").textContent = preset ? i + 1 : (p.rank[0] === p.rank[1] ? p.rank[0] : `${p.rank[0]}–${p.rank[1]}`); tb.insertBefore(row, refRow); });
+    row.querySelector(".rk").textContent = preset ? i + 1 : p.rank[0];
+    row.classList.toggle("gs", byScore && prevG !== null && p.rank[3] !== prevG); prevG = p.rank[3]; tb.insertBefore(row, refRow); });
   if (fastest && $("#fastest")) { $("#fastest .pk").textContent = fastest.id; $("#fastest .pk").href = `recipe-${fastest.id}.html`;
     $("#fastest .pv").textContent = `${fastest.pred ? "~" : ""}${fmt(fastest.t2)} tok/s${fastest.pred ? " predicted" : ""}`; }
   $("#scatter").innerHTML = scatter(pts);
@@ -678,8 +701,8 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict
             w = " — thinking looped" if f.get("loop") else " — ran out of thinking room" if f.get("cut") else ""
             lost.setdefault(r["block"], []).append(f'{r["kind"].replace("_", " ")} {r["id"].rsplit(".", 2)[-2]} ({r["score"]*100:.0f}){w}')
             why.setdefault(r["block"], []).append("looped" if f.get("loop") else "out of thinking room" if f.get("cut") else "wrong answer")
-    lo, hi = ranks.get(rid, (1, 1))
-    rk = f"{lo}" if lo == hi else f"{lo}–{hi}"
+    pl, lo, hi, _ = ranks.get(rid, (1, 1, 1, 0))
+    rk = f"{pl}" + (f"<br><span class='q'>tied with places {lo}–{hi}</span>" if lo != hi else "")
     m = rec.get("model") or {}
     rcp = rec.get("recipe") or {}
     lines = [
@@ -733,7 +756,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict
  <div class="meta">{esc(m.get("hf_repo") or "")}{f' · {m["bytes"]/1e9:.1f} GB' if m.get("bytes") else ""} · suite v{esc(rec["suite"]["version"])}</div></div>
  <div class="acts"><a class="btn" href="hardware-{esc(rid)}.html">SPEED ON OTHER BOXES →</a>{f'<a class="btn" href="{esc(cmp_href)}">COMPARE WITH {esc(rival.upper())}</a>' if rival else ""}</div></section>
 <section class="panel"><div class="lbl">Score</div><div class="top">
- <div class="score"><div class="n glow">{f"{vs:.0f}" if vs is not None else "—"}<small>%</small></div><div class="of">of frontier</div><div class="rk">rank {rk} of {n_measured}<br><span class="q">{s.get("runs", 1)} run{"s" if s.get("runs", 1) > 1 else ""}</span></div><a class="q" href="method.html" style="display:block;margin-top:14px">how scores work</a></div>
+ <div class="score"><div class="n glow">{f"{vs:.0f}" if vs is not None else "—"}<small>%</small></div><div class="of">of frontier</div><div class="rk">place {rk} of {n_measured}<br><span class="q">{s.get("runs", 1)} run{"s" if s.get("runs", 1) > 1 else ""}</span></div><a class="q" href="method.html" style="display:block;margin-top:14px">how scores work</a></div>
  <div class="lines">{line_html}</div>
  <div>{_star(s["blocks"], (ref or {}).get("summary", {}).get("blocks") or {}, lost)}</div></div>{sw}</section>
 <section class="panel pad"><div class="lbl">Speed as the context grows</div>{_depth_bars([(rid, bd)])}
@@ -1056,7 +1079,7 @@ is its 95% interval. Every further run adds answers and narrows the range.</p>
 <p>A run is either <b>fixed</b> (every task family once: 40–110 minutes, depending on the model's speed) or <b>adaptive</b> (40 minutes:
 after each task, the next one is the task that narrows the range most per second of this model's time, and tasks it always or never
 solves are skipped). Measured on fresh tasks: six runs of one model, three of each kind, agreed within ±2.6 points.</p>
-<p>When two ranges overlap, the difference is not settled, and both models share a rank range such as <b>1–2</b>.
+<p>Models are listed by place (1, 2, 3...). Two models are <b>measurably apart</b> when the gap between their scores is larger than the 95% margin of that gap; overlapping ranges alone do not mean a tie. A dashed line in the ranking separates groups: each group starts with the first model that is measurably worse than the top of the group above. Inside a group the order can still change with more runs.
 Verdicts: 85% of the frontier or more is excellent, 70% very good, 50% good.</p>
 
 <h2>Speed</h2>
