@@ -234,8 +234,10 @@ def _fs_real(image: str, scripts: list[str], workers: int = 6) -> list[str]:
         procs.append(subprocess.Popen(["docker", "run", "--rm", "--tmpfs", "/home/dev:rw,exec", "-v", f"{d}:/w", image,
                                        "sh", "/w/run.sh"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True))
     out = [""] * len(scripts)
-    for p in procs:
-        text = p.communicate(timeout=7200)[0]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(len(procs)) as ex:    # drained together: a full pipe must not stall another container
+        texts = list(ex.map(lambda p: p.communicate(timeout=7200)[0], procs))
+    for text in texts:
         for part in re.split(r"^@@ITEM ", text, flags=re.M)[1:]:
             i, _, body = part.partition("\n")
             out[int(i)] = body
@@ -278,7 +280,7 @@ def _fs_compare(it, real: dict) -> list[tuple[str, str]]:
         rc = real["rc"].get(i + 1)
         if rc is None or (rc == 0) != ok:
             bad.append(("command", f"{i + 1}. {m['commands'][i]}: emulator {'ok' if ok else 'fails'}, real rc={rc}"))
-    failed = " ".join(str(i + 1) for i in sorted(real["rc"]) if real["rc"][i]) or "NONE"
+    failed = " ".join(str(i) for i in sorted(real["rc"]) if real["rc"][i]) or "NONE"
     if failed != m["expected"][0]:
         bad.append(("failed", f"key {m['expected'][0]!r}, real {failed!r}"))
     lines, modes, inos = [], {}, {}

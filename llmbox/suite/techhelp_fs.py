@@ -1477,16 +1477,16 @@ class _Gen:
             at = [r.randint(2, max(2, target - 3))]
         fill = list(_FILLER)
         w = [_FILLER[k] for k in fill]
-        tries = 0
+        tries, blocked = 0, -1
         while len(self.cmds) < target and tries < 3000:
             tries += 1
-            if traps and len(self.cmds) >= at[0]:
-                if getattr(self, "t_" + traps[0])():
-                    traps.pop(0)
+            if traps and len(self.cmds) >= at[0] and blocked != len(self.cmds):
+                placed = next((k for k in range(len(traps)) if getattr(self, "t_" + traps[k])()), None)
+                if placed is not None:
+                    traps.pop(placed)
                     at.pop(0)
-                elif tries % 4 == 0:     # not possible here and now: try the next one first
-                    traps.append(traps.pop(0))
-                continue
+                    continue
+                blocked = len(self.cmds)     # none is possible here and now: an ordinary command first
             if self.size() > self.cap and r.random() < 0.6:
                 if not self.f_prune():
                     self.f_rm()
@@ -1519,20 +1519,27 @@ def _pick_questions(g: _Gen, n: int) -> list[tuple[str, str]]:
     r.shuffle(cands)
     out: list = []
     used: set = set()
+    errors = [0 if r.random() < 0.4 else 1]
+
+    def take(k: str, p: str) -> bool:
+        """At most one question answers ERROR, in 40% of the items (it must not pay to guess it)."""
+        if p in used or len(out) >= n:
+            return False
+        if _answer(g.fs, k, p) == "ERROR":
+            if errors[0]:
+                return False
+            errors[0] += 1
+        out.append((k, p))
+        used.add(p)
+        return True
     for want in ["readlink", "cat", "ls", "readlink", "cat", "cat", "readlink", "ls", "cat"]:
         for k, p in cands:
-            if k == want and p not in used and len(out) < n:
-                out.append((k, p))
-                used.add(p)
+            if k == want and take(k, p):
                 break
     for k, p in cands:
-        if len(out) < n and p not in used:
-            out.append((k, p))
-            used.add(p)
+        take(k, p)
     for p in sorted(g.files(), key=lambda _x: r.random()):   # few traps touched paths (low levels): ordinary files
-        if len(out) < n and p not in used:
-            out.append(("cat", p))
-            used.add(p)
+        take("cat", p)
     r.shuffle(out)
     return out
 
