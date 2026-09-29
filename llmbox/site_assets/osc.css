@@ -70,6 +70,44 @@ tr.sel td{background:rgba(255,176,0,.04)}
 .bars{display:grid;grid-template-columns:170px minmax(0,1fr) 170px;row-gap:14px;column-gap:18px;align-items:center}
 .bars .k{font:600 15px "IBM Plex Sans Condensed"}.bars .k small{display:block;font:400 11px "IBM Plex Mono";color:var(--muted)}
 .bars .ft{font-size:12px;color:var(--muted)}.bars .ft b{display:block;font:400 15px "IBM Plex Mono";color:var(--ink)}
+/* shared pieces (rev 3, 2026-09-30), the same on every page: the model marker (colour = family by GGUF architecture;
+   filled = the maker's release, ring = fine-tune, diamond = uncensored), a score as a dot with its 95% range on a shared
+   scale, block bars with the typical local model (and Claude Opus) marked, what stands out, the visitor's box. */
+.mk{flex:none}
+.mw{display:grid;grid-template-columns:14px minmax(0,1fr);column-gap:10px;align-items:baseline}
+.mw .mk{align-self:center}.mw .m{white-space:nowrap}.mw .qt{grid-column:2;font-size:11px;color:var(--faint)}
+.fp{display:flex;align-items:center;gap:14px}.fp .trk{position:relative;flex:1;height:14px}
+.fp .num{width:46px;text-align:right;font:500 17px "IBM Plex Mono";color:var(--ink);flex:none}
+.fp .trk s{position:absolute;top:-4px;bottom:-4px;width:1px;background:var(--line2)}
+.fp .trk i{position:absolute;top:6px;height:2px;opacity:.5}
+.fp .trk b{position:absolute;top:2px;width:10px;height:10px;margin-left:-5px;border-radius:50%}
+.fp .trk b.rf{top:-6px;height:26px;width:0;margin:0;border-radius:0;border-left:1px dashed #8b877b}
+.fp .trk em{position:absolute;left:14px;top:-1px;font:normal 11px "IBM Plex Mono";color:var(--red)}
+.axis span{position:absolute;bottom:0;transform:translateX(-50%);font-size:10.5px;letter-spacing:0;color:var(--faint)}
+.so span{display:block;white-space:nowrap}.so .up{color:var(--amber)}.so .dn{color:#e0826a}.so .ev{color:var(--faint)}
+.bt{display:block;position:relative;height:4px;background:var(--line)}.bt i{position:absolute;left:0;top:0;bottom:0;opacity:.8}.bt.big{height:7px}
+.bt u{position:absolute;top:-4px;height:12px;width:2px;background:var(--ink);opacity:.55}.bt s{position:absolute;top:-4px;height:12px;width:0;border-left:2px dotted #8b877b}
+.bt.big u,.bt.big s{top:-3px;height:13px}
+.groups{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 32px}
+div.gh,details.gh>summary{display:grid;grid-template-columns:minmax(0,1fr) 38px;column-gap:10px;row-gap:6px;align-items:center}
+.gh .gn{font:600 15px "IBM Plex Sans Condensed";color:var(--ink);justify-self:start}.gh .gv{grid-column:2;grid-row:1/3;font:500 19px "IBM Plex Mono";color:var(--ink);text-align:right}
+.gh .bt{grid-column:1;grid-row:2}
+.grp .bb{margin-top:10px}
+div.bb,details.bb>summary{display:grid;grid-template-columns:minmax(0,1fr) 30px;gap:4px 10px;align-items:center;font-size:12.5px}
+.bb .bn{grid-column:1;color:var(--soft)}.bb .bn small{color:var(--faint);margin-left:6px;font-size:10.5px}.bb .bt{grid-column:1;grid-row:2}
+div.bb>b,details.bb>summary>b{grid-column:2;grid-row:1/3;font:500 14px "IBM Plex Mono";text-align:right;color:var(--soft)}
+details>summary{list-style:none;cursor:pointer}details>summary::-webkit-details-marker{display:none}
+details.bb>summary .bn:after,details.gh>summary .gv:before{content:"▾ ";color:var(--faint);font-size:10px}
+details.bb[open]>summary .bn:after,details.gh[open]>summary .gv:before{content:"▴ "}
+details.bb>summary .bn:after{content:" ▾"}details.bb[open]>summary .bn:after{content:" ▴"}
+details.bb ul,details.gh ul{margin:8px 0 4px;list-style:none;font-size:12px;color:var(--muted);line-height:1.5}
+details.bb li,details.gh li{padding-left:12px;position:relative;margin-bottom:3px}details.bb li:before,details.gh li:before{content:"›";position:absolute;left:0;color:var(--amber-dim)}
+.glg{margin:16px 0 0}.glg u,.glg s{display:inline-block;position:relative;width:2px;height:10px;margin:0 4px;top:1px}.glg u{background:var(--ink);opacity:.55}.glg s{width:0;border-left:2px dotted #8b877b}
+@media (max-width:1000px){.groups{grid-template-columns:1fr 1fr}}
+@media (max-width:560px){.groups{grid-template-columns:1fr}}
+.boxchip{font-size:11.5px;color:var(--muted);border:1px solid var(--line);padding:4px 10px;white-space:nowrap}
+.boxchip b{color:var(--ink);font-weight:500}.boxchip:hover{border-color:var(--amber-dim);color:var(--muted);text-decoration:none}
+.src{font-size:10.5px;letter-spacing:.04em;color:var(--faint);white-space:nowrap}
 footer{margin-top:28px;color:var(--faint);font-size:12px;display:flex;justify-content:space-between;gap:20px}
 @media (max-width:900px){
   .wrap{padding:16px 16px 40px}
