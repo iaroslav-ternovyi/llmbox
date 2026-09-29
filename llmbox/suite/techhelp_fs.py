@@ -20,9 +20,11 @@ The answers come from an emulator of a small in-memory filesystem (no subprocess
 checked against bash + GNU coreutils 8.32 / 9.4 / 9.7 in Docker by tests/real_programs.py (mode fs). Anything the
 emulator does not model exactly, or where those versions differ, raises Unsupported and the generator never goes there.
 Levels: 1-3 one trap in 5-10 commands; 4-6 15-25 commands, 4-6 traps; 7-8 30-50 commands with symlinks, hard links,
-globs and a cd session interacting; 9 85-100 and 10 170-200 commands (Claude Opus solved 60-100-command versions of
-both at 1.0, 2026-09-29) with a bigger starting tree and questions aimed at the paths that took the most commands or
-symlinks to get right. Credit per question; the failed commands by overlap; the tree per path.
+globs and a cd session interacting; 9 85-100 and 10 170-200 commands with a bigger starting tree and questions aimed at
+the paths that took the most commands or symlinks to get right. Credit per question; the failed commands by overlap; the
+tree per path. Claude Opus (2026-09-29, seed 1): 1.0 at levels 8-10 when 9-10 had 60-100 commands (with and without the
+level 7-10 traps), then 0.985 (L9) / 0.988 (L10) here - it took `mv link file-it-points-to` for a success and
+`cat f > f` for a failure; per-path credit keeps such slips cheap, so levels 9-10 are not yet the headroom they aim at.
 """
 from __future__ import annotations
 

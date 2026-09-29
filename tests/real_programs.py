@@ -23,7 +23,11 @@ nginx:alpine and debian:stable; the routing check runs a privileged container). 
   fs               techhelp.fs_seq (levels 1-10): every item replayed by bash in a fresh /home/dev/proj as uid 1234 (umask
                    022, LC_ALL=C, stdin /dev/null) on coreutils 9.7 / 9.4 / 8.32 (debian:stable, ubuntu:24.04 / 22.04);
                    exit statuses, the tree (types, symlink texts, contents), modes, hard-link groups, $PWD and every
-                   question's answer compared with the emulator. FSRESULT
+                   question's answer compared with the emulator. 2026-09-29, --seeds 320: 3200 items, 140673 commands,
+                   17599 questions, 0 disagreements on each of coreutils 9.7 / 9.4 / 8.32 (bash 5.2.37 / 5.2.21 / 5.1.16)
+                   - after fixes for what it found: `cp -a` onto a file with other hard links replaces it (`cp -r`
+                   writes into it), `cp -a` keeps hard links between names of one symlink, a `cp -rL` failure one
+                   level down fails the whole command. A Docker that goes away mid-run shows as "[run] no output".
 
 Run: python3 tests/real_programs.py [nginx|route|shell|git|gitignore|gitignore-linux|js|js-linux|js-node24|fs ...] [--seeds N] [--image IMAGE]
 2026-09-29, --seeds 25: 668 / 495 / 1296 checked, 0 wrong - after the fix it found (a rewrite empties $1 even when its
