@@ -68,15 +68,16 @@ def plan(rid: str, src: str, target: str, force: bool = False, unload: bool = Fa
     m = fitted["model"]
     gf = None
     if m.get("hf_repo") and m.get("file"):
-        gf = next((x for x in hf.list_gguf(m["hf_repo"]) if x.name == m["file"]), None)
+        # split models live in a subfolder on Hugging Face (bartowski: Q3_K_M/…-00001-of-00002.gguf): match by file name too
+        gf = next((x for x in hf.list_gguf(m["hf_repo"]) if x.name == m["file"] or os.path.basename(x.name) == m["file"]), None)
     dst_dir = os.path.dirname(m["path"])
     parts = gf.parts if gf else [m["file"]]
     missing = []
     for i, p in enumerate(parts):
         dst = os.path.join(dst_dir, os.path.basename(p))
         have, want = _remote_size(h, dst), (gf.sizes[i] if gf else None)
-        if want is None or have != want:
-            missing.append((p, dst, want, have))
+        if (want is None and not (have or 0) > 0) or (want is not None and have != want):
+            missing.append((p, dst, want, have))   # no size to compare with: a file that is there counts as there
     if not missing:
         steps.append(Step("download", "done", f"{len(parts)} file(s) in {dst_dir}"))
     elif not gf:
