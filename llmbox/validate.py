@@ -23,6 +23,7 @@ from .suite.common import Item
 
 ANSWER_KINDS = {("reasoning", k) for k in ("arith", "dates", "logic", "code_trace", "table", "schedule", "budget")} | \
                {("longctx", k) for k in ("lookup", "multihop", "count", "latest", "total", "audit")} | {("tools", "total")}
+ANSWER_KINDS |= {("techhelp", "fs_seq")}   # its own parser (a tree over many lines): the answer shapes are checked too
 
 
 def _cleanup(it: Item) -> None:
