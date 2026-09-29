@@ -1459,13 +1459,20 @@ def _generate(seed: int, level: int, tries: int = 60) -> _Gen:
     return best
 
 def git_seq(seed: int, level: int = 3) -> Item:
-    """A git session replayed exactly: a small repository, then 5-100 numbered commands (edits, staging, commits,
-    branches, switches that carry or refuse local changes, stash, resets, merges, detached HEAD, amend, cherry-pick,
-    revert), and questions about the final state. Level 1: `commit -a` leaves a new file untracked; 2: a mixed reset
-    unstages; 3: `rm --cached` and a commit with nothing staged; 4-6: 12-25 commands with branches, stash and the reset
-    modes; 7-8: 30-50 with detached HEAD, amend, cherry-pick, revert and refused checkouts; 9-10: 60-100 over 3-4
-    branches with 14-15 questions (the volume of exact state is the difficulty). Credit per question, per line for
-    status / log / stash, per command for the failures."""
+    """A git session replayed exactly: a small repository, then 5-100 numbered commands and questions about the final
+    state. Every level has a fixed mix of traps (_LEVEL; a seed changes files, words, names, order and small variants):
+    1 (5-7 commands): `commit -a` leaves a new file untracked; 2 (6-9): a commit with a new file undone by a mixed
+    reset; 3 (8-10): `rm --cached` and a commit with nothing staged; 4 (12-16): an edit carried to another branch,
+    stash push / pop around other work (the index is not restored), `reset --soft`, a stash with nothing to save or a
+    pop with nothing stashed; 5 (16-21): a refused checkout, stash with and without -u, `reset --hard` (a staged new
+    file goes, an untracked one stays), a fast-forward, `commit -a`; 6 (20-25): `branch -d` refused / -D, a merge
+    commit, restore, an empty stash, a mixed reset, `git add` of a deleted file, mv; 7 (30-40): a detached HEAD with
+    commits, amend, cherry-pick, revert, a refused checkout, stash pop, a merge commit, a hard reset, an empty commit;
+    8 (40-50): + refused `git rm`, soft reset, mv, `branch -d`, restore of an untracked file; 9 (65-80, 3-4 branches,
+    14-15 questions): + a cherry-pick and a real merge refused over a staged edit, stash -u, `commit -a`, `rm --cached`,
+    a fast-forward, a switch to a deleted branch; 10 (86-100, 4 branches, 15-16 questions): + an empty stash, `git add`
+    of a deleted file, a file written back to its committed content, `merge --no-ff`, a mixed reset. Credit per
+    question, per line for status / log / stash, per command for the failures."""
     g = _generate(seed, level)
     qs = g.questions()
     answers = [g.answer(q) for q in qs]
