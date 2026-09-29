@@ -1,13 +1,16 @@
-"""Long documents / RAG-style reading at 8 difficulty levels.
+"""Long documents / RAG-style reading at 10 difficulty levels.
 
 Levels 1-5 scale document length (~29k -> ~200k real tokens; the chars/4 estimate under-counts by ~1.2x), hop count, the number of conditions and adds later corrections
 ("incident reopened" entries that override earlier facts).
 v0.11: levels 6-8 (audit: 7-8) keep the document at the level-3 size and make the reading harder: dated org changes, withdrawn
 duplicates, revised user counts, facts the document does not contain (NOT STATED) - see "levels 6-8" below.
+Levels 9-10 (aimed at the frontier) add corrections of corrections, vendor-conditional updates and retroactive org
+corrections, and ask for sets, headcounts, per-director breakdowns, rankings and long audits - see "levels 9-10" below.
 """
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 import re
 
 from .common import Item, final_answer, multi_check, num, rng
@@ -121,6 +124,8 @@ def _eq(expected: str):
 
 
 def lookup(seed: int, level: int = 3) -> Item:
+    if level >= 9:   # v0.11: levels 9-10, aimed at the frontier
+        return _x_item("lookup", seed, level)
     if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
         return _hard_item("lookup", seed, level)
     def build(r, staff, mgr, incidents, level):
@@ -131,6 +136,8 @@ def lookup(seed: int, level: int = 3) -> Item:
 
 
 def multihop(seed: int, level: int = 3) -> Item:
+    if level >= 9:   # v0.11: levels 9-10, aimed at the frontier
+        return _x_item("multihop", seed, level)
     if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
         return _hard_item("multihop", seed, level)
     def build(r, staff, mgr, incidents, level):
@@ -148,6 +155,8 @@ def multihop(seed: int, level: int = 3) -> Item:
 
 
 def count(seed: int, level: int = 3) -> Item:
+    if level >= 9:   # v0.11: levels 9-10, aimed at the frontier
+        return _x_item("count", seed, level)
     if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
         return _hard_item("count", seed, level)
     def build(r, staff, mgr, incidents, level):
@@ -172,6 +181,8 @@ def count(seed: int, level: int = 3) -> Item:
 
 
 def latest(seed: int, level: int = 3) -> Item:
+    if level >= 9:   # v0.11: levels 9-10, aimed at the frontier
+        return _x_item("latest", seed, level)
     if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
         return _hard_item("latest", seed, level)
     def build(r, staff, mgr, incidents, level):
@@ -191,6 +202,8 @@ def latest(seed: int, level: int = 3) -> Item:
 
 def total(seed: int, level: int = 3) -> Item:
     """Sum of affected users over many matching incidents - needs every match, not just finding one."""
+    if level >= 9:   # v0.11: levels 9-10, aimed at the frontier
+        return _x_item("total", seed, level)
     if level >= 6:   # v0.11: levels 6-8 keep the document at the level-3 size and ask harder questions
         return _hard_item("total", seed, level)
     def build(r, staff, mgr, incidents, level):
@@ -213,6 +226,8 @@ def audit(seed: int, level: int = 6) -> Item:
     """Expert: fact-check a draft monthly report (40 lines) against the incident log - the log is the source of truth and
     later updates override earlier facts. Errors are subtle: a pre-correction severity or root-cause code, two swapped
     digits in the user count, a duration off by an hour, a wrong service. Credit per error found, minus false alarms."""
+    if level >= 9:
+        return _audit_x(seed, level)
     if level >= 7:
         return _audit_hard(seed, level)
     r = rng(BLOCK, f"audit{level}", seed)
@@ -281,7 +296,7 @@ def audit(seed: int, level: int = 6) -> Item:
 #     an incident id or date that is not in the log): the answer is NOT STATED (from level 7);
 #   - aggregations picked so that a reader who misses one kind of later update gets a different answer.
 # Every level-6..8 item mixes a fixed set of question types (a seed changes only which incidents / values they hit).
-TOKENS_HARD = {6: 72_000, 7: 72_000, 8: 72_000}
+TOKENS_HARD = {6: 72_000, 7: 72_000, 8: 72_000, 9: 66_000, 10: 66_000}
 NOT_STATED = "NOT STATED"
 _T0 = dt.datetime(2026, 1, 1)
 _NS = re.compile(r"\bnot[\s_-]+(stated|specified|mentioned|given|listed|recorded|documented|provided|available|found|in\s+the\s+"
@@ -298,8 +313,8 @@ def _at(hist: list, when: dt.datetime):
     return cur
 
 
-def _world_hard(r, level: int) -> dict:
-    staff, mgr_info, incidents = _world(r, TOKENS_HARD[level], corrections=2)
+def _world_hard(r, level: int, n_tokens: int | None = None) -> dict:
+    staff, mgr_info, incidents = _world(r, n_tokens or TOKENS_HARD[level], corrections=2)
     managers = list(mgr_info)
     dirs = sorted({v["director"] for v in mgr_info.values()})
     used = set(staff) | set(managers) | set(dirs)
@@ -348,6 +363,8 @@ def _world_hard(r, level: int) -> dict:
     wd_ids = {i["id"] for i in wd}
     for inc in wd:
         earlier = [j for j in by_time if j["service"] == inc["service"] and j["opened"] < inc["opened"] and j["id"] not in wd_ids]
+        if not earlier:   # nothing earlier on this service to duplicate (a seed that used to crash here): not withdrawn
+            continue
         tgt = earlier[-r.randint(1, min(6, len(earlier)))]
         inc["dup_of"] = tgt["id"]
         when = inc["resolved"] + dt.timedelta(days=r.randint(1, 6), hours=r.randint(0, 12))
@@ -817,5 +834,529 @@ def _audit_hard(seed: int, level: int) -> Item:
                 meta={"expected": ", ".join(exp), "doc_tokens_est": (len(doc) + len(report)) // 4, "level": level, "wrong": len(exp)})
 
 
-MAX_LEVEL = 8
+# ---- levels 9-10 (v0.11) ----------------------------------------------------------------------------------------------
+# Aimed at the frontier: levels 6-8 were 1.0 for Claude Opus / Sonnet. Same document size (<= ~95k real tokens); the log
+# now also has corrections of corrections: an update withdrawn by a later one (L10: a withdrawal withdrawn again), root-
+# cause corrections that apply only once a vendor confirms them, mistyped user-count revisions corrected, org changes
+# corrected retroactively (a move took effect on another date) or cancelled, and duplicates of incidents that are not in
+# this log. Aggregations ask for one number per month over three months (20+ records to trace per question), the top two
+# of a ranking, or a whole report to audit - partial credit per number.
+_NAME = {"sev": "severity", "code": "root-cause code"}
+AUDIT_X_TOKENS = {9: 60_000, 10: 56_000}   # the audit's log is smaller: its long report comes on top
+
+
+def _world_x(r, level: int, n_tokens: int | None = None) -> dict:
+    W = _world_hard(r, level, n_tokens)
+    incs = W["incidents"]
+    W["hist0"] = {n: list(h) for n, h in W["hist"].items()}   # the org changes as first logged (before any correction)
+    for inc in incs:
+        users = [(inc["opened"], inc["users0"])]
+        for when, text in sorted(inc["updates"]):
+            m = re.search(r"affected users is revised from [\d,]+ to ([\d,]+)\.", text)
+            if m:
+                users.append((when, int(m.group(1).replace(",", ""))))
+        inc["tl"] = {"sev": list(inc["hist"]["sev"]), "code": list(inc["hist"]["code"]), "users": users}
+        inc["naive"] = {f: v[-1][1] for f, v in inc["tl"].items()}   # a reader who applies every change but no withdrawal / condition
+        inc["meta"] = {}
+
+    def after(inc):
+        return max([inc["resolved"]] + [w for w, _ in inc["updates"]]) + dt.timedelta(days=r.randint(2, 20), hours=r.randint(1, 12))
+    live = [i for i in incs if not i["dup_of"]]
+    # 1) the last severity / code change withdrawn as entered in error; at L10 some withdrawals are withdrawn again
+    cand = [i for i in live if len(i["tl"]["sev"]) > 1 or len(i["tl"]["code"]) > 1]
+    for inc in r.sample(cand, min(len(cand), 30)):
+        field = r.choice([f for f in ("sev", "code") if len(inc["tl"][f]) > 1])
+        tl = inc["tl"][field]
+        (t_last, v_last), v_prev = tl[-1], tl[-2][1]
+        if sum(1 for w, _ in tl if w.date() == t_last.date()) > 1:
+            continue
+        vd = after(inc)
+        inc["updates"].append((vd, f"Post-mortem update for {inc['id']}: the {_NAME[field]} change of {t_last:%Y-%m-%d} is withdrawn - "
+                                   f"it was entered in error."))
+        tl.append((vd, v_prev))
+        inc["meta"]["void"] = (field, t_last, vd)
+        if level >= 10 and r.random() < 0.45:
+            rd = after(inc)
+            inc["updates"].append((rd, f"Post-mortem update for {inc['id']}: the withdrawal of {vd:%Y-%m-%d} is itself withdrawn; the "
+                                       f"{_NAME[field]} change of {t_last:%Y-%m-%d} stands."))
+            tl.append((rd, v_last))
+            inc["meta"]["reinstate"] = (field, vd, rd)
+    # 2) root-cause corrections that apply only when the vendor confirms them
+    for inc in r.sample([i for i in live if "void" not in i["meta"] or i["meta"]["void"][0] != "code"], 24):
+        cur = inc["tl"]["code"][-1][1]
+        new = f"RC-{r.randint(10, 99)}{r.choice('ABCDEFGH')}"
+        if new == cur:
+            continue
+        cd = after(inc)
+        inc["updates"].append((cd, f"Post-mortem update for {inc['id']}: if the vendor confirms a defect in their component, the "
+                                   f"root-cause code will be corrected from {cur} to {new}."))
+        outcome = r.choice(["yes", "no", "none"])
+        cd2 = None
+        if outcome != "none":
+            cd2 = after(inc)
+            inc["updates"].append((cd2, f"Vendor response for {inc['id']}: " + ("the defect is confirmed." if outcome == "yes"
+                                                                                 else "no defect was found in their component.")))
+            if outcome == "yes":
+                inc["tl"]["code"].append((cd2, new))
+        inc["meta"]["cond"] = (outcome, cd, cd2, cur, new)
+        inc["naive"]["code"] = new   # a reader who applies the announcement
+    # 3) user-count revisions that were mistyped (corrected figure) or withdrawn (the original figure stands)
+    for inc in r.sample([i for i in live if len(i["tl"]["users"]) > 1], 30):
+        tl = inc["tl"]["users"]
+        rd, fd = tl[-1][0], after(inc)
+        if r.random() < 0.5:
+            x = max(10, int(tl[-1][1] * r.choice([0.5, 0.8, 1.25, 1.6])) + r.randint(-40, 40))
+            inc["updates"].append((fd, f"Post-mortem update for {inc['id']}: the revised user count of {rd:%Y-%m-%d} was mistyped; "
+                                       f"the correct number of affected users is {x:,}."))
+        else:
+            x = inc["users0"]
+            inc["updates"].append((fd, f"Post-mortem update for {inc['id']}: the user-count revision of {rd:%Y-%m-%d} is withdrawn; "
+                                       f"the original figure stands."))
+        tl.append((fd, x))
+        inc["meta"]["fix"] = (rd, fd)
+    # 4) duplicates of incidents that are not in this log (the withdrawn one is; the other one is not)
+    targets = {i["dup_of"] for i in incs if i["dup_of"]}
+    for inc in r.sample([i for i in live if i["id"] not in targets and i["engineer"] in W["staff"]], 7):
+        ghost = f"INC-{r.randint(1000, 9999)}"
+        if ghost in W["by_id"]:
+            continue
+        when = inc["resolved"] + dt.timedelta(days=r.randint(1, 6), hours=r.randint(0, 12))
+        inc["updates"].append((when, f"{inc['id']} was a duplicate of {ghost}, which is tracked on the partner status page and not in "
+                                     f"this log; {inc['id']} is withdrawn and does not count in any statistics."))
+        inc["dup_of"], inc["ghost"] = ghost, True
+    # 5) org changes corrected retroactively (another effective date) or cancelled
+    W["retro"], W["cancelled"], extra = [], [], {}
+    moves = [(n, k) for n, h in W["hist"].items() for k in range(1, len(h))]
+    for n, k in r.sample(moves, min(len(moves), 16)):
+        h = W["hist"][n]
+        if any(x[0] == n for x in W["retro"]):
+            continue
+        eff = h[k][0]
+        new = eff + dt.timedelta(days=r.choice([-1, 1]) * r.randint(8, 35))
+        lo = h[k - 1][0] if k > 1 else _T0 + dt.timedelta(days=5)
+        hi = h[k + 1][0] if k + 1 < len(h) else _T0 + dt.timedelta(days=300)
+        if not lo + dt.timedelta(days=3) < new < hi - dt.timedelta(days=3):
+            continue
+        cw = max(eff, new) + dt.timedelta(days=r.randint(3, 25), hours=r.randint(1, 12))
+        W["org"].append((cw, f"Correction to the org change of {eff:%Y-%m-%d}: {n}'s move to {h[k][2]} took effect on "
+                             f"{new:%Y-%m-%d}, not {eff:%Y-%m-%d}."))
+        h[k] = (new, h[k][1], h[k][2])
+        W["retro"].append((n, eff, new))
+        extra.setdefault(n, set()).update({eff.date(), new.date()})
+    movers = sorted(n for n, h in W["hist"].items() if len(h) > 1 and n not in extra)
+    for n in r.sample(movers, min(6, len(movers))):
+        h = W["hist"][n]
+        (eff, team, mgr), prev = h[-1], h[-2]
+        cw = eff + dt.timedelta(days=r.randint(4, 30), hours=r.randint(1, 12))
+        W["org"].append((cw, f"The org change of {eff:%Y-%m-%d} for {n} is cancelled: {n} never moved and kept reporting to {prev[2]}"
+                             + (f" on the {prev[1]} team." if team != prev[1] else ".")))
+        h.pop()
+        W["cancelled"].append((n, eff))
+        extra.setdefault(n, set()).add(eff.date())
+    W["extra_days"] = extra
+    for inc in incs:
+        for f in ("sev", "code", "users"):
+            inc[f] = inc["tl"][f][-1][1]
+        inc["wd_when"] = next((w for w, t in inc["updates"] if " was a duplicate of " in t), None)
+    return W
+
+
+def _clean_x(W, inc) -> bool:
+    """_clean, plus no logged-then-corrected or cancelled org change of the engineer on the opening day."""
+    return _clean(W, inc) and inc["opened"].date() not in W["extra_days"].get(inc["engineer"], ())
+
+
+def _value_at(inc, field: str, when: dt.datetime):
+    return [v for w, v in inc["tl"][field] if w <= when][-1]
+
+
+def _eod(day) -> dt.datetime:
+    return dt.datetime.combine(day, dt.time(23, 59))
+
+
+def _asof_q(r, inc, field: str, lo: dt.datetime, hi: dt.datetime):
+    """A question about the value at the end of a day strictly between two entries (None when they are too close)."""
+    days = (hi.date() - lo.date()).days
+    if days < 2:
+        return None
+    day = lo.date() + dt.timedelta(days=r.randint(1, days - 1))
+    a = _value_at(inc, field, _eod(day))
+    what = {"sev": "severity", "code": "root-cause code", "users": "number of affected users"}[field]
+    q = f"According to the log, what was the {what} of {inc['id']} at the end of {day:%Y-%m-%d} (leave out any update made after that day)?"
+    return q, [(_chk(a, "sev" if field == "sev" else "num" if field == "users" else "text"), a)], q
+
+
+def _list_chk(expected: list):
+    """A list answer: credit per id found, a wrong id cancels one (listing everything earns nothing)."""
+    exp = set(expected)
+
+    def f(t, _t=None):
+        got = set(re.findall(r"INC-\d+", final_answer(t) or ""))
+        return max(0.0, (len(got & exp) - len(got - exp)) / len(exp))
+    return f
+
+
+def _wd_by(inc, when) -> bool:
+    return bool(inc["dup_of"]) and inc["wd_when"] <= when
+
+
+def _lookup_x(r, W, typ, level):
+    """Every incident that matches a condition, scattered over the whole log: the final value (L9) or the value at the end of
+    a day (L10) differs from the incident entry. Withdrawn, restored and unconfirmed changes decide membership."""
+    incs = W["incidents"]
+    field = {"code": "code", "sev": "sev", "users": "users"}[typ]
+    what = {"code": "root-cause code", "sev": "severity", "users": "number of affected users"}[field]
+    if field == "users":
+        m = r.randint(1, 10)
+        scope, sel = f"opened in month {m} of 2026 (on any service)", [i for i in incs if i["opened"].month == m]
+    else:
+        svc = r.choice(SERVICES)
+        scope, sel = f"on the {svc} service", [i for i in incs if i["service"] == svc]
+    if level >= 10:
+        day = _T0.date() + dt.timedelta(days=r.randint(120, 300))
+        t = _eod(day)
+        exp = [i["id"] for i in sel if i["opened"] <= t and not _wd_by(i, t) and _value_at(i, field, t) != i[field + "0"]]
+        naive = [i["id"] for i in sel if i["opened"] <= t and not i["dup_of"] and i["naive"][field] != i[field + "0"]]
+        q = (f"At the end of {day:%Y-%m-%d}, which incidents {scope} had a {what} different from the one in their incident entry, as "
+             f"recorded up to that day? Leave out incidents opened later, incidents withdrawn by then and every update made after that "
+             f"day. List the incident ids.")
+    else:
+        base = "users0" if field == "users" else field + "0"
+        exp = [i["id"] for i in sel if not i["dup_of"] and i[field] != i[base]]
+        naive = [i["id"] for i in sel if not i["dup_of"] and i["naive"][field] != i[base]]
+        q = (f"Which incidents {scope} end with a {what} different from the one in their incident entry? Withdrawn incidents do not "
+             f"count. List the incident ids.")
+    if not 3 <= len(exp) <= 12 or set(exp) == set(naive):
+        return None
+    return q, [(_list_chk(exp), ", ".join(exp))], {q}
+
+
+def _mh_x(W, inc, what, hist):
+    e, t = inc["engineer"], inc["opened"]
+    if e not in hist:
+        return None
+    m = _at(hist[e], t)[2]
+    return {"mgr": m, "team": _at(hist[e], t)[1], "office": _office_at(W, m, t), "dir": _dir_at(W, m, t)}[what]
+
+
+def _headcount(W, hist, day, key: str) -> dict:
+    t, c = _eod(day), {}
+    for e in W["staff"]:
+        m = _at(hist[e], t)[2]
+        k = m if key == "mgr" else _dir_at(W, m, t)
+        c[k] = c.get(k, 0) + 1
+    return c
+
+
+def _multihop_x(r, W, typ, level):
+    """Headcounts on a day after every org correction: how many directory engineers reported to each of three managers
+    (L9) / were in each director's organisation (L10) - every engineer's reporting line on that day, 59 timelines."""
+    days = sorted({(min(a, b) + dt.timedelta(days=k)).date() for _n, a, b in W["retro"] for k in range(1, max(2, abs((b - a).days)))}
+                  | {(e + dt.timedelta(days=k)).date() for _n, e in W["cancelled"] for k in range(1, 30)})
+    day = r.choice(days or [_T0.date() + dt.timedelta(days=r.randint(60, 280))])
+    key = "mgr" if level < 10 else "dir"
+    right, naive = _headcount(W, W["hist"], day, key), _headcount(W, W["hist0"], day, key)
+    if key == "mgr":
+        diff = [m for m in W["mgr"] if right.get(m, 0) != naive.get(m, 0)]
+        if not diff:
+            return None
+        first = r.choice(diff)
+        who = sorted([first] + r.sample([m for m in W["mgr"] if m != first], 2), key=list(W["mgr"]).index)
+        q = f"At the end of {day:%Y-%m-%d}, how many engineers from the directory reported to each of these managers: {', '.join(who)}?"
+    else:
+        who = sorted({d for h in W["director"].values() for _, d in h})
+        if all(right.get(d, 0) == naive.get(d, 0) for d in who):
+            return None
+        q = (f"At the end of {day:%Y-%m-%d}, how many engineers from the directory were in each director's organisation (their manager "
+             f"reported to that director on that day): {', '.join(who)}?")
+    return q, [(_chk(right.get(x, 0), "num"), right.get(x, 0)) for x in who], {day.month}, who
+
+
+def _agg_x_pool(W, kind: str, level: int):
+    """(traps, params, answers, work) for every question of a kind: traps = how many kinds of misreading change an answer."""
+    ck = ("x", kind, level)
+    if ck in W["cache"]:
+        return W["cache"][ck]
+    incs = W["incidents"]
+    dirs = sorted({d for h in W["director"].values() for _, d in h})
+    pool = []
+    if kind in ("count", "total") and level >= 10:   # one month, every service, a breakdown by director
+        sevs = ("SEV2", "SEV3") if kind == "count" else ("SEV1", "SEV2")
+        for m in range(1, 11):
+            items = [i for i in incs if i["opened"].month == m]
+
+            def per_dir(var):
+                out = []
+                for d in dirs:
+                    rows = [i for i in items if (i["sev0"] if var == "sev0" else i["naive"]["sev"] if var == "naive" else i["sev"]) in sevs
+                            and (not i["dup_of"] or var == "wd") and _mh_x(W, i, "dir", W["hist0"] if var == "org0" else W["hist"]) == d]
+                    out.append(len(rows) if kind == "count" else
+                               sum(i["users0"] if var == "users0" else i["naive"]["users"] if var == "unfixed" else i["users"] for i in rows))
+                return out
+            right = per_dir("right")
+            variants = ("sev0", "naive", "wd", "org0") + (("users0", "unfixed") if kind == "total" else ())
+            pool.append((sum(1 for v in variants if per_dir(v) != right), (m, sevs, tuple(dirs)), right, len(items)))
+    elif kind in ("count", "total"):
+        if level < 10:
+            svcs = SERVICES
+            sev_sets = [("SEV1", "SEV2"), ("SEV2", "SEV3"), ("SEV1", "SEV3")] if kind == "count" else [("SEV1", "SEV2"), ("SEV1", "SEV3")]
+        else:
+            svcs, sev_sets = [None], [("SEV1",)]
+        for svc in svcs:
+            on = [i for i in incs if svc is None or i["service"] == svc]
+            for a in range(1, 9):
+                months = [a, a + 1, a + 2]
+                items = [i for i in on if a <= i["opened"].month <= a + 2]
+                for sevs in sev_sets:
+                    touch = [i for i in items if i["sev"] in sevs or i["sev0"] in sevs or i["naive"]["sev"] in sevs]
+                    if len(touch) < (18 if kind == "count" else 14):
+                        continue
+                    for org in dirs:
+                        def total(var, m):
+                            rows = []
+                            for i in items:
+                                if i["opened"].month != m:
+                                    continue
+                                sev = i["sev0"] if var == "sev0" else i["naive"]["sev"] if var == "naive" else i["sev"]
+                                if sev not in sevs or (i["dup_of"] and var != "wd"):
+                                    continue
+                                if _mh_x(W, i, "dir", W["hist0"] if var == "org0" else W["hist"]) != org:
+                                    continue
+                                rows.append(i)
+                            if kind == "count":
+                                return len(rows)
+                            return sum(i["users0"] if var == "users0" else i["naive"]["users"] if var == "unfixed" else i["users"] for i in rows)
+                        right = [total("right", m) for m in months]
+                        if min(right) < 1:
+                            continue
+                        variants = ("sev0", "naive", "wd", "org0") + (("users0", "unfixed") if kind == "total" else ())
+                        traps = sum(1 for v in variants if [total(v, m) for m in months] != right)
+                        pool.append((traps, (svc, sevs, a, org), right, len(touch)))
+    else:   # latest: the top incidents by affected users (latest figures) among a cause on 3 services (L9) / all services (L10)
+        n_top = 2 if level < 10 else 5
+        svc_sets = list(itertools.combinations(SERVICES, 3)) if level < 10 else [tuple(SERVICES)]
+        for cause in CAUSES:
+            of = [i for i in incs if i["cause"] == cause]
+            for svcs in svc_sets:
+                items = [i for i in of if i["service"] in svcs]
+                for sevs in [("SEV1", "SEV2"), ("SEV2", "SEV3")]:
+                    def ranked(var):
+                        users = (lambda i: i["users0"]) if var == "users0" else (lambda i: i["naive"]["users"]) if var == "unfixed" else (lambda i: i["users"])
+                        sev = (lambda i: i["sev0"]) if var == "sev0" else (lambda i: i["naive"]["sev"]) if var == "naive" else (lambda i: i["sev"])
+                        return sorted(((users(i), i["id"]) for i in items if (not i["dup_of"] or var == "wd") and sev(i) in sevs), reverse=True)
+                    right = ranked("right")
+                    if len(right) < 14 or len({u for u, _ in right[:n_top + 1]}) < n_top + 1:
+                        continue
+                    top = [x[1] for x in right[:n_top]]
+                    traps = sum(1 for v in ("users0", "unfixed", "wd", "sev0", "naive") if [x[1] for x in ranked(v)[:n_top]] != top)
+                    pool.append((traps, (cause, svcs, sevs), top, len(right)))
+    W["cache"][ck] = pool
+    return pool
+
+
+def _months_labels(a):
+    return [f"month {m}" for m in (a, a + 1, a + 2)]
+
+
+def _org_x(org) -> str:
+    return (f" and handled by an engineer whose manager, at the time the incident was opened, reported to director {org} (engineers "
+            f"who are not in the directory do not count)")
+
+
+def _breakdown_q(r, W, kind, level):
+    _, (m, sevs, dirs), right, _n = _pick(r, _agg_x_pool(W, kind, level), 3)
+    what = "how many incidents" if kind == "count" else "what is the total number of affected users (latest figures) over all incidents"
+    verb = "were" if kind == "count" else "that were"
+    q = (f"In month {m} of 2026: {what} on any service with final severity {' or '.join(sevs)} {verb} OPENED in that month and handled by "
+         f"an engineer whose manager, at the time the incident was opened, reported to each of these directors: {', '.join(dirs)}? "
+         f"(Engineers who are not in the directory count for none of them.)" + ("" if kind == "count" else " Plain integers."))
+    return q, [(_chk(x, "num"), x) for x in right], {m}, list(dirs)
+
+
+def _count_x(r, W, typ, level):
+    if level >= 10:
+        return _breakdown_q(r, W, "count", level)
+    _, (svc, sevs, a, org), right, _n = _pick(r, _agg_x_pool(W, "count", level), 3)
+    where = f"on the {svc} service" if svc else "on any service"
+    q = (f"For each of the months {a}, {a + 1} and {a + 2} of 2026: how many incidents {where} with final severity "
+         f"{' or '.join(sevs)} were OPENED in that month{_org_x(org)}?")
+    return q, [(_chk(x, "num"), x) for x in right], {(svc, m) for m in (a, a + 1, a + 2)}, _months_labels(a)
+
+
+def _total_x(r, W, typ, level):
+    if level >= 10:
+        return _breakdown_q(r, W, "total", level)
+    _, (svc, sevs, a, org), right, _n = _pick(r, _agg_x_pool(W, "total", level), 3)
+    where = f"on the {svc} service" if svc else "on any service"
+    q = (f"For each of the months {a}, {a + 1} and {a + 2} of 2026: what is the total number of affected users (latest figures) over "
+         f"all incidents {where} with final severity {' or '.join(sevs)} that were OPENED in that month{_org_x(org)}? Plain integers.")
+    return q, [(_chk(x, "num"), x) for x in right], {(svc, m) for m in (a, a + 1, a + 2)}, _months_labels(a)
+
+
+def _latest_x(r, W, typ, level):
+    _, (cause, svcs, sevs), top, _n = _pick(r, _agg_x_pool(W, "latest", level), 2)
+    where = "on any service" if len(svcs) == len(SERVICES) else f"on the {', '.join(svcs[:-1])} or {svcs[-1]} service"
+    n = len(top)
+    q = (f"Among all incidents caused by a {cause} {where} with final severity {' or '.join(sevs)}, which {n} affected the most "
+         f"users (latest figures)? Incident ids, most first.")
+    return q, [(_chk(x), x) for x in top], {cause}, ["the most", "the second most", "the third most", "the fourth", "the fifth"][:n]
+
+
+_X = {"lookup": (_lookup_x, {9: ["code", "sev", "users"], 10: ["code", "sev", "users"]}),
+      "multihop": (_multihop_x, {9: ["q"] * 3, 10: ["q"] * 3}),
+      "count": (_count_x, {9: ["q"] * 3, 10: ["q"] * 3}), "total": (_total_x, {9: ["q"] * 3, 10: ["q"] * 3}),
+      "latest": (_latest_x, {9: ["q"] * 4, 10: ["q"] * 2})}
+
+
+_X_NOTE = ("\nHow to read the log: later updates override earlier facts. An update that withdraws an earlier update cancels it (the "
+           "value before it applies again), and a withdrawn withdrawal restores the update. A conditional correction applies only "
+           "from the day its condition is confirmed. A correction to an org change applies retroactively: the move counts from the "
+           "corrected date, and a cancelled move never happened. Org changes take effect on their date. Withdrawn incidents do not "
+           "count anywhere. If the document does not contain the answer to a question, answer NOT STATED.")
+
+
+def _x_item(kind: str, seed: int, level: int) -> Item:
+    """Levels 9-10: one document per (level, seed), shared by every question kind; several numbered answers per question
+    for the aggregations (credit per answer)."""
+    W = _world_x(rng(BLOCK, f"doc{level}", seed), level)
+    doc = _render_hard(W)
+    build, plans = _X[kind]
+    plan = list(plans[level])
+    rng(BLOCK, f"{kind}{level}plan", seed).shuffle(plan)
+    qs = []
+    for k, typ in enumerate(plan):
+        for a in range(80):
+            q = build(rng(BLOCK, f"{kind}{level}q{k}.{a}", seed), W, typ, level)
+            # distinct questions; for the first 40 draws also a distinct key (another service window / cause)
+            if q and all(x[1] is not None for x in q[1]) and all(
+                    q[0] != x[0] and [e for _, e in q[1]] != [e for _, e in x[1]] and (a >= 40 or not set(q[2]) & set(x[2])) for x in qs):
+                qs.append(q)
+                break
+        else:
+            raise RuntimeError(f"no question of type {typ} for {kind} L{level} seed {seed}")
+    lines, checks, expected, n = [], [], [], 1
+    for i, q in enumerate(qs):
+        text = q[0]
+        if len(q[1]) > 1:
+            labels = q[3]
+            text += " Give " + ", ".join(f"ANSWER {n + j} ({lab})" for j, lab in enumerate(labels[:-1])) + \
+                f" and ANSWER {n + len(labels) - 1} ({labels[-1]})."
+        else:
+            text += f" (ANSWER {n})"
+        lines.append(f"{i + 1}. {text}")
+        for c, e in q[1]:
+            checks.append(c)
+            expected.append(e)
+        n += len(q[1])
+    ask = "Answer each of these questions:\n" + "\n".join(lines)
+    fin = ("\n\nAnswer from the document only. Finish with one final line per answer, exactly in the form:\n"
+           + "\n".join(f"ANSWER {i + 1}: <answer>" for i in range(len(expected))))
+    return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind,
+                [{"role": "user", "content": doc + "\n\n---\n" + ask + _X_NOTE + fin}], multi_check(checks),
+                max_tokens=32000, meta={"expected": expected, "doc_tokens_est": len(doc) // 4, "level": level,
+                                        "questions": len(qs), "types": plan})
+
+
+def _audit_x(seed: int, level: int) -> Item:
+    """Levels 9-10 of audit: 60 / 90 report lines on a level-9+ log (a smaller one: the report is long) with 16 / 22 errors.
+    Besides the level-7/8 errors (and a duration off by a few minutes: every duration has to be computed) a
+    line can keep a change that was withdrawn, apply a vendor correction that was never confirmed, use a mistyped user
+    count, or name the manager of a move that was cancelled or took effect on another date. Right lines are picked among
+    incidents whose facts changed in those ways (a reader who flags every change pays for it)."""
+    r = rng(BLOCK, f"audit{level}", seed)
+    W = _world_x(r, level, AUDIT_X_TOKENS[level])
+    doc = _render_hard(W)
+    elig = [i for i in W["incidents"] if i["engineer"] in W["staff"] and _clean_x(W, i) and not i.get("ghost")]
+    live = [i for i in elig if not i["dup_of"]]
+    affected = {n for n, *_ in W["retro"]} | {n for n, _ in W["cancelled"]}
+
+    def mgr(i, hist="hist"):
+        return _mh_x(W, i, "mgr", W[hist])
+    pools = {"void_kept": [i for i in live if "void" in i["meta"] and "reinstate" not in i["meta"]],
+             "cond_applied": [i for i in live if "cond" in i["meta"] and i["meta"]["cond"][0] != "yes"],
+             "cond_missed": [i for i in live if "cond" in i["meta"] and i["meta"]["cond"][0] == "yes"],
+             "users_unfixed": [i for i in live if "fix" in i["meta"] and i["naive"]["users"] != i["users"]],
+             "org_as_logged": [i for i in live if i["engineer"] in affected and mgr(i) != mgr(i, "hist0")],
+             "stale_sev": [i for i in live if i["sev0"] != i["sev"]], "stale_code": [i for i in live if i["code0"] != i["code"]],
+             "withdrawn": [i for i in elig if i["dup_of"]], "digits": [i for i in live if len(set(str(i["users"]))) > 1],
+             "duration": live, "minutes": live, "reinstated": [i for i in live if "reinstate" in i["meta"]]}
+    kinds = ["void_kept", "cond_applied", "users_unfixed", "org_as_logged", "stale_sev", "stale_code", "withdrawn", "digits",
+             "duration", "void_kept", "users_unfixed", "org_as_logged", "minutes", "minutes", "cond_missed", "reinstated"]
+    decoys = ["void_kept", "cond_applied", "cond_missed", "users_unfixed", "org_as_logged", "stale_code", "reinstated", "org_as_logged"]
+    n_lines = 60
+    if level >= 10:
+        kinds += ["minutes", "minutes", "org_as_logged", "cond_applied", "stale_sev", "withdrawn"]
+        decoys += ["reinstated", "org_as_logged", "cond_applied", "users_unfixed", "void_kept"]
+        n_lines = 90
+    used, plan = set(), {}
+    for k in kinds:
+        c = [i for i in pools[k] if i["id"] not in used]
+        if c:
+            i = r.choice(c)
+            used.add(i["id"])
+            plan[i["id"]] = k
+    for k in decoys:
+        c = [i for i in pools[k] if i["id"] not in used]
+        if c:
+            used.add(r.choice(c)["id"])
+    rest = r.sample([i for i in live if i["id"] not in used], n_lines - len(used))
+    chosen = sorted([W["by_id"][x] for x in used] + rest, key=lambda i: i["opened"])
+
+    def fields(i):
+        d = i["resolved"] - i["opened"]
+        return {"service": i["service"], "sev": i["sev"], "users": i["users"], "dur": int(d.total_seconds() // 60), "code": i["code"],
+                "mgr": mgr(i)}
+    lines = []
+    for i in chosen:
+        f = fields(i)
+        k = plan.get(i["id"])
+        if k == "void_kept":
+            fld, t_last, _vd = i["meta"]["void"]
+            f[fld] = [v for w, v in i["tl"][fld] if w <= t_last][-1]
+        elif k == "reinstated":   # the reader stopped at the withdrawal
+            fld, vd, _rd = i["meta"]["reinstate"]
+            f[fld] = _value_at(i, fld, vd)
+        elif k == "cond_applied":
+            f["code"] = i["meta"]["cond"][4]
+        elif k == "cond_missed":
+            f["code"] = i["meta"]["cond"][3]
+        elif k == "users_unfixed":
+            f["users"] = i["naive"]["users"]
+        elif k == "org_as_logged":
+            f["mgr"] = mgr(i, "hist0")
+        elif k == "stale_sev":
+            f["sev"] = i["sev0"]
+        elif k == "stale_code":
+            f["code"] = i["code0"]
+        elif k == "minutes":
+            f["dur"] += r.choice([-1, 1]) * r.randint(1, 9) if f["dur"] > 10 else r.randint(1, 9)
+        elif k == "digits":
+            s_ = str(f["users"])
+            p = r.choice([j for j in range(len(s_) - 1) if s_[j] != s_[j + 1]])
+            f["users"] = int(s_[:p] + s_[p + 1] + s_[p] + s_[p + 2:])
+        elif k == "duration":
+            f["dur"] += 60 if f["dur"] <= 60 or r.random() < 0.5 else -60
+        if k and k != "withdrawn" and f == fields(i):   # the stale value happens to equal the final one: no error after all
+            plan.pop(i["id"])
+        lines.append(f"- {i['id']} ({f['service']}, {f['sev']}): about {f['users']:,} users affected, resolved after {f['dur'] // 60}h "
+                     f"{f['dur'] % 60:02d}m, root-cause code {f['code']}; handled by {i['engineer']}, whose manager at the time was "
+                     f"{f['mgr']}.")
+    exp = [i["id"] for i in chosen if i["id"] in plan]
+    report = "## Draft reliability report (to be checked)\n\n" + "\n".join(lines)
+    question = ("The draft reliability report above was written from the incident log before it. Check EVERY line of the report "
+                "against the log: the log is the source of truth, and a withdrawn incident must not appear in the report at all (its "
+                "line is an error). The manager named must be the one the engineer reported to when the incident was opened." + _X_NOTE.replace(
+                    " If the document does not contain the answer to a question, answer NOT STATED.", "")
+                + "\nList the ids of all incidents whose report line contains at least one error, in report order.")
+    fin = "\n\nAnswer from the documents only. Finish with a final line exactly in the form:\nANSWER: <comma-separated incident ids, or none>"
+
+    def check(t, _t=None, exp=tuple(exp)) -> float:
+        got = set(re.findall(r"INC-\d+", final_answer(t) or ""))
+        return max(0.0, (len(got & set(exp)) - len(got - set(exp))) / len(exp))
+    return Item(f"{BLOCK}.audit.L{level}.{seed}", BLOCK, "audit",
+                [{"role": "user", "content": doc + "\n\n---\n" + report + "\n\n---\n" + question + fin}], check, max_tokens=32000,
+                meta={"expected": ", ".join(exp), "doc_tokens_est": (len(doc) + len(report)) // 4, "level": level, "wrong": len(exp)})
+
+
+MAX_LEVEL = 10
 KINDS = {"lookup": lookup, "multihop": multihop, "count": count, "latest": latest, "total": total, "audit": audit}

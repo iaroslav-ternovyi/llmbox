@@ -179,7 +179,8 @@ def _writing_oracle(it: Item) -> str | None:
         from .suite import writing as W
         if it.kind == "i18n":
             return W.i18n_reference(it)
-        return W._proofread_texts(int(it.id.split(".")[-1]), it.meta["level"])[0]
+        texts = W._proofread_x_texts if it.meta["level"] >= 9 else W._proofread_texts   # levels 9-10 draw from a larger bank
+        return texts(int(it.id.split(".")[-1]), it.meta["level"])[0]
     if it.kind == "proofread":
         user = it.messages[0]["content"]
         from .suite import writing as W
