@@ -515,12 +515,12 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
 <p class="lede">AI models you can run on your own computer, graded on real work (coding, tools, documents, writing) and timed on a real PC.
 Pick your graphics card or Mac: the table shows what fits, how fast it answers and how close it gets to Claude. Every model page has the file to download and settings to copy.</p>
 {NEWBIE}
-<section class="boxbar"><span class="sc">Your box</span>
+<section class="boxbar" id="box"><span class="sc">Your box</span>
  <select id="gpu" aria-label="GPU or Mac"><option value="">the reference PC ({esc(ref_box)})</option></select>
  <span class="bl">RAM</span><select id="ram" aria-label="System RAM or a Mac's unified memory"><option value="8">8 GB</option><option value="16">16 GB</option><option value="24">24 GB</option><option value="32">32 GB</option><option value="36">36 GB</option><option value="48">48 GB</option><option value="64" selected>64 GB</option><option value="96">96 GB</option><option value="128">128 GB</option><option value="192">192 GB</option><option value="256">256 GB</option><option value="512">512 GB</option></select>
  <span class="bl" id="bwl">speed</span><select id="bw" aria-label="RAM speed"></select>
  <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
- <span id="boxnote" class="q">speeds measured on this box</span></section>
+ <span id="boxnote" class="q">speeds measured on this box</span><span id="fitsum" class="q"></span></section>
 <section class="panel chart hero"><h2 class="ch2">Smarter or faster: what runs best on your box</h2>
  <div id="scatter">{_scatter(local)}</div>
  <p class="cap">Each point is a model with the settings it was measured with. Higher = closer to Claude Opus 5.5 on the same tasks;
@@ -628,7 +628,7 @@ _HOME_CSS = """
 .boxbar .sc{margin-right:4px}
 .boxbar select,.boxbar input{background:#0b0c09;color:var(--ink);border:1px solid var(--line);padding:6px 8px;font:13px "IBM Plex Mono"}
 .boxbar select:focus,.boxbar input:focus{border-color:var(--amber);outline:none}.boxbar select:disabled,.boxbar input:disabled{opacity:.35}
-.boxbar #boxnote{margin-left:auto}
+.boxbar #boxnote{margin-left:auto}.boxbar #fitsum{color:var(--soft)}.boxbar #fitsum:before{content:"· ";color:var(--faint)}
 .rhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding:18px 16px 6px}
 .seg{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.seg .sc{margin-right:8px}
 .seg button{background:none;border:1px solid transparent;color:var(--muted);font:12px "IBM Plex Mono";padding:5px 10px;cursor:pointer;white-space:nowrap}
@@ -823,6 +823,8 @@ function render() {
       row.querySelector(".fit").innerHTML = sh ? `✓ ${kfmt(sh.ctx)}` : "—";
     }
   }
+  const loc = pts.filter(p => !p.cloud), nfit = loc.filter(p => p.t2).length;
+  $("#fitsum").textContent = nfit === loc.length ? `all ${loc.length} models fit` : `${nfit} of ${loc.length} models fit`;
   const tb = $(".rank tbody");
   const key = sortBy === "speed" ? p => p.t2 || 0 : p => p.vs ?? -1;
   const by = (a, b) => sortDir * (key(b) - key(a)) || (b.vs ?? -1) - (a.vs ?? -1);
@@ -915,6 +917,10 @@ function savedBox(DATA) {
     return boxFrom(g, parseInt(s.ram), parseFloat(s.bwn) || parseFloat(s.bw)); } catch (e) { return null; }
 }
 """
+BOXCHIP_JS = r"""(function () {   // the box picked on the home page, named in every page's header
+  try { const s = JSON.parse(localStorage.getItem("llmbox-box") || "null"), c = document.getElementById("boxchip");
+    if (c && s && s.gpu) c.querySelector("b").textContent = s.gpu + (/^Mac/.test(s.gpu) ? ` · ${s.ram} GB` : ` · ${s.ram} GB RAM`); } catch (e) {}
+})();"""
 TAB_LINKS = {"MODELS": "index.html", "NEW": "new.html", "COMPARE": "compare.html", "METHOD": "method.html"}
 
 
@@ -925,9 +931,10 @@ def _page(title: str, tab: str, body: str, css: str = "", js: str = "", links: d
             f'<title>{esc(title)}</title><link rel="stylesheet" href="osc.css"><style>{_PAGES_CSS}{css}</style></head><body>'
             '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
             '<div class="wrap"><header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>'
-            f'<nav class="tabs">{nav}</nav></header>{body}'
+            f'<nav class="tabs">{nav}</nav><a class="boxchip" id="boxchip" href="index.html#box" title="the box speeds and fit are shown for; change it on the home page">'
+            f'Your box <b>reference PC</b></a></header>{body}'
             f'<footer><span>Every number on this page comes from a saved run record.</span><span>generated {time.strftime("%b %d, %Y %H:%M")}</span></footer>'
-            f'</div>{f"<script>{js}</script>" if js else ""}</body></html>')
+            f'</div><script>{BOXCHIP_JS}</script>{f"<script>{js}</script>" if js else ""}</body></html>')
 
 
 def load_records(host: str, suite_version: str, tier: str) -> dict:
@@ -1944,8 +1951,8 @@ def _optimize_table(opts: dict, ranked: set | None = None) -> str:
             f"weights, KV cache type, speculative decoding with the model's MTP head where it has one, batch sizes, then <code>llmbox tune</code>). Same file, "
             f"same context. Median: <b>{_st.median(gains) * 100:+.0f}%</b> in a short chat"
             + (f", <b>{_st.median(deep) * 100:+.0f}%</b> at 32k" if deep else "") + ".</p>"
-            f'<table class="opt"><tr><th class="l">model</th><th>stock tok/s</th><th>llmbox tok/s</th><th>gain</th><th>stock at 32k</th>'
-            f"<th>llmbox at 32k</th><th class='l'>tuned</th></tr>{tr}</table>")
+            f'<div class="tw"><table class="opt"><tr><th class="l">model</th><th>stock tok/s</th><th>llmbox tok/s</th><th>gain</th><th>stock at 32k</th>'
+            f"<th>llmbox at 32k</th><th class='l'>tuned</th></tr>{tr}</table></div>")
 
 
 def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None = None, ref_row: dict | None = None,
@@ -2070,7 +2077,7 @@ _METHOD_CSS = """
 .short b{color:var(--ink);font-weight:500}
 .exs{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin:18px 0 6px}.exs .sc{margin-bottom:8px}
 .ex{display:grid;grid-template-columns:200px minmax(0,1fr);gap:12px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)}.ex .m{font:600 14px "IBM Plex Sans Condensed"}
-@media (max-width:900px){.mdoc{grid-template-columns:1fr}.toc{display:none}.exs{grid-template-columns:1fr}.ex{grid-template-columns:1fr}}
+@media (max-width:900px){.mdoc{grid-template-columns:minmax(0,1fr)}.toc{display:none}.exs{grid-template-columns:1fr}.ex{grid-template-columns:1fr}}
 """
 
 
@@ -2245,11 +2252,11 @@ _CMP_CSS = """
 .two2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px}
 .sd{display:grid;grid-template-columns:130px minmax(0,1fr);gap:14px;align-items:center;margin-bottom:12px}.sd .k{font:600 14px "IBM Plex Sans Condensed"}.sd .k small{display:block;font:400 11px "IBM Plex Mono";color:var(--muted)}
 .sb{position:relative;height:22px;background:var(--line2)}.sb+.sb{margin-top:3px}.sb i{position:absolute;left:0;top:0;bottom:0}.sb.a i{background:rgba(255,176,0,.55)}.sb.b i{background:rgba(232,228,216,.22)}
-.sb span{position:absolute;left:8px;top:2px;font-size:12px;white-space:nowrap}
+.sb{overflow:hidden}.sb span{position:absolute;left:8px;top:2px;font-size:12px;white-space:nowrap}
 .only{display:grid;grid-template-columns:1fr 1fr;gap:18px}.only .sc{margin-bottom:8px;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--soft)}
 .only li{list-style:none;font-size:12.5px;color:var(--soft);padding:3px 0}
-@media (max-width:900px){.two2,.only,.sides{grid-template-columns:1fr}.side.a{border-right:0;border-bottom:1px solid var(--line2)}.side .nums{grid-template-columns:1fr 1fr}
- .dr{grid-template-columns:minmax(0,1fr) 30px minmax(0,1.3fr) 30px 36px;gap:8px}.pick select{width:100%}}
+@media (max-width:900px){.two2,.only,.sides{grid-template-columns:minmax(0,1fr)}.sd{grid-template-columns:minmax(0,1fr);gap:6px}.side.a{border-right:0;border-bottom:1px solid var(--line2)}.side .nums{grid-template-columns:1fr 1fr}
+ .dr{grid-template-columns:minmax(0,1fr) 30px minmax(0,1.3fr) 30px 36px;gap:8px}.pick select{width:calc(100% - 26px)}.pick .sw{order:9}}
 """
 _HW_JS = r"""
 const $ = s => document.querySelector(s);
