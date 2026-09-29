@@ -9,11 +9,20 @@ relative `ln -s` target read from the link's directory, writing through a dangli
 `rm -r link` removing only the link and `rm -r link/` emptying the target, `cp` following symlinks while `cp -r`/`-a`
 copy them, `ln -sf` into a symlinked directory, `..` after `cd` through a symlink, a read-only directory or file.
 
+Levels 7-10 add globs (`cp dir/* d` and `rm dir/*` skip a subdirectory and fail, `rmdir dir/*`, `chmod a-w dir/*`),
+several sources (`cp a missing b d` copies the others), `cp -f` onto a read-only hard link (a new file: the other name
+keeps the old one), `cp -a` onto a hard-linked file (replaced) while `cp -r` writes into it, `cat f > g` onto its own hard
+link (both emptied), `cp -rT` / `dir/.`, `mv -T`, `cp -rH` / `-rL`, `ln -f`, `ln -sr` (both paths canonicalized),
+`rmdir -p` stopping part-way, `rm -r d/.` refused, a read-only directory renamed in place but not moved, and sessions
+inside a symlinked directory: every relative path in them resolves physically, `cd ..` and `cd ../x` logically.
+
 The answers come from an emulator of a small in-memory filesystem (no subprocess, deterministic, milliseconds per item),
 checked against bash + GNU coreutils 8.32 / 9.4 / 9.7 in Docker by tests/real_programs.py (mode fs). Anything the
 emulator does not model exactly, or where those versions differ, raises Unsupported and the generator never goes there.
-Levels: 1-3 one trap in 5-10 commands, 4-6 15-25 commands, 7-8 30-50 with symlinks and hard links interacting, 9-10
-60-100: the difficulty is the volume of exact state plus interacting traps. Credit per question; the tree per path.
+Levels: 1-3 one trap in 5-10 commands; 4-6 15-25 commands, 4-6 traps; 7-8 30-50 commands with symlinks, hard links,
+globs and a cd session interacting; 9 85-100 and 10 170-200 commands (Claude Opus solved 60-100-command versions of
+both at 1.0, 2026-09-29) with a bigger starting tree and questions aimed at the paths that took the most commands or
+symlinks to get right. Credit per question; the failed commands by overlap; the tree per path.
 """
 from __future__ import annotations
 
@@ -645,7 +654,13 @@ class FS:
                 self._del(dp, dn)
             elif not dp.mode & 0o200:
                 return fail()
-            self._put(dp, dn, self._new("l", 0o777, target=s.target))
+            if arch and s.ino in self._hl:           # -a keeps hard links between names of one symlink too
+                self._put(dp, dn, self._hl[s.ino])
+                return True
+            node = self._new("l", 0o777, target=s.target)
+            self._put(dp, dn, node)
+            if arch:
+                self._hl[s.ino] = node
             return True
         if s.kind == "f":
             if not s.mode & 0o400:

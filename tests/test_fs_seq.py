@@ -143,6 +143,11 @@ for name, cmds, want_st, want_tree in CASES:
     check(f"emulator: {name} (exit statuses)", st == want_st, f"{st} != {want_st}")
     check(f"emulator: {name} (tree)", tree == want_tree, f"{tree} != {want_tree}")
 
+# cp -a keeps a hard link between two names of one symlink (found by tests/real_programs.py fs: L9 seed 290)
+_st, _t, fs = run(["mkdir s", "ln -s zz s/l", "ln s/l s/m", "cp -a s t", "cp -r s u"])
+same = lambda a, b: fs.walk(a, False, False)[2] is fs.walk(b, False, False)[2]
+check("cp -a: hard-linked symlinks stay linked", same("t/l", "t/m") and not same("u/l", "u/m") and not same("s/l", "t/l"))
+
 _st, _t, fs = run(["mkdir -p a/b", "echo x > a/b/f", "ln -s a/b l", "ln -s nope d", "ln -s nd/t e", "ln -s l ll"])
 for kind, path, want in [("readlink", "l", F.ROOT + "/a/b"), ("readlink", "d", F.ROOT + "/nope"), ("readlink", "e", "ERROR"),
                          ("readlink", "ll/f", F.ROOT + "/a/b/f"), ("readlink", "l/../f", F.ROOT + "/a/f"), ("cat", "ll/f", "x"),
