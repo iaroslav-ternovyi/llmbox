@@ -38,9 +38,9 @@ TIPS = {
                 ["Meeting minutes with owners and dates", "UI strings in Russian / Ukrainian with ICU plurals"]),
     "reasoning": ("Reasoning", "Multi-step problems with exact answers, several per problem.",
                   ["Order total with tiered discounts and tax", "Trace a function by hand; schedule jobs"]),
-    "techhelp": ("Tech help", "Questions about your own machines, answered from configs and logs: 3-5 per machine, every answer computed.",
-                 ["Which host ports does docker compose publish?", "Which interface does this packet leave through?"]),
-    "knowledge": ("Knowledge & \"I don't know\"", "Exact facts developers look up (Python, shell, error codes); two questions per task ask about things that do not exist.",
+    "techhelp": ("Tech help", "Questions about your own machines and projects - configs, logs, a SQLite database, a git repo, a shell script's effect: every answer computed or checked on the real program.",
+                 ["Which host ports does docker compose publish?", "Which files does git status list after these .gitignore files?"]),
+    "knowledge": ("Knowledge & \"I don't know\"", "Exact facts developers look up (Python, shell, regular expressions, Node.js event order, error codes); two questions per task ask about things that do not exist.",
                   ["What does this one-liner print?", "Invented flags and functions: saying UNKNOWN scores"]),
     "explain": ("Explaining", "Explain a made-up system in 130-190 words; a fixed reader model must then work out 8 cases from the explanation alone.",
                 ["How a CLI decides each setting", "What a month of an API costs"]),
@@ -1260,9 +1260,12 @@ _GRADING = {   # how each block is graded (from the suite modules' own descripti
     "code": "One function or module from a written spec, in Python or JavaScript. Hidden unit tests from a reference implementation decide.",
     "tools": "Function calls against a simulated CRM with fresh customers and invoices. Graded on the final state of that world: "
              "a wrong or extra email, discount or payment costs points.",
-    "techhelp": "Generated configs and logs of a machine (docker compose, nginx, routing tables, chmod chains, journal logs) with 3-5 "
-                "questions each; every answer is computed from the config (chmod checked against GNU chmod). Credit per question.",
-    "knowledge": "8 short questions per task on Python, shell and error codes, answers taken from running the real thing; two per task "
+    "techhelp": "Generated configs and logs of a machine (docker compose, nginx, routing tables, chmod chains, journal logs), SQLite queries, "
+                ".gitignore files, long git and shell command sequences, with several questions each. Answers come from the real program "
+                "(SQLite runs the queries) or from a model of it checked against the real one (nginx, iproute2, git, GNU coreutils, "
+                "tests/real_programs.py). Credit per question.",
+    "knowledge": "8 short questions per task on Python, shell, regular expressions, Node.js event order and error codes, answers taken from "
+                 "running the real thing (CPython, bash, Node 22); two per task "
                  "ask about something that does not exist. Right 1, UNKNOWN 1/3 (made-up: 1), invented 0.",
     "explain": "The model explains a made-up system within a word limit; a fixed reader model (gpt-oss-20b, greedy) then works out 8 "
                "cases from the explanation alone. The score is the share it gets right.",
