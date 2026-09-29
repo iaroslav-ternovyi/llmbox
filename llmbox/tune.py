@@ -133,7 +133,7 @@ def run(host: str, rid: str, out=print, measure=None) -> dict:
         out("apply to the recipe's hardware layer (llama-swap launcher/entry change: box must be idle, your call)")
     else:
         out("the recipe's settings are already the fastest measured")
-    fast = next(((n, ov, row) for n, ov, ok, row in tried if not ok), None)
+    fast = next(((n, ov, row) for n, ov, ok, row in tried if not ok and ov[0].startswith("placement.ctx=")), None)   # KV-in-RAM is no daily profile
     if fast and fast[2]["step_s"]:
         daily = one("fast profile + winners", fast[1] + res["chosen"]) if res["chosen"] else fast[2]
         res["fast_profile"] = {"overrides": fast[1] + res["chosen"], "step_s": daily["step_s"], "decode": daily["decode"],
