@@ -110,6 +110,30 @@ def model_name(r: dict) -> str:
         n = m
 
 
+# a model's family is its architecture as the GGUF says (Hugging Face base_model tags stop short: Tiel's chain ends at
+# Ornith, itself a Qwen3.6 fine-tune): one colour per family on the chart
+FAMILIES = [("qwen35moe", "Qwen MoE 35B-A3B", "#FFB000"), ("qwen3moe", "Qwen MoE", "#FFB000"), ("qwen", "Qwen dense", "#4FC3C7"),
+            ("gemma", "Gemma", "#5B8DEF"), ("gpt-oss", "gpt-oss", "#9CCC65"), ("bailing", "Ling", "#B07CF5"),
+            ("k2-horizon", "K2 Horizon", "#E8566C"), ("", "other", "#9AA0A6")]
+
+
+def family(arch: str | None) -> tuple[str, str]:
+    """(family name, colour) of a GGUF architecture."""
+    a = (arch or "").lower()
+    return next((n, c) for k, n, c in FAMILIES if a.startswith(k))
+
+
+def _kind(repo: str | None) -> str:
+    """release / fine-tune / uncensored, from the Hugging Face lineage (cached); release when unknown."""
+    if not repo:
+        return "release"
+    try:
+        from . import candidates as C
+        return C.lineage(repo).get("kind") or "release"
+    except Exception:
+        return "release"
+
+
 def _name_of(rec: dict) -> str:
     """model_name for a saved run record."""
     m = rec.get("model") or (rec.get("recipe") or {}).get("model") or {}
@@ -224,7 +248,7 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
                         "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used, "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv),
                         "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "ctx": ctx, "k2": round(cal.k2, 4), "kd": round(cal.kd, 4),
                         "deepK": cal.deep_k, "size": round((sh.total_bytes or 0) / 1e9, 1),
-                        "params": int(sh.total_params * (1 - (sh.mtp_bytes or 0) / sh.total_bytes)) if sh.total_bytes else 0,
+                        "arch": sh.arch, "params": int(sh.total_params * (1 - (sh.mtp_bytes or 0) / sh.total_bytes)) if sh.total_bytes else 0,
                         "active": sh.active_params}
     return {"recipes": out, "ref": {"gpu": prof["hw"]["gpus"][0]["name"].replace("NVIDIA GeForce ", "") if prof["hw"]["gpus"] else "",
                                     "vram": ref_hw.vram_mib, "ram": ref_hw.ram_mib, "rambw": ref_hw.ram_bw_gbs, "vrambw": ref_hw.vram_bw_gbs},
@@ -330,8 +354,9 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
             break
 
     presets = "".join(f'<button class="{"on" if i == 0 else ""}" data-p="{i}" title="{esc(" · ".join(f"{LABEL[b].lower()} {v}" for b, v in w.items()))}">{esc(n)}</button>' for i, (n, w) in enumerate(PRESETS))
-    data = dict(sd, presets=[w for _, w in PRESETS], refBlocks=(ref or {}).get("blocks") or {},
-                points=[{"id": r["id"], "name": labels[r["id"]], "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": r["speed"].get("decode_tps"),
+    data = dict(sd, families=[[n, c] for _k, n, c in FAMILIES], presets=[w for _, w in PRESETS], refBlocks=(ref or {}).get("blocks") or {},
+                points=[{"id": r["id"], "name": labels[r["id"]], "model": names0[r["id"]], "quant": _quant(r["file"]).split(" ")[0],
+                         "fam": family((sd["recipes"].get(r["id"]) or {}).get("arch"))[0], "kind": _kind(r.get("hf_repo")), "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": r["speed"].get("decode_tps"),
                          "td": float(report._deep(r["speed"])) if report._deep(r["speed"]) != "-" else None, "rank": list(ranks[r["id"]])} for r in local]
                 + [{"id": r["id"], "name": model_name(r), "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": None, "td": None,
                     "rank": None, "cloud": True} for r in clouds])
@@ -354,15 +379,17 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
  <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
  <span id="boxnote" class="q">speeds measured on this box</span></section>
 <section class="picks">{picks}</section>{optline}
+<section class="panel chart hero"><h2 class="ch2">Smarter or faster: what runs best on your box</h2>
+ <div id="scatter">{_scatter(local)}</div>
+ <p class="cap">Each point is a model with the settings it was measured with. Higher = closer to Claude Opus 5.5 on the same tasks;
+ further right = faster on the box you picked above. Bright points are the best trade-offs: no other model is both smarter and faster.
+ Point at a model for its range and speed, click it for its page. <a href="method.html">How scores work</a></p></section>
 <section class="panel rankp"><div class="lbl">Ranking <span class="faint">· suite v{esc(suite_version)}{" · preliminary: runs of this version are still coming in" if "-dev" in suite_version else ""}</span></div>
  <div class="rhead"><div class="seg" role="group" aria-label="rank by"><span class="sc">Rank by</span>{presets}</div>
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
  <div class="tw"><table class="rank">{head}{''.join(body)}</table></div>
  <p class="rnote">Places by score. A dashed line: every model above it is measurably better than the models below; inside a group the order is not settled yet (hover a place for its tie range).</p>{qline}</section>
 <div class="below">
- <section class="panel chart"><div class="lbl">Smarter vs faster</div><div id="scatter">{_scatter(local)}</div>
-  <p class="legend"><svg width="12" height="16" viewBox="0 0 12 16"><g stroke="#FFB000" stroke-opacity=".6" stroke-width="1.5"><line x1="6" y1="1" x2="6" y2="15"/><line x1="1" y1="1" x2="11" y2="1"/><line x1="1" y1="15" x2="11" y2="15"/></g></svg>
-  <span>where the score probably really is (95%). With ~30 tasks one task moves it a few points; when two ranges overlap, the difference is not settled yet. <a href="method.html">More</a></span></p></section>
  <div class="side"><section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
  {_news_panel({r["id"] for r in local})}</div>
 </div>
@@ -442,6 +469,20 @@ _HOME_CSS = """
 .picks .pk{overflow-wrap:anywhere}
 .optl{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 22px;padding:12px 18px;border:1px solid var(--line);border-top:0;font-size:13px}
 .side{display:flex;flex-direction:column;gap:22px;min-width:0}
+.hero{padding:22px 22px 14px;margin:0 0 22px}.hero .ch2{font:600 22px "IBM Plex Sans Condensed";margin:0 0 12px;color:var(--ink)}
+.hero .cap{font-size:12.5px;line-height:1.6;color:var(--muted);max-width:110ch;margin:8px 4px 2px}
+#scatter{position:relative}.scatter2{width:100%;height:auto;display:block}
+.scatter2 .gl{stroke:#1d1e19}.scatter2 .axl{stroke:#3a3b33}.scatter2 .ax{fill:#6c695f;font-size:12px}.scatter2 .axt{fill:#8b877b;font-size:12px}
+.scatter2 .ref{stroke:#56544b;stroke-dasharray:6 5}.scatter2 .refl{fill:#8b877b;font-size:12px}.scatter2 .refv{fill:#c9c4b5}
+.scatter2 .lb{fill:#7d7a70;font-size:12.5px;cursor:pointer}.scatter2 .lb.on{fill:#ece7da}.scatter2 .pt{cursor:pointer}
+#scatter.hov .pt,#scatter.hov .lb{opacity:.18}#scatter.hov .on2{opacity:1!important}
+.clg{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--soft);margin:0 0 6px 4px}.clg span{display:inline-flex;align-items:center;gap:6px}
+.clg i{width:10px;height:10px;border-radius:50%;display:inline-block}.clg .k{color:var(--muted)}
+.ctip{position:absolute;z-index:5;width:270px;background:#15160f;border:1px solid var(--amber-dim);padding:10px 12px;font-size:12px;line-height:1.55;pointer-events:none}
+.ctip b{display:block;color:var(--ink);font-weight:500;margin-bottom:2px}.ctip span{display:block;color:var(--muted)}.ctip em{font-style:normal;color:var(--amber)}
+.below{grid-template-columns:minmax(0,1fr)!important}.below .side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
+@media (max-width:760px){.below .side{grid-template-columns:1fr}.hero{padding:16px 10px 10px}}
+
 .news .nt{display:inline-block;font-size:10px;letter-spacing:.08em;padding:1px 5px;margin-right:4px;border:1px solid var(--amber-dim);color:var(--amber)}
 .news .nt.repo_update,.news .nt.runtime,.news .nt.pr{border-color:var(--line);color:var(--muted)}
 .news .nd{display:block;font-size:12px;color:var(--faint);margin-top:3px;overflow-wrap:anywhere}.news .nr{font-size:12px;margin-left:8px}
@@ -503,39 +544,87 @@ function tile(v, small, pred) { if (v == null) return `<span class="tile">—<sm
   const c = v >= 85 ? "hi" : v >= 50 ? "mid" : "lo";
   return `<span class="tile ${c}${pred ? " pred" : ""}">${pred ? "~" : ""}${fmt(v)}<small>${small}</small></span>`; }
 function weighted(b, w) { let s = 0, n = 0; for (const k in w) { s += (b[k] || 0) * w[k]; n += w[k]; } return n ? s / n : 0; }
-function scatter(pts) {   // up = smarter, right = faster. Numbered dots + a list: names never drift away from their dot
-  const W = 640, H = 300, L = 54, B = 262, T = 24, R = 618;
-  const ok = pts.filter(p => p.t2 && p.vs != null).sort((a, b) => b.vs - a.vs);
-  if (!ok.length) return "";
-  const rng = p => { const k = p.vs / p.cap; return [p.ci[0] * k, Math.min(100, p.ci[1] * k)]; };
-  const ymin = Math.max(0, Math.floor((Math.min(...ok.map(p => rng(p)[0])) - 3) / 10) * 10);
-  const xs = ok.map(p => p.t2), span = Math.max(10, Math.max(...xs) - Math.min(...xs));
-  const step = span > 150 ? 50 : span > 60 ? 20 : span > 25 ? 10 : 5;   // zoom the speed axis onto the models, not onto 0
-  const xmin = Math.max(0, Math.floor((Math.min(...xs) - span * 0.25) / step) * step), xmax = Math.ceil((Math.max(...xs) + span * 0.25) / step) * step;
-  const X = v => L + (v - xmin) / (xmax - xmin) * (R - L), Y = v => B - (v - ymin) / (100 - ymin) * (B - T);
+function scatter(pts) {   // up = closer to Claude Opus, right = faster on the box picked. Names sit at their points.
+  // a phone gets its own proportions (narrower and taller), not the desktop chart shrunk until its names are unreadable
+  const narrow = (document.querySelector("#scatter") || {}).clientWidth < 700;
+  const W = narrow ? 460 : 1000, H = narrow ? 600 : 540, L = narrow ? 44 : 58, R = narrow ? 346 : 812, T = 26, B = narrow ? 536 : 478;   // the right margin names the Claude lines
+  const loc = pts.filter(p => !p.cloud && p.t2 && p.vs != null), cloud = pts.filter(p => p.cloud && p.vs != null).sort((a, b) => b.vs - a.vs);
+  if (!loc.length) return "";
+  const fams = Object.fromEntries(DATA.families), col = p => fams[p.fam] || "#9AA0A6";
+  // y: just under the weakest model at >= 50% of the frontier; weaker ones sit on the floor with an arrow
+  const main = loc.filter(p => p.vs >= 50), lowest = Math.min(...(main.length ? main : loc).map(p => p.vs));
+  const ymin = Math.max(0, Math.floor((lowest - 6) / 5) * 5), ystep = 100 - ymin > 40 ? 10 : 5;
+  const xs = loc.map(p => p.t2), span = Math.max(10, Math.max(...xs) - Math.min(...xs));
+  const xstep = span > 150 ? 50 : span > 60 ? 20 : span > 25 ? 10 : 5;
+  const xmin = Math.max(0, Math.floor((Math.min(...xs) - span * 0.12) / xstep) * xstep), xmax = Math.ceil((Math.max(...xs) + span * 0.12) / xstep) * xstep;
+  const X = v => L + (v - xmin) / (xmax - xmin) * (R - L), Y = v => B - (Math.max(v, ymin) - ymin) / (100 - ymin) * (B - T);
+  const front = new Set(loc.filter(p => !loc.some(q => q !== p && q.t2 >= p.t2 && q.vs >= p.vs && (q.t2 > p.t2 || q.vs > p.vs))).map(p => p.id));
   let g = "";
-  for (let v = ymin; v <= 100; v += 10) g += `<line x1="${L}" y1="${Y(v)}" x2="${R}" y2="${Y(v)}" stroke="#1f201b"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v}%</text>`;
-  for (let v = xmin; v <= xmax; v += step) g += `<line x1="${X(v)}" y1="${T}" x2="${X(v)}" y2="${B}" stroke="#18190f"/><text x="${X(v)}" y="${B + 18}" text-anchor="middle">${v}</text>`;
-  g += `<line x1="${L}" y1="${Y(100)}" x2="${R}" y2="${Y(100)}" stroke="#8b877b" stroke-dasharray="5 4"/><text x="${R}" y="${Y(100) - 6}" text-anchor="end" fill="#8b877b">frontier model = 100%</text>`;
-  ok.forEach((p, i) => {
-    const [lo, hi] = rng(p), x = X(p.t2), y = Y(p.vs);
-    g += `<g class="pt" data-id="${p.id}"><g class="ci" stroke="#FFB000" stroke-width="1.5"><line x1="${x}" y1="${Y(hi)}" x2="${x}" y2="${Y(lo)}"/>` +
-         `<line x1="${x - 5}" y1="${Y(hi)}" x2="${x + 5}" y2="${Y(hi)}"/><line x1="${x - 5}" y1="${Y(lo)}" x2="${x + 5}" y2="${Y(lo)}"/></g>` +
-         `<circle cx="${x}" cy="${y}" r="10" fill="${p.pred ? "#0E0F0C" : "#FFB000"}" stroke="#FFB000" stroke-width="2"/>` +
-         `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="12" font-weight="600" fill="${p.pred ? "#FFB000" : "#0E0F0C"}">${i + 1}</text></g>`;
+  for (let v = ymin; v <= 100; v += ystep) g += `<line x1="${L}" y1="${Y(v)}" x2="${R}" y2="${Y(v)}" class="gl"/><text x="${L - 10}" y="${Y(v) + 4}" text-anchor="end" class="ax">${v}%</text>`;
+  for (let v = xmin; v <= xmax; v += xstep) g += `<text x="${X(v)}" y="${B + 22}" text-anchor="middle" class="ax">${v}</text>`;
+  g += `<line x1="${L}" y1="${B}" x2="${R}" y2="${B}" class="axl"/>`;
+  // the cloud models: reference lines, named in the right margin (labels pushed apart when close)
+  let lastY = -99;
+  cloud.forEach(c => { const y = Y(c.vs), ly = Math.max(y + 4, lastY + 15); lastY = ly;
+    g += `<line x1="${L}" y1="${y}" x2="${R}" y2="${y}" class="ref"/><text x="${R + 8}" y="${ly}" class="refl">${narrow ? c.name.replace("Claude ", "") : c.name} <tspan class="refv">${Math.round(c.vs)}%</tspan></text>`; });
+  // one model in several variants (quants): a line through them, slowest to fastest
+  const series = {};
+  loc.forEach(p => (series[p.model] = series[p.model] || []).push(p));
+  Object.values(series).filter(s => s.length > 1).forEach(s => { s.sort((a, b) => a.t2 - b.t2);
+    g += `<polyline points="${s.map(p => `${X(p.t2)},${Y(p.vs)}`).join(" ")}" fill="none" stroke="${col(s[0])}" stroke-width="2" stroke-opacity=".55"/>`; });
+  // markers: filled = the maker's own release, ring = a fine-tune, diamond = an uncensored remix; faded = another model is smarter and faster
+  const boxes = [];
+  const order = loc.slice().sort((a, b) => (front.has(b.id) - front.has(a.id)) || b.vs - a.vs);
+  order.slice().reverse().forEach(p => { const x = X(p.t2), y = Y(p.vs), c = col(p), op = front.has(p.id) ? 1 : .42, low = p.vs < ymin;
+    const mk = p.kind === "uncensored" ? `<path d="M${x} ${y - 7}L${x + 7} ${y}L${x} ${y + 7}L${x - 7} ${y}Z" fill="#0E0F0C" stroke="${c}" stroke-width="2.2"/>`
+      : `<circle cx="${x}" cy="${y}" r="6.5" fill="${p.kind === "fine-tune" ? "#0E0F0C" : c}" stroke="${c}" stroke-width="2.2"${p.pred ? ' stroke-dasharray="3 2"' : ""}/>`;
+    g += `<g class="pt" data-id="${p.id}" opacity="${op}">${mk}${low ? `<path d="M${x - 4} ${y + 11}L${x + 4} ${y + 11}L${x} ${y + 17}Z" fill="${c}"/>` : ""}` +
+         `<circle cx="${x}" cy="${y}" r="16" fill="transparent"/></g>`;
+    boxes.push([x - 8, y - 8, x + 8, y + 8]); });
+  // names next to their points: the first free spot of eight around it, the models on the frontier first
+  const hit = (b) => b[0] < L + 2 || b[2] > R + 2 || b[1] < T - 14 || b[3] > B + 2 || boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
+  const sq = q => (q || "").replace(/^UD-/, "");
+  const labelOf = p => { const s = series[p.model]; if (!s || s.length < 2) return p.model;
+    return s.reduce((a, b) => (b.vs > a.vs ? b : a)) === p ? `${p.model} · ${sq(p.quant)}` : sq(p.quant); };
+  // the series lines are obstacles for names too: sample points along them
+  Object.values(series).filter(s => s.length > 1).forEach(s => { for (let i = 1; i < s.length; i++) {
+    const [a, b] = [s[i - 1], s[i]]; for (let t = 0.15; t < 0.9; t += 0.1) { const x = X(a.t2 + (b.t2 - a.t2) * t), y = Y(a.vs + (b.vs - a.vs) * t); boxes.push([x - 3, y - 3, x + 3, y + 3]); } } });
+  order.forEach(p => { const x = X(p.t2), y = Y(p.vs), txt = labelOf(p) + (p.vs < ymin ? ` ${Math.round(p.vs)}%` : ""), w = txt.length * 7.7 + 4;   // IBM Plex Mono at 12.5: ~7.5 units a character
+    const spots = [[x + 11, y + 4, "start"], [x - 11, y + 4, "end"], [x, y - 13, "middle"], [x, y + 21, "middle"],
+                   [x + 10, y - 9, "start"], [x + 10, y + 17, "start"], [x - 10, y - 9, "end"], [x - 10, y + 17, "end"]];
+    for (const [tx, ty, an] of spots) {
+      const x0 = an === "start" ? tx : an === "end" ? tx - w : tx - w / 2, b = [x0, ty - 11, x0 + w, ty + 3];
+      if (!hit(b)) { boxes.push(b); g += `<text x="${tx}" y="${ty}" text-anchor="${an}" class="lb${front.has(p.id) ? " on" : ""}" data-id="${p.id}">${txt}</text>`; return; }
+    }
   });
-  const legend = ok.map((p, i) => `<li class="pt" data-id="${p.id}"><b>${i + 1}</b><span class="nm">${p.name || p.id}</span><span class="lv">${p.vs.toFixed(0)}%</span><span class="lv">${p.pred ? "~" : ""}${Math.round(p.t2)} tok/s</span></li>`).join("");
-  return `<div class="sc2"><svg viewBox="0 0 ${W} ${H}" class="scatter" font-family="IBM Plex Mono" font-size="11" fill="#6c695f" role="img" aria-label="score against speed">${g}` +
-         `<text x="${R}" y="${H - 2}" text-anchor="end" fill="#8b877b">faster on your box (tok/s) →</text><text x="${L}" y="12" fill="#8b877b">↑ smarter</text></svg>` +
-         `<ol class="lgd2">${legend}</ol></div>`;
+  const famsUsed = [...new Set(loc.map(p => p.fam))];
+  const legend = `<div class="clg">${famsUsed.map(f => `<span><i style="background:${fams[f]}"></i>${f}</span>`).join("")}` +
+    `<span class="k"><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#8b877b"/></svg>release</span>` +
+    `<span class="k"><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="none" stroke="#8b877b" stroke-width="2"/></svg>fine-tune</span>` +
+    `<span class="k"><svg width="14" height="14"><path d="M7 1L13 7L7 13L1 7Z" fill="none" stroke="#8b877b" stroke-width="2"/></svg>uncensored</span>` +
+    `<span class="k"><svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#8b877b" stroke-width="2"/></svg>same model, other quant</span></div>`;
+  return legend + `<svg viewBox="0 0 ${W} ${H}" class="scatter2" font-family="IBM Plex Mono" role="img" aria-label="score against speed">${g}` +
+    `<text x="${(L + R) / 2}" y="${H - 8}" text-anchor="middle" class="axt">tokens per second on your box →</text>` +
+    `<text transform="translate(16 ${(T + B) / 2}) rotate(-90)" text-anchor="middle" class="axt">↑ share of Claude Opus 5.5's score</text></svg><div class="ctip" hidden></div>`;
 }
-function hoverScatter() {   // point at a dot or a name: that model and its range light up, the rest step back
-  const box = document.querySelector("#scatter");
-  box.querySelectorAll(".pt").forEach(el => {
-    el.addEventListener("mouseenter", () => { box.classList.add("hov"); box.querySelectorAll(`.pt[data-id="${el.dataset.id}"]`).forEach(x => x.classList.add("on")); });
-    el.addEventListener("mouseleave", () => { box.classList.remove("hov"); box.querySelectorAll(".pt.on").forEach(x => x.classList.remove("on")); });
+function hoverScatter(pts) {   // a model's point or name: its details in a tip, the others step back
+  const box = document.querySelector("#scatter"), tip = box.querySelector(".ctip"), by = Object.fromEntries((pts || []).map(p => [p.id, p]));
+  if (!tip) return;
+  box.querySelectorAll(".pt, .lb").forEach(el => {
+    el.addEventListener("mouseenter", () => { const p = by[el.dataset.id]; if (!p) return;
+      box.classList.add("hov"); box.querySelectorAll(`[data-id="${p.id}"]`).forEach(x => x.classList.add("on2"));
+      const k = p.vs / p.cap, lo = Math.round(p.ci[0] * k), hi = Math.min(100, Math.round(p.ci[1] * k));
+      tip.innerHTML = `<b>${p.name}</b><span>${p.fam} · ${p.kind}</span><span>score <em>${Math.round(p.vs)}%</em> of Claude Opus (95%: ${lo}-${hi})</span>` +
+        `<span>speed <em>${p.pred ? "~" : ""}${Math.round(p.t2)} tok/s</em>${p.pred ? " predicted for your box" : " measured"}${p.td ? ` · ${Math.round(p.td)} deep in context` : ""}</span>`;
+      const r = box.getBoundingClientRect(), e = el.getBoundingClientRect();
+      tip.hidden = false; tip.style.left = Math.min(r.width - 280, Math.max(0, e.left - r.left + 18)) + "px"; tip.style.top = (e.top - r.top - 8) + "px"; });
+    el.addEventListener("mouseleave", () => { box.classList.remove("hov"); box.querySelectorAll(".on2").forEach(x => x.classList.remove("on2")); tip.hidden = true; });
+    el.addEventListener("click", () => { location.href = `recipe-${el.dataset.id}.html`; });
   });
 }
+let resizeT = null, lastNarrow = null;   // the chart has phone and desktop proportions: redraw when the width crosses over
+addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => { const n = (document.querySelector("#scatter") || {}).clientWidth < 700;
+  if (n !== lastNarrow) { lastNarrow = n; render(); } }, 200); });
 let hwNow = null, preset = 0, sortBy = "score", sortDir = 1;   // any column with data-sort; a second click reverses it
 document.querySelectorAll(".rank th[data-sort]").forEach(th => th.addEventListener("click", () => {
   sortDir = sortBy === th.dataset.sort ? -sortDir : 1; sortBy = th.dataset.sort;
@@ -576,7 +665,7 @@ function render() {
   if (fastest && $("#fastest")) { $("#fastest .pk").textContent = fastest.name || fastest.id; $("#fastest .pk").href = `recipe-${fastest.id}.html`;
     $("#fastest .pv").textContent = `${fastest.pred ? "~" : ""}${fmt(fastest.t2)} tok/s${fastest.pred ? " predicted" : ""}`; }
   $("#scatter").innerHTML = scatter(pts);
-  hoverScatter();
+  hoverScatter(pts);
 }
 function readBox() {
   const g = DATA.gpus.find(x => x[0] === $("#gpu").value);
