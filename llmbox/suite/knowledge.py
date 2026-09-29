@@ -25,6 +25,7 @@ import subprocess
 import sys
 
 from .common import Item, rng, strip_think
+from .knowledge_js import gen as js_gen
 
 BLOCK = "knowledge"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -518,9 +519,9 @@ def oracle(it: Item) -> str:
     return "ANSWERS\n" + "\n".join(f"{i}. {a}" for i, a in enumerate(it.meta["expected"], 1))
 
 
-KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes")}
+KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes"), "js": js_gen}
 MAX_LEVEL = 10   # 6 = expert: implementation-specific behaviour even frontier models get wrong; 7-10: facts combined
-QUICK = list(KINDS)
+QUICK = ["python", "shell", "codes"]
 
 
 # ---- building the bank: run every question on the real thing ----------------------------------------------------------
