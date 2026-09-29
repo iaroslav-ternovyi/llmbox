@@ -332,7 +332,8 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
                          "td": float(report._deep(r["speed"])) if report._deep(r["speed"]) != "-" else None, "rank": list(ranks[r["id"]])} for r in local]
                 + [{"id": r["id"], "name": model_name(r), "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": None, "td": None,
                     "rank": None, "cloud": True} for r in clouds])
-    compare_tab = f"compare-{local[0]['id']}-vs-{local[1]['id']}.html" if len(local) > 1 else "#"
+    top2 = sorted(local, key=lambda r: (-r["capability"], r["id"]))[:2]   # the build names pairs best-first, ties by id
+    compare_tab = f"compare-{top2[0]['id']}-vs-{top2[1]['id']}.html" if len(top2) > 1 else "#"
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>llmbox · What should I run on my box?</title><link rel="stylesheet" href="osc.css"><style>{_HOME_CSS}</style></head><body>
 <svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>
@@ -350,7 +351,7 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
  <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
  <span id="boxnote" class="q">speeds measured on this box</span></section>
 <section class="picks">{picks}</section>{optline}
-<section class="panel rankp"><div class="lbl">Ranking <span class="faint">· suite v{esc(suite_version)}</span></div>
+<section class="panel rankp"><div class="lbl">Ranking <span class="faint">· suite v{esc(suite_version)}{" · preliminary: runs of this version are still coming in" if "-dev" in suite_version else ""}</span></div>
  <div class="rhead"><div class="seg" role="group" aria-label="rank by"><span class="sc">Rank by</span>{presets}</div>
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
  <div class="tw"><table class="rank">{head}{''.join(body)}</table></div>
@@ -595,7 +596,7 @@ $("#bw").value = String(DATA.ramKinds.reduce((a, r) => Math.abs(r[1] - DATA.ref.
 $("#bw").addEventListener("change", () => { $("#bwn").value = ""; readBox(); });   // a preset replaces a typed-in measurement
 document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
   document.querySelectorAll(".seg button").forEach(u => u.classList.remove("on")); b.classList.add("on"); preset = +b.dataset.p; render(); }));
-const order = DATA.points.slice().sort((a, b) => b.cap - a.cap).map(p => p.id);   // compare pages are named best-first
+const order = DATA.points.slice().sort((a, b) => b.cap - a.cap || (a.id < b.id ? -1 : 1)).map(p => p.id);   // compare pages are named best-first
 document.querySelectorAll(".pick2 input").forEach(c => c.addEventListener("change", () => {
   const on = [...document.querySelectorAll(".pick2 input:checked")];
   if (on.length > 2) { on.filter(x => x !== c)[0].checked = false; }
@@ -1118,7 +1119,8 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, others: dict, ranks: dict
                  f'<td class="l cfg">{esc(rt.get("variant") or "not recorded")}</td>'
                  f'<td>{_tile(vs, f"{s["capability"]:.1f}")}</td><td>{_tile(sp.get("decode_tps"))}</td><td><a class="btn" href="run-{rec["id"][:8]}.html">OPEN</a></td></tr></table></div>')
     rival = next((o for o in sorted(others, key=lambda k: -others[k]["summary"]["capability"]) if o != rid), None)
-    cmp_href = "" if not rival else (f"compare-{rid}-vs-{rival}.html" if others[rid]["summary"]["capability"] >= others[rival]["summary"]["capability"] else f"compare-{rival}-vs-{rid}.html")
+    first = lambda a, b: min((a, b), key=lambda k: (-others[k]["summary"]["capability"], k))   # compare pages are named best-first, ties by id
+    cmp_href = "" if not rival else f"compare-{first(rid, rival)}-vs-{rival if first(rid, rival) == rid else rid}.html"
     nm = _name_of(rec)
     body = f'''
 <section class="panel title"><div><div class="crumb"><a href="index.html">Models</a> / {esc(nm)}</div><h1>{esc(nm)} <span class="muted" style="font-weight:500">· {esc(_quant(m.get("file")))}</span></h1>
@@ -1485,7 +1487,7 @@ def _optimize_table(opts: dict, ranked: set | None = None) -> str:
             f"<th>llmbox at 32k</th><th class='l'>tuned</th></tr>{tr}</table>")
 
 
-def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None = None) -> str:
+def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None = None, ref_row: dict | None = None) -> str:
     """How the numbers are made. The figures (weights, task counts, versions, depths) come from the code."""
     from . import suite
     per = {}
@@ -1497,8 +1499,8 @@ def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None =
                    f'<td>{len(per.get(b, []))}</td><td class="l q">{esc(_GRADING[b].format(**counts))}</td></tr>' for b in BLOCKS)
     n = len(suite.QUICK_ITEMS)
     n6 = sum(1 for *_x, lvl in suite.QUICK_ITEMS if lvl >= 6)
-    ref_name = (ref or {}).get("recipe", {}).get("id") or "the frontier model"
-    ref_cap = (ref or {}).get("summary", {}).get("capability")
+    ref_name = _name_of(ref) if ref else "the frontier model"
+    ref_cap = (ref_row or {}).get("capability") or (ref or {}).get("summary", {}).get("capability")
     body = f'''
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / how scores work</div><h1>How the numbers are made</h1>
  <p class="q" style="margin-top:6px">Suite v{esc(suite.VERSION)} · content hash {esc(suite.content_hash())}</p></div></section>
@@ -1577,13 +1579,14 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
     local_run, ref = recs["local"], recs["ref"]
     allrecs = report.results.load_all(host)
     local = {rid: report.with_probe(rec, allrecs) for rid, rec in local_run.items()}   # speed re-measured after tune; run pages keep their own
-    rs = [r for r in report.rows(host, suite_version=suite_version, tier=tier) if r["host"].get("id") != "cloud" and not r.get("partial")]
+    all_rs = report.rows(host, suite_version=suite_version, tier=tier)
+    rs = [r for r in all_rs if r["host"].get("id") != "cloud" and not r.get("partial")]
     ranks = rank_ranges(rs)
     n_total = len(rs) + len([j for j in queue_state() if j["model"] not in local])
     data = shape_data(rs, host)
     flags = {rid: task_flags(rec) for rid, rec in local.items()}
     opts = optimize_records(host)
-    order = sorted(local, key=lambda k: -local[k]["summary"]["capability"])
+    order = sorted(local, key=lambda k: (-local[k]["summary"]["capability"], k))   # ties by id: recipe pages and the home page name pairs the same way
     TAB_LINKS["COMPARE"] = f"compare-{order[0]}-vs-{order[1]}.html" if len(order) > 1 else "#"
     def w(name, html_):
         p = os.path.join(out_dir, name)
@@ -1598,7 +1601,8 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
             w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
     for a, b in itertools.combinations(order, 2):
         w(f"compare-{a}-vs-{b}.html", compare_page(a, b, local[a], local[b], ref, flags[a], flags[b]))
-    w("method.html", method_page(ref, opts, set(local)))
+    ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
+    w("method.html", method_page(ref, opts, set(local), ref_row))
     try:
         np_ = new_page(rs, data, host)
     except Exception as e:   # the list needs Hugging Face; the rest of the site must not depend on it
