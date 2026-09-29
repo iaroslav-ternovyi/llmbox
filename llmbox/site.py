@@ -244,6 +244,9 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     q = [j for j in queue_state() if j["model"] not in {r["id"] for r in local}]
     sd = shape_data(local, host)
     names0 = {r["id"]: model_name(r) for r in local}
+    # one model in two quants (Tiel Q4 and Q6): the chart legend and the picks say which is which
+    dup = {n for n in names0.values() if list(names0.values()).count(n) > 1}
+    labels = {rid: n + (f" · {_quant(next(r['file'] for r in local if r['id'] == rid)).split(' ')[0]}" if n in dup else "") for rid, n in names0.items()}
 
     # the answer first: computed from the data, no editorial text
     def best(key, label, fmt, cid=""):
@@ -251,7 +254,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
         if not c:
             return ""
         b = max(c, key=key)
-        return (f'<div{f" id={cid}" if cid else ""}><span class="sc">{label}</span><a class="pk" href="recipe-{esc(b["id"])}.html">{esc(model_name(b))}</a>'
+        return (f'<div{f" id={cid}" if cid else ""}><span class="sc">{label}</span><a class="pk" href="recipe-{esc(b["id"])}.html">{esc(labels.get(b["id"], model_name(b)))}</a>'
                 f'<span class="pv">{fmt(b)}</span></div>')
     picks = "".join([
         best(lambda r: r.get("vs_ref"), "Best overall", lambda r: f'{r["vs_ref"]:.0f}% of frontier'),
@@ -328,7 +331,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
 
     presets = "".join(f'<button class="{"on" if i == 0 else ""}" data-p="{i}" title="{esc(" · ".join(f"{LABEL[b].lower()} {v}" for b, v in w.items()))}">{esc(n)}</button>' for i, (n, w) in enumerate(PRESETS))
     data = dict(sd, presets=[w for _, w in PRESETS], refBlocks=(ref or {}).get("blocks") or {},
-                points=[{"id": r["id"], "name": model_name(r), "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": r["speed"].get("decode_tps"),
+                points=[{"id": r["id"], "name": labels[r["id"]], "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": r["speed"].get("decode_tps"),
                          "td": float(report._deep(r["speed"])) if report._deep(r["speed"]) != "-" else None, "rank": list(ranks[r["id"]])} for r in local]
                 + [{"id": r["id"], "name": model_name(r), "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": None, "td": None,
                     "rank": None, "cloud": True} for r in clouds])
