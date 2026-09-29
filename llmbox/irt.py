@@ -410,7 +410,7 @@ def next_family(bank: Bank, th: float, done: set, slowness: float = 1.0, min_per
         if short:
             cands = short
     cost = cost or (lambda f: bank.seconds[f] * slowness)
-    return max(cands, key=lambda f: bank.info(f, th) / cost(f))
+    return max(cands, key=lambda f: bank.info(f, th) / max(cost(f), 1.0))
 
 
 def simulate(bank: Bank, truth: dict, true_seconds: dict, prior: tuple = PRIOR, ref: list[str] | None = None,

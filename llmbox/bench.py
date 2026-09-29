@@ -447,7 +447,10 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         if spent >= budget_min * 60 or (on_target and (not prov or len(explored) >= min(quota, len(prov)))):
             break
         short = [b for b in bank.weights if counts.get(b, 0) < min_per_block]
-        cost = irt.cost_model(bank, [(r["family"], r["seconds"]) for r in rows])
+        # an item that failed at once (HTTP 502 while the server restarts) says nothing about its time: 0 s made a
+        # family free and crashed the choice (K2 Horizon, 2026-09-29)
+        timed = [r for r in rows if not r.get("error") and r["seconds"] > 0]
+        cost = irt.cost_model(bank, [(r["family"], r["seconds"]) for r in timed])
         if prov and not short and len(explored) < quota and (n % 3 == 2 or on_target or quota > EXPLORE):   # a new family near this model's level
             fam = irt.next_family(full_bank, sel["theta"], set(bank.a) | set(explored), slowness)
             if fam:
@@ -483,7 +486,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         counts[blk] = counts.get(blk, 0) + 1
         if not row.get("error") and not row.get("pending") and fam not in prov:   # explain: scored by the reader after the loop
             obs.append((fam, max(0.0, min(1.0, float(row["score"])))))
-        ratios = [r["seconds"] / bank.seconds[r["family"]] for r in rows if bank.seconds.get(r["family"])]
+        ratios = [r["seconds"] / bank.seconds[r["family"]] for r in rows if bank.seconds.get(r["family"]) and not r.get("error") and r["seconds"] > 0]
         slowness = statistics.median(ratios) if ratios else 1.0
         est = irt.block_estimate(bank, obs, prior)
         cap, lo, hi = est["capability"], est["lo"], est["hi"]
