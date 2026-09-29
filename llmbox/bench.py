@@ -435,7 +435,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
     obs, rows, counts, per_fam = [], [], {}, {}
     out = open(jsonl_path, "a") if jsonl_path else None
     trace_dir = os.path.join(TRACES, os.path.splitext(os.path.basename(jsonl_path))[0]) if jsonl_path else None
-    t0, slowness, n = time.time(), 1.0, 0
+    t0, slowness, n, stopped = time.time(), 1.0, 0, None
     est = irt.block_estimate(bank, obs, prior)
     cap, lo, hi = est["capability"], est["lo"], est["hi"]
     sel = est
@@ -466,7 +466,14 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         blk, kind, lvl = fam.split(".")
         n += 1
         it = suite.BLOCKS[blk][kind](seed0 + n, int(lvl[1:]))
-        row = run_item(base_url, model, it, api_key, trace_dir=trace_dir)
+        try:
+            row = run_item(base_url, model, it, api_key, trace_dir=trace_dir)
+        except RuntimeError as e:
+            if type(e).__name__ != "UsageLimit":
+                raise
+            stopped = str(e)[:200]   # the subscription ran out: keep what was answered, score nothing more
+            progress(f"  stopped: {stopped}")
+            break
         row["family"] = fam
         rows.append(row)
         if out:
@@ -501,5 +508,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
               "irt": {"theta": round(est["theta"], 3), "sd": round(est["theta_sd"], 3), "prior": list(prior or bank.prior), "items": len(rows),
                       "explored": explored,
                       "families": per_fam, "block_n": {b: v["n"] for b, v in est["blocks"].items()}}})
+    if stopped:
+        s["stopped"] = stopped
     return {"suite": {"version": suite.VERSION, "tier": "adaptive", "seed0": seed0, "content_hash": suite.content_hash(),
                       "weights": suite.WEIGHTS, "budget_min": budget_min, "target": target}, "summary": s, "rows": rows}
