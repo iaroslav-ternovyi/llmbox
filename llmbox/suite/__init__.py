@@ -15,7 +15,7 @@ from __future__ import annotations
 from . import agentic, code, explain, knowledge, longctx, reasoning, sessions, techhelp, tools, writing
 from .common import Item
 
-VERSION = "0.11-dev4"
+VERSION = "0.11"
 # v0.11: tools dedupe / bulk_discount graded by level with the discount policy part of the job (v0.10 hid it: only the
 # frontier guessed it, and 15% of the score hung on one yes/no task), levels 7-8 (headroom above the frontier reference);
 # answers to unchanged task families count across versions (llmbox/famfp.py), so only changed families need new runs.

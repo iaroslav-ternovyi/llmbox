@@ -431,12 +431,13 @@ def simulate(bank: Bank, truth: dict, true_seconds: dict, prior: tuple = PRIOR, 
 # suite contents with the same tasks, mapped to the canonical one whose bank they share: a grader fix applied to the older
 # runs by `llmbox regrade --reader`, or only the version string changing
 SAME_TASKS = {"e9f84b50bd85": "8168e071e372",    # v0.10-dev7 (billing questions did not state the uptime; regraded)
-              "8713ad469067": "8168e071e372"}    # v0.10-dev7.1-7.3 -> v0.10 (the version string only)
+              "8713ad469067": "8168e071e372",    # v0.10-dev7.1-7.3 -> v0.10 (the version string only)
+              "19bbcf6ca73c": "53fbc86d524d"}    # v0.11 = v0.11-dev4 (the version string only)
 
 
 # released suite contents (canonical hash -> version): runs of an older tag with the same tasks count as that release
 # even after the working tree has moved on to the next version
-RELEASES = {"8168e071e372": "0.10"}
+RELEASES = {"8168e071e372": "0.10", "53fbc86d524d": "0.11"}
 
 
 def canonical(content_hash: str | None) -> str | None:
