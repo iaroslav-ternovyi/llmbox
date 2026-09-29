@@ -79,7 +79,13 @@ def run(host: str, rid: str, retune: bool = False, out=print, endpoint: str = "h
             return {"rid": rid, "error": res["error"]}
         if res.get("chosen"):
             tune.apply(host, rid, out=out)
-    rec = compare(host, rid, out=out)
+    r = rc.load(host, rid)
+    if r["runtime"].get("engine", "llama.cpp") != "llama.cpp":
+        # stock llama.cpp cannot run a model that needs another engine (K2 Horizon on ik_llama.cpp): no before/after
+        out(f"  stock comparison skipped: {rid} runs on {r['runtime']['engine']}, not stock llama.cpp")
+        rec = {"model": {k: r["model"].get(k) for k in ("hf_repo", "file", "path", "sha256")}, "summary": {"engine": r["runtime"]["engine"]}}
+    else:
+        rec = compare(host, rid, out=out)
     # the ranking's speed: the served recipe through the same probe as every other model
     from . import bench, runinfo
     ep = endpoint

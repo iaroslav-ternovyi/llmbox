@@ -20,7 +20,7 @@ DEFAULTS = {
     "runtime": {"server": "llama-server", "cpu_affinity": "", "threads": 0, "engine": "llama.cpp"},
     "placement": {"ctx": 0, "kv_type": "q8_0", "fit": True, "fit_target_mib": 256, "flash_attn": True, "load_mode": "none",
                   "batch": 2048, "ubatch": 2048, "slots": 1, "kv_unified": False, "cache_ram": "auto",
-                  "cache_ram_headroom_mib": 4096, "cache_reuse": 256, "kv_offload": True},
+                  "cache_ram_headroom_mib": 4096, "cache_reuse": 256, "kv_offload": True, "n_cpu_moe": 0},
     "speculative": {"type": "", "draft_max": 0},
     "sampling": {},
     "chat": {"template_kwargs": {}, "jinja": True},
@@ -68,6 +68,8 @@ def server_args(r: dict, port: str = "$PORT") -> list[str]:
     a = ["--port", port, "-m", r["model"]["path"]]
     if p["fit"]:
         a += ["--fit", "on", "--fit-target", str(p["fit_target_mib"])]
+    else:   # explicit placement (ik_llama.cpp's --fit crashes on K2 Horizon): every layer on the card, the experts of the first N in RAM
+        a += ["-ngl", "999"] + (["--n-cpu-moe", str(p["n_cpu_moe"])] if p.get("n_cpu_moe") else [])
     a += ["--flash-attn", "on" if p["flash_attn"] else "off", "--cache-type-k", p["kv_type"], "--cache-type-v", p["kv_type"]]
     if p["load_mode"]:   # "" = do not pass (builds without the flag, e.g. the PrismML fork)
         a += ["--load-mode", p["load_mode"]]
