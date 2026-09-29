@@ -535,7 +535,7 @@ _L7 = ["detached", "amend", "cherry_pick", "revert", "checkout_refused", "stash_
        "commit_nothing"]
 _L8 = _L7 + ["rm_refused", "reset_soft", "mv", "branch_d", "restore_fail"]
 _L9 = _L8 + ["pick_refused", "merge_refused", "stash_untracked", "commit_a", "rm_cached", "merge_ff", "switch_missing"]
-_L10 = _L9 + ["stash_empty", "add_deleted", "echo_back", "add_u", "merge_noff", "reset_mixed"]
+_L10 = _L9 + ["stash_empty", "add_deleted", "echo_back", "merge_noff", "reset_mixed"]
 _LEVEL = {
     1: ((5, 7), 3, 0, ["commit_a"]),
     2: ((6, 9), 3, 0, ["reset_mixed_full"]),
@@ -546,11 +546,11 @@ _LEVEL = {
     7: ((30, 40), 5, 2, _L7),
     8: ((40, 50), 5, 2, _L8),
     9: ((65, 80), 5, 2, _L9),
-    10: ((88, 100), 6, 3, _L10),
+    10: ((86, 100), 6, 3, _L10),
 }
 # commands a trap emits on average with its setup (measured): filler goes in only while the planned traps still fit
 _COSTS = {"merge_refused": 6.5, "stash_pop": 6.5, "detached": 5.1, "merge_true": 4.3, "cherry_pick": 4.0,
-          "stash_untracked": 3.8, "merge_ff": 3.8, "merge_noff": 3.4, "restore": 3.3, "reset_hard": 3.0, "add_u": 3.0,
+          "stash_untracked": 3.8, "merge_ff": 3.8, "merge_noff": 3.4, "restore": 3.3, "reset_hard": 3.0,
           "commit_a": 3.0, "rm_refused": 2.9, "checkout_refused": 2.6, "switch_carry": 2.5, "echo_back": 2.5, "amend": 2.3,
           "stash_empty": 2.3, "commit_nothing": 2.2, "add_deleted": 2.2, "pick_refused": 2.2, "rm_cached": 2.1,
           "reset_mixed": 2.0, "branch_d": 1.8, "revert": 1.7, "restore_fail": 1.6, "reset_soft": 1.6, "mv": 1.0,
@@ -574,7 +574,7 @@ class _Gen:
         (lo, hi), self.n_files, n_br, self.plan = _LEVEL[level]
         self.target = r.randint(lo, hi)
         self.hi = hi
-        self.pool = r.sample(_BRANCHES, n_br + (2 if level >= 4 else 0))   # names for new branches, a spare or two
+        self.pool = r.sample(_BRANCHES, n_br + {9: 1, 10: 0}.get(level, 2 if level >= 4 else 0))   # new names + spares
         self.owned: dict[str, set] = {"main": set()}     # files a branch mostly works on (keeps merges clean)
         self.deleted: list[str] = []
         self.done: list[str] = []                        # traps that happened, in order
@@ -651,7 +651,6 @@ class _Gen:
         if not c or self.r.random() < 0.2:
             n = self.new_file()
             self.owned.setdefault(self.repo.branch or "", set()).add(n)
-            self.do(f"git add {n}")
             ps.append(n)
         else:
             for _ in range(self.r.choice([1, 1, 2])):
@@ -682,12 +681,19 @@ class _Gen:
         return free[0] if free else None
 
     def make_side(self, commits: int = 1, back: bool = True) -> str | None:
-        """Start a branch here, commit on it, and (back) return: the branch is then ahead of HEAD."""
+        """Start a branch here, commit on it, and (back) return: the branch is then ahead of HEAD. With every branch
+        name in use, commit on another branch instead (it then has work HEAD lacks)."""
         name, orig = self.branch_name(), self.repo.branch
-        if name is None or orig is None:
+        if orig is None:
             return None
         self.settle()
-        if not self.do(self.r.choice([f"git switch -c {name}", f"git checkout -b {name}"]), want=True):
+        if name is None:
+            o = [b for b in self.others() if b != "main" and self.peek(f"git switch {b}") == 0]
+            if not o:
+                return None
+            name = self.r.choice(o)
+            self.do(self.r.choice([f"git switch {name}", f"git checkout {name}"]), want=True)
+        elif not self.do(self.r.choice([f"git switch -c {name}", f"git checkout -b {name}"]), want=True):
             return None
         self.owned.setdefault(name, set())
         others_own = set().union(*[v for k, v in self.owned.items() if k != name])
@@ -1066,11 +1072,6 @@ class _Gen:
         self.do(f"rm {p}")
         return self.do(f"git add {p}" if v < 0.6 else "git add -u", want=True)
 
-    def m_add_u(self) -> bool:
-        self.new_file()
-        self.edit()
-        return self.do("git add -u", want=True)
-
     def m_switch_missing(self) -> bool:
         gone = [b for b in self.deleted if b not in self.repo.branches]
         if gone and self.r.random() < 0.6:
@@ -1160,7 +1161,7 @@ class _Gen:
         self.owned["main"] = set(files[: len(files) // 2])
         if self.level >= 9:                              # the branches first: 3-4 lines of work to merge and pick from
             spare = [f for f in files if f not in self.owned["main"]]
-            for i in range(len(self.pool) - 2):
+            for i in range(2 if self.level == 9 else 3):
                 self.owned[self.pool[i]] = {spare[i % len(spare)]}
                 self.make_side(commits=r.choice([1, 2]), back=True)
         plan = list(self.plan)
