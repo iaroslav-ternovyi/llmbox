@@ -1,6 +1,6 @@
-"""Levels 1-6 of every non-agentic task family must stay exactly as they were when tests/levels_baseline.json was taken:
+"""Levels 1-10 of every non-agentic task family must stay exactly as they were when tests/levels_baseline.json was taken:
 answers to them are pooled across suite versions (llmbox/famfp.py), so a changed task or grader silently mixes two
-different tasks into one IRT family. Adding levels 7-8 must not touch them. Run: python3 tests/test_levels_stable.py
+different tasks into one IRT family. Adding levels must not touch the existing ones. Run: python3 tests/test_levels_stable.py
 (an intended change: regenerate the baseline and bump the module's GRADING number if its grading changed)."""
 import json
 import os
