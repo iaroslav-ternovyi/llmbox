@@ -6,7 +6,8 @@ exact state (chmod, 6 paths x 8 steps: 0.67), so this kind is long state with re
 
 The answers come from `Repo`, an emulator of the bounded command set below: no subprocess, deterministic, a few ms per
 item. It is checked against real git (tests/real_programs.py git: every generated command replayed in a temp repo with
-fixed dates, every exit status and every question compared). What the emulator cannot model exactly (merge conflicts,
+fixed dates, every exit status, every question's own command and the whole final state compared; 2026-09-29: 3200
+items, 132k commands, 28.5k questions, 0 disagreements on git 2.51.2). What the emulator cannot model exactly (merge conflicts,
 criss-cross merge bases, rename detection in a merge, empty cherry-picks and reverts) raises Unmodeled, and the
 generator never emits such a command - so every item stays inside behaviour the emulator gets exactly right, and that
 is stable across git 2.30+: status runs with --no-renames, stashes carry a message (no hashes anywhere), commits are
@@ -1510,9 +1511,12 @@ def git_seq(seed: int, level: int = 3) -> Item:
     commits, amend, cherry-pick, revert, a refused checkout, stash pop, a merge commit, a hard reset, an empty commit;
     8 (40-50): + refused `git rm`, soft reset, mv, `branch -d`, restore of an untracked file; 9 (65-80, 3-4 branches,
     14-15 questions): + a cherry-pick and a real merge refused over a staged edit, stash -u, `commit -a`, `rm --cached`,
-    a fast-forward, a switch to a deleted branch; 10 (86-100, 4 branches, 15-16 questions): + an empty stash, `git add`
-    of a deleted file, a file written back to its committed content, `merge --no-ff`, a mixed reset. Credit per
-    question, per line for status / log / stash, per command for the failures."""
+    a fast-forward, a switch to a deleted branch; 10 (150-185 commands, 5-7 branches, 20-21 questions): + an empty
+    stash, `git add` of a deleted file, a file written back to its committed content, `merge --no-ff`, a mixed reset,
+    most traps twice, resets / checkouts / picks / reverts two and three commits back, and questions on `<branch>~N`.
+    Credit per question, per line for status / log / stash, per command for the failures.
+    Claude Opus 5.5 (2026-09-29, seed 1): L8 1.0, L9 1.0, L10 at 86-100 commands 1.0, at 150-185 commands 0.997 - it
+    tracks git state nearly without slips; the headroom here is for local models."""
     g = _generate(seed, level)
     qs = g.questions()
     answers = [g.answer(q) for q in qs]

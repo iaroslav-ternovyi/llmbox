@@ -6,9 +6,12 @@ nginx:alpine and debian:stable; the routing check runs a privileged container). 
   route   techhelp.subnet (levels 6-10): the `ip rule` / `ip route` lines of the prompt applied in a network namespace of
           a real kernel (dummy interfaces, forwarding on, rp_filter off), answers from `ip route get`
   shell   knowledge.shell (levels 7-10 and the part type levels 9-10 leave out) in bash 5 with GNU coreutils, gawk, jq
-  git     techhelp.git_seq (levels 1-10): every item replayed on the local git (no Docker; --image debian:bullseye runs
-          it on that image's git instead) in a temp repo with fixed names, dates one minute apart and no user config;
-          each command's exit status, every question's answer and the whole final state compared with the emulator
+  git     techhelp.git_seq (levels 1-10): every item replayed on the local git (no Docker; --image alpine:3.13 runs it
+          on that image's git 2.30 instead) in a temp repo with fixed names, dates one minute apart and no user config;
+          each command's exit status, each question's own command and the whole final state compared with the emulator.
+          2026-09-29: --seeds 320 on git 2.51.2: 3200 items, 132332 commands, 28499 questions; --seeds 40 on git 2.30.6
+          (alpine:3.13): 400 items, 16550 commands, 3561 questions - 0 disagreements (the fuzzing before it found two:
+          `git checkout HEAD` stays on the branch; a failing pop of a -u stash restores its untracked files anyway)
 
 Run: python3 tests/real_programs.py [nginx|route|shell|git ...] [--seeds N] [--image IMAGE]
 2026-09-29, --seeds 25: 668 / 495 / 1296 checked, 0 wrong - after the fix it found (a rewrite empties $1 even when its
@@ -301,8 +304,10 @@ def git(n, image=None):
         open(os.path.join(d, "s", f"{k}.sh"), "w").write(git_script(g.setup, g.cmds, probes))
     if image:
         run = (f"cd /w && ls s | sed 's/.sh$//' | xargs -P 8 -I{{}} sh -c 'bash s/{{}}.sh /tmp/r{{}} > o/{{}}.out 2>&1; rm -rf /tmp/r{{}}'")
-        docker(["-v", f"{d}:/w", image, "sh", "-c", "(command -v git >/dev/null || (apt-get update -qq >/dev/null 2>&1 && "
-                "apt-get install -y -qq git >/dev/null 2>&1)) && " + run])
+        p = docker(["-v", f"{d}:/w", image, "sh", "-c", "if command -v apk >/dev/null; then apk add -q --no-cache git bash >/dev/null; "
+                    "else apt-get update -qq >/dev/null && apt-get install -y -qq git >/dev/null; fi; " + run])
+        if not os.listdir(os.path.join(d, "o")):
+            raise RuntimeError(f"no output from {image}: {p.stderr[-500:]}")
     else:
         def one(k):
             w = tempfile.mkdtemp(prefix="gitrepo")
