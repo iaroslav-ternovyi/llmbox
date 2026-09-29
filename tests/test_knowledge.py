@@ -105,6 +105,10 @@ def codes_int(phrase):
     m = re.fullmatch(r'the HTTP status code with the reason phrase "(.+)"', phrase)
     if m:
         return bq[("codes", f'Which HTTP status code has the reason phrase "{m.group(1)}"?')]["accept"]["int"]
+    m = re.fullmatch(r"the exit status (.+?) (returns|reports|has)(.*)", phrase)   # levels 9-10: measured exit statuses
+    if m:
+        verb = {"returns": "return", "reports": "report", "has": "have"}[m.group(2)]
+        return bq[("codes", f"What exit status does {m.group(1)} {verb}{m.group(3)}?")]["accept"]["int"]
     m = re.fullmatch(r'the errno number that goes with the error message "(.+)" on Linux', phrase)
     names = bq[("codes", f'Which errno name goes with the error message "{m.group(1)}" on Linux?')]["accept"]["names"]
     return next(bq[("codes", f"What is the errno number of {n} on Linux?")]["accept"]["int"] for n in names
@@ -113,17 +117,18 @@ def codes_int(phrase):
 
 combos = {"python": {}, "shell": {}}
 n = 0
+SHAPE = {7: [1] * 4 + [2] * 4, 8: [1] * 2 + [2] * 3 + [3] * 3, 9: [1, 2, 3, 3, 3, 3, 4, 4], 10: [3] * 4 + [4] * 6}
 for kind, gen in K.KINDS.items():
-    for level in (7, 8):
+    for level in (7, 8, 9, 10):
         for seed in range(1, 61):
             a, b = gen(seed, level), gen(seed, level)
             n += 1
             qs = a.meta["questions"]
             nq, nf = len(qs), sum(q["fake"] for q in qs)
             check(f"{kind} L{level} s{seed} deterministic", a.messages == b.messages)
-            check(f"{kind} L{level} s{seed} 10 questions, 2 fake", nq == 10 and nf == 2)
-            check(f"{kind} L{level} s{seed} shape", sorted(len(q.get("parts", [1])) for q in qs if not q["fake"])
-                  == ([1] * 4 + [2] * 4 if level == 7 else [1] * 2 + [2] * 3 + [3] * 3))
+            check(f"{kind} L{level} s{seed} {12 if level == 10 else 10} questions, 2 fake", nq == (12 if level == 10 else 10) and nf == 2)
+            shape = [4] * 4 + [5] * 6 if (kind, level) == ("codes", 10) else SHAPE[level]
+            check(f"{kind} L{level} s{seed} shape", sorted(len(q.get("parts", [1])) for q in qs if not q["fake"]) == shape)
             check(f"{kind} L{level} s{seed} oracle", a.check(K.oracle(a)) == 1.0, K.oracle(a))
             idk = sum(q.get("idk", K.IDK) for q in qs) / nq
             check(f"{kind} L{level} s{seed} all UNKNOWN", abs(a.check("ANSWERS\n" + "\n".join(f"{i}. UNKNOWN" for i in range(1, nq + 1))) - idk) < 1e-9)
@@ -145,7 +150,17 @@ for kind, gen in K.KINDS.items():
                     check(f"codes combo {q['text'][:50]}", q["accept"]["repr"] == ", ".join(map(str, want)), q["accept"])
                     continue
                 ps = [bq[(kind, p)] for p in q["parts"]]
+                if q["fake"]:   # levels 9-10, python: a made-up call last, after parts that do not raise
+                    check(f"hidden fake {q['text'][:50]}", level >= 9 and kind == "python" and ps[-1]["fake"]
+                          and not any(p["fake"] or p["accept"].get("exc") for p in ps[:-1]) and K.oracle_answer(q) == "NONEXISTENT"
+                          and q["accept"]["exc"] == ps[-1]["accept"]["exc"])
+                    combos[kind][q["text"]] = q
+                    continue
                 check(f"{kind} combo parts real", all(not p["fake"] and p["level"] >= 5 for p in ps))
+                if kind == "python" and level >= 9:   # one level-7 fact per combination, never behind a part that raises
+                    at = [i for i, p in enumerate(ps) if p["level"] == 7]
+                    check(f"python L{level} one level-7 part {q['text'][:50]}", len(at) == 1 and not any(
+                        p["accept"].get("exc") for p in ps[:at[0]]), [p["level"] for p in ps])
                 if kind == "python":
                     exc = next((p["accept"]["exc"] for p in ps if p["accept"].get("exc")), None)
                     want = f"raises {exc[0]}" if exc else "(" + ", ".join(p["accept"]["repr"] for p in ps) + ")"
@@ -165,7 +180,7 @@ for kind, gen in K.KINDS.items():
                 status = [int(m) for q in qs if not q.get("parts") for m in re.findall(r"exited with status (\d+)", q["text"])]
                 killed = [codes_int(p) for q in qs for p in q.get("parts", []) if "killed by" in p]
                 check(f"codes L{level} s{seed} status not given away", not set(status) & set(killed), (status, killed))
-print(f"{n} level 7-8 items generated")
+print(f"{n} level 7-10 items generated")
 
 # python combos on the real interpreters, as the bank was built (every 3.12+ CPython found here, two hash seeds)
 texts = sorted(combos["python"])

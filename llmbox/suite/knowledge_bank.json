@@ -1,4 +1,4 @@
-{"built": "2026-09-27", "env": {"python": ["3.12.12", "3.14.4"], "bash": "GNU bash, version 5.3.9(1)-release (x86_64-pc-linux-gnu)", "jq": "jq-1.7.1-apple", "ports": "documented defaults of each project (2026); the IANA ones are checked against /etc/services on the box"}, "questions": [
+{"built": "2026-09-27", "env": {"python": ["3.12.12", "3.14.4"], "bash": "GNU bash, version 5.3.9(1)-release (x86_64-pc-linux-gnu)", "jq": "jq-1.7.1-apple", "ports": "documented defaults of each project (2026); the IANA ones are checked against /etc/services on the box", "python_level7": "CPython 3.12.12 + 3.14.5 on the Mac (the box's 3.14.4 was not reachable)"}, "questions": [
 {"kind": "python", "src": "python", "level": 1, "fake": false, "text": "\"a,b,,c\".split(\",\")", "mode": "py", "accept": {"repr": "['a', 'b', '', 'c']", "str": "['a', 'b', '', 'c']", "type": "list", "canon": "('list', [('str', 'a'), ('str', 'b'), ('str', ''), ('str', 'c')])"}},
 {"kind": "python", "src": "python", "level": 1, "fake": false, "text": "\" a  b \".split()", "mode": "py", "accept": {"repr": "['a', 'b']", "str": "['a', 'b']", "type": "list", "canon": "('list', [('str', 'a'), ('str', 'b')])"}},
 {"kind": "python", "src": "python", "level": 1, "fake": false, "text": "\"abc\"[::-1]", "mode": "py", "accept": {"repr": "'cba'", "str": "cba", "type": "str", "canon": "('str', 'cba')"}},
@@ -1173,5 +1173,25 @@
 {"kind": "codes", "src": "port", "level": 4, "fake": true, "text": "What is the default TCP port of the Glintlake metrics agent?", "mode": "int", "accept": {}, "idk": 1.0},
 {"kind": "codes", "src": "port", "level": 5, "fake": true, "text": "What is the default TCP port of the Hollowfen message broker?", "mode": "int", "accept": {}, "idk": 1.0},
 {"kind": "codes", "src": "port", "level": 5, "fake": true, "text": "What is the default TCP port of the Sablecrest search engine?", "mode": "int", "accept": {}, "idk": 1.0},
-{"kind": "codes", "src": "port", "level": 5, "fake": true, "text": "What is the default TCP port of the Mirewood reverse proxy?", "mode": "int", "accept": {}, "idk": 1.0}
+{"kind": "codes", "src": "port", "level": 5, "fake": true, "text": "What is the default TCP port of the Mirewood reverse proxy?", "mode": "int", "accept": {}, "idk": 1.0},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "\"ab\".center(5, \"*\")", "mode": "py", "accept": {"repr": "'**ab*'", "str": "**ab*", "type": "str", "canon": "('str', '**ab*')"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "\"ab\".center(3, \"*\")", "mode": "py", "accept": {"repr": "'*ab'", "str": "*ab", "type": "str", "canon": "('str', '*ab')"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "sum([0.1] * 10)", "mode": "py", "accept": {"repr": "1.0", "str": "1.0", "type": "float", "canon": "('float', 1.0)"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "sum([0.1, 0.2, 0.3])", "mode": "py", "accept": {"repr": "0.6", "str": "0.6", "type": "float", "canon": "('float', 0.6)"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "sum([0.1] * 6)", "mode": "py", "accept": {"repr": "0.6000000000000001", "str": "0.6000000000000001", "type": "float", "canon": "('float', 0.6000000000000001)"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "sum([1e100, 1.0, -1e100])", "mode": "py", "accept": {"repr": "1.0", "str": "1.0", "type": "float", "canon": "('float', 1.0)"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "shlex.split(\"a#b c #d\")", "mode": "py", "accept": {"repr": "['a#b', 'c', '#d']", "str": "['a#b', 'c', '#d']", "type": "list", "canon": "('list', [('str', 'a#b'), ('str', 'c'), ('str', '#d')])"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "shlex.split(\"a#b c #d\", comments=True)", "mode": "py", "accept": {"repr": "['a']", "str": "['a']", "type": "list", "canon": "('list', [('str', 'a')])"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "shlex.split(\"a\\\\\\nb\")", "mode": "py", "accept": {"repr": "['a\\nb']", "str": "['a\\nb']", "type": "list", "canon": "('list', [('str', 'a\\nb')])"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "shlex.split('\"a\\\\$b\"')", "mode": "py", "accept": {"repr": "['a\\\\$b']", "str": "['a\\\\$b']", "type": "list", "canon": "('list', [('str', 'a\\\\$b')])"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "time.strptime(\"12\", \"%I\").tm_hour", "mode": "py", "accept": {"repr": "0", "str": "0", "type": "int", "canon": "('int', 0)"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "datetime.datetime.strptime(\"  1\", \"%d\").day", "mode": "py", "accept": {"exc": ["ValueError"]}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "datetime.datetime.strptime(\"1 2024 1\", \"%w %Y %U\").day", "mode": "py", "accept": {"repr": "8", "str": "8", "type": "int", "canon": "('int', 8)"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "datetime.datetime.strptime(\"29\", \"%d\").year", "mode": "py", "accept": {"repr": "1900", "str": "1900", "type": "int", "canon": "('int', 1900)"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "next(csv.reader([\"\"]))", "mode": "py", "accept": {"repr": "[]", "str": "[]", "type": "list", "canon": "('list', [])"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "str(pathlib.PureWindowsPath(\"c:/a\") / \"c:b\")", "mode": "py", "accept": {"repr": "'c:\\\\a\\\\b'", "str": "c:\\a\\b", "type": "str", "canon": "('str', 'c:\\\\a\\\\b')"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "f\"{'a':=>5}\"", "mode": "py", "accept": {"repr": "'====a'", "str": "====a", "type": "str", "canon": "('str', '====a')"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "re.sub(\"a\", \"\\\\\\\\\", \"a\")", "mode": "py", "accept": {"repr": "'\\\\'", "str": "\\", "type": "str", "canon": "('str', '\\\\')"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "uuid.UUID(\"{12345678-1234-5678-1234-567812345678}\").version", "mode": "py", "accept": {"repr": "None", "str": "None", "type": "NoneType", "canon": "('NoneType', None)"}},
+{"kind": "python", "src": "python", "level": 7, "fake": false, "text": "argparse.ArgumentParser().parse_args([\"--\"]) == argparse.Namespace()", "mode": "py", "accept": {"exc": ["SystemExit"]}}
 ]}

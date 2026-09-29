@@ -87,6 +87,8 @@ def _show(q: dict) -> str:
 
 def _gen(kind: str):
     def gen(seed: int, level: int = 3) -> Item:
+        if level >= 9:
+            return _gen910(kind, seed, level)
         if level >= 7:
             return _gen78(kind, seed, level)
         r = rng(BLOCK, f"{kind}{level}", seed)
@@ -207,7 +209,7 @@ def _combine(kind: str, parts: list, level: int) -> dict:
                 "accept": {"texts": [_ws(" ".join(p["accept"]["texts"][0] for p in parts))]}, "parts": [p["text"] for p in parts]}
     ints = tuple(p["int"] for p in parts)
     text = (f"Give these {len(parts)} numbers in this order, separated by commas: "
-            + "; ".join(f"({'abc'[i]}) {p['phrase']}" for i, p in enumerate(parts)) + ".")
+            + "; ".join(f"({'abcde'[i]}) {p['phrase']}" for i, p in enumerate(parts)) + ".")
     return {"kind": kind, "src": "combo", "level": level, "fake": False, "text": text, "mode": "py",
             "accept": {"repr": ", ".join(map(str, ints)), "str": ", ".join(map(str, ints)), "type": "tuple",
                        "canon": repr(_canon(ints))}, "parts": [p["phrase"] for p in parts]}
@@ -258,9 +260,95 @@ def _gen78(kind: str, seed: int, level: int) -> Item:
                 max_tokens=32000, meta={"level": level, "questions": qs, "expected": [oracle_answer(q) for q in qs]})
 
 
+# ---- levels 9-10: aimed at the frontier - bigger combinations, a made-up call hidden inside one ------------------------
+# Level 9: 1 single fact, a pair, four triples and two quadruples; level 10: four triples and six quadruples (codes:
+# quadruples and quintuples) - 10 and 12 questions, exactly 2 made up. Claude Opus answered the first version of level
+# 10 right in python and codes (shell: 0.83), so:
+#   python  every combination holds one bank level-7 fact: behaviour found by predicting it first and being wrong
+#           (built like the rest of the bank, by running CPython - knowledge_src.txt `## python 7`)
+#   codes   the exit statuses the bank measured on the box join the numbers (the status curl gives when --max-time runs out)
+# In python one of the two made-up questions is a combination whose last part does not exist, after parts that do not
+# raise: evaluating it raises that part's AttributeError / TypeError, so NONEXISTENT (or the exception) is right, and
+# computing the real parts first is wasted work - the decoy.
+def _exit_facts() -> list[dict]:
+    """The bank's measured exit statuses (levels 4-5) as noun phrases for the codes combinations."""
+    out = []
+    for q in bank()["questions"]:
+        m = re.fullmatch(r"What exit status does (.+?) (return|report|have)(.*)\?", q["text"])
+        if q["kind"] == "codes" and q["src"] == "exit" and q["level"] >= 4 and m:
+            verb = {"return": "returns", "report": "reports", "have": "has"}[m.group(2)]
+            out.append({"key": "exit:" + q["text"], "level": q["level"], "int": q["accept"]["int"],
+                        "phrase": f"the exit status {m.group(1)} {verb}{m.group(3)}"})
+    return out
+
+
+def _combo_pool910(kind: str) -> tuple[list, list]:
+    """(the parts every combination draws one of, the other parts) for levels 9-10."""
+    if kind == "python":
+        ok = lambda q, lv: q["kind"] == kind and not q["fake"] and q["level"] == lv and _py_combinable(q) and \
+            bool(q["accept"].get("exc") or q["accept"].get("canon"))
+        qs = bank()["questions"]
+        return [q for q in qs if ok(q, 7)], [q for q in qs if ok(q, 6)]
+    if kind == "shell":   # no ' inside "..." inside "$(...)": bash 3.2 scans those wrongly (bash 5.2 does not:
+        # tests/real_programs.py); left out as when the levels were measured
+        return [], [p for p in _combo_pool(kind, 7) if "\"'" not in p["text"]]
+    return [], [f for f in _codes_facts() if f["level"] == 5] + _exit_facts()
+
+
+def _hidden_fake(r, pool: list[dict], fakes: list[dict], size: int) -> dict:
+    fake = r.choice([f for f in fakes if _py_combinable(f)])
+    parts = r.sample([p for p in pool if not p["accept"].get("exc")], size - 1)
+    return {"kind": "python", "src": "combo", "level": fake["level"], "fake": True,
+            "text": "(" + ", ".join(p["text"] for p in parts + [fake]) + ")", "mode": "py",
+            "accept": {"exc": fake["accept"]["exc"]}, "parts": [p["text"] for p in parts + [fake]]}
+
+
+def _gen910(kind: str, seed: int, level: int) -> Item:
+    r = rng(BLOCK, f"{kind}{level}", seed)
+    sizes = {9: [2, 3, 3, 3, 3, 4, 4], 10: [3, 3, 3, 3, 4, 4, 4, 4, 4, 4]}[level]
+    if kind == "codes" and level == 10:
+        sizes = [4, 4, 4, 4, 5, 5, 5, 5, 5, 5]
+    singles = r.sample(_pool(kind, 6 if kind != "codes" else 5, False), 1 if level == 9 else 0)
+    used = {q["text"] for q in singles}
+    # python: one level-7 part + level-6 parts; shell: levels 5-6 (level 6 alone is too small for 36 parts); codes: level 5
+    lead, pool = (lst := _combo_pool910(kind))[0], [p for p in lst[1] if p.get("text", p.get("phrase")) not in used]
+    lead = r.sample(lead, len(sizes)) if lead else []
+    order = list(range(len(pool)))
+    r.shuffle(order)
+    it_, taken, combos = iter(order), set(), []
+    for n_, size in enumerate(sizes):
+        parts = []
+        while len(parts) < size - bool(lead):
+            p = pool[next(it_)]
+            k = p.get("key", p.get("text"))
+            if k not in taken:
+                taken.add(k)
+                parts.append(p)
+        if lead:   # never behind a part that raises: evaluation would stop before it
+            at = r.randrange(size)
+            parts.insert(0 if any(p["accept"].get("exc") for p in parts[:at]) else at, lead[n_])
+        combos.append(_combine(kind, parts, level))
+    fakes = _pool(kind, 7, True)   # the level-6 made-up ones (codes: level 5)
+    if kind == "python":
+        hidden = _hidden_fake(r, [p for p in pool if p["text"] not in taken], fakes, 3 if level == 9 else 4)
+        extra = [hidden, r.choice([f for f in fakes if f["text"] != hidden["parts"][-1]])]
+    else:
+        extra = r.sample(fakes, 2)
+    qs = singles + combos + extra
+    r.shuffle(qs)
+    body = "\n".join(f"{i}. {_show(q)}" for i, q in enumerate(qs, 1))
+    prompt = f"{HEAD[kind]} {RULES}\n\n{body}{TAIL}"
+
+    def check(text: str, _t=None, qs=qs) -> float:
+        got = answers(text, len(qs))
+        return sum(credit(q, got.get(i)) for i, q in enumerate(qs, 1)) / len(qs)
+    return Item(f"{BLOCK}.{kind}.L{level}.{seed}", BLOCK, kind, [{"role": "user", "content": prompt}], check,
+                max_tokens=32000, meta={"level": level, "questions": qs, "expected": [oracle_answer(q) for q in qs]})
+
+
 # ---- grading -----------------------------------------------------------------------------------------------------------
 
-_LINE =re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?\s*(\d{1,2})\s*[.):]\s*(?:\*\*)?\s*(.*?)\s*$")
+_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?\s*(\d{1,2})\s*[.):]\s*(?:\*\*)?\s*(.*?)\s*$")
 
 
 def answers(text: str, n: int) -> dict[int, str]:
@@ -431,7 +519,7 @@ def oracle(it: Item) -> str:
 
 
 KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes")}
-MAX_LEVEL = 8   # 6 = expert: implementation-specific behaviour even frontier models get wrong; 7-8: facts combined
+MAX_LEVEL = 10   # 6 = expert: implementation-specific behaviour even frontier models get wrong; 7-10: facts combined
 QUICK = list(KINDS)
 
 

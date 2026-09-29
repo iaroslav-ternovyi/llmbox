@@ -898,3 +898,28 @@ echo 'null' | jq -c '.a'
 ## jq fake 6
 echo '[1,2]' | jq 'mean'
 echo '"a,b"' | jq -c 'splits_all(",")'
+
+## python 7
+# level 7 (used from knowledge level 9): behaviour found by predicting the answer first and being wrong - CPython decides.
+# sum() of floats is compensated since 3.12; str.center puts the odd fill character on the left; shlex, strptime, csv,
+# PureWindowsPath, format and re.sub replacement corners.
+"ab".center(5, "*")
+"ab".center(3, "*")
+sum([0.1] * 10)
+sum([0.1, 0.2, 0.3])
+sum([0.1] * 6)
+sum([1e100, 1.0, -1e100])
+shlex.split("a#b c #d")
+shlex.split("a#b c #d", comments=True)
+shlex.split("a\\\nb")
+shlex.split('"a\\$b"')
+time.strptime("12", "%I").tm_hour
+datetime.datetime.strptime("  1", "%d").day
+datetime.datetime.strptime("1 2024 1", "%w %Y %U").day
+datetime.datetime.strptime("29", "%d").year
+next(csv.reader([""]))
+str(pathlib.PureWindowsPath("c:/a") / "c:b")
+f"{'a':=>5}"
+re.sub("a", "\\\\", "a")
+uuid.UUID("{12345678-1234-5678-1234-567812345678}").version
+argparse.ArgumentParser().parse_args(["--"]) == argparse.Namespace()
