@@ -209,6 +209,8 @@ def _fs_item_script(it) -> str:
     sh += ['echo "@@PWD $PWD"', f"cd {FSM.ROOT} || exit 1"]
     run = {"cat": "cat", "readlink": "readlink -f", "ls": "LC_ALL=C ls"}
     for j, (k, p) in enumerate(zip(m["kinds"][2:], m["paths"])):
+        if k == "pwd":
+            continue
         sh.append(f"{{ {run[k]} {p} ; }} > /tmp/q 2>/dev/null; echo \"@@Q {j} $? $(base64 -w0 /tmp/q)\"")
     sh += ["find . -mindepth 1 -printf '@@E %y %m %i %p\\t%l\\n'", "chmod -R u+rX . 2>/dev/null",
            "find . -mindepth 1 -type f -print | while IFS= read -r p; do echo \"@@F $p $(base64 -w0 < \"$p\")\"; done"]
@@ -227,7 +229,7 @@ def _fs_real(image: str, scripts: list[str], workers: int = 6) -> list[str]:
         for i in chunk:
             open(os.path.join(d, "items", f"{i}.sh"), "w").write(scripts[i])
         open(os.path.join(d, "drv.sh"), "w").write(
-            "umask 022\n" + "".join(f"echo '@@ITEM {i}'; bash --norc --noprofile /w/items/{i}.sh < /dev/null\n" for i in chunk))
+            "umask 022\nexport LC_ALL=C\n" + "".join(f"echo '@@ITEM {i}'; bash --norc --noprofile /w/items/{i}.sh < /dev/null\n" for i in chunk))
         open(os.path.join(d, "run.sh"), "w").write(
             "mkdir -p /home/dev && chown 1234:1234 /home/dev && cd / && "
             "exec setpriv --reuid=1234 --regid=1234 --clear-groups env HOME=/home/dev bash /w/drv.sh\n")
@@ -323,7 +325,9 @@ def _fs_compare(it, real: dict) -> list[tuple[str, str]]:
         bad.append(("pwd", f"emulator {fs.pwd}, real {real['pwd']}"))
     for j, (k, p) in enumerate(zip(m["kinds"][2:], m["paths"])):
         rc, out = real["q"].get(j, (None, ""))
-        if rc != 0:
+        if k == "pwd":
+            got = real["pwd"]
+        elif rc != 0:
             got = "ERROR"
         elif k == "cat":
             try:

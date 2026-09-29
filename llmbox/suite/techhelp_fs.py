@@ -203,6 +203,21 @@ class FS:
             raise Unsupported("stale $PWD")
 
     # ---- a command line
+    def glob(self, pat: str) -> list[str]:
+        """bash pathname expansion of a '*' in the last component (LC_ALL=C order); no match leaves the word as it is."""
+        d, _, base = pat.rpartition("/")
+        if "*" in d or "?" in base or "[" in base:
+            raise Unsupported(f"glob {pat}")
+        try:
+            node = self.stat(d) if d else self.cwd
+        except FSErr:
+            return [pat]
+        if node.kind != "d":
+            return [pat]
+        rx = re.compile(".*".join(re.escape(x) for x in base.split("*")))
+        names = sorted(n for n in node.ents if rx.fullmatch(n) and not n.startswith("."))
+        return [(d + "/" if d else "") + n for n in names] or [pat]
+
     def run(self, cmd: str) -> bool:
         """Run one command; True if it exits 0."""
         t = cmd.split()
@@ -212,23 +227,28 @@ class FS:
         if c == "cat":                        # cat SRC > DST  |  cat SRC >> DST
             return self.cat(t[1], t[3], t[2] == ">>")
         opts = "".join(x[1:] for x in t[1:] if x.startswith("-"))
-        args = [x for x in t[1:] if not x.startswith("-")]
+        args = []
+        for x in t[1:]:
+            if not x.startswith("-"):
+                args += self.glob(x) if "*" in x and c != "cd" else [x]
         if c == "cd":
             return self.cd(args[0])
         if c == "mkdir":
             return self.mkdir(args, "p" in opts)
         if c == "touch":
-            return self.touch(args)
+            return self.touch(args, "c" in opts)
         if c == "rm":
-            return self.rm(args, "r" in opts or "R" in opts, "f" in opts)
+            return self.rm(args, "r" in opts or "R" in opts, "f" in opts, "d" in opts)
         if c == "rmdir":
-            return self.rmdir(args)
+            return self.rmdir(args, "p" in opts)
         if c == "cp":
-            return self.cp(opts, args[0], args[1])
+            return self.cp(opts, args)
         if c == "mv":
-            return self.mv(args[0], args[1])
+            return self.mv(opts, args)
         if c == "ln":
-            return self.ln_s(args[0], args[1], "f" in opts, "n" in opts) if "s" in opts else self.ln(args[0], args[1])
+            if "s" in opts:
+                return self.ln_s(args[0], args[1], "f" in opts, "n" in opts, "r" in opts)
+            return self.ln(args[0], args[1], "f" in opts)
         if c == "chmod":
             return self.chmod(args[0], args[1:])
         raise ValueError(cmd)
@@ -274,8 +294,10 @@ class FS:
             s = self.stat(src)
         except FSErr:
             return False
-        if s is out:
-            raise Unsupported("cat a file into itself")
+        if s is out:      # bash emptied it before cat started: cat reads nothing and succeeds
+            if append:
+                raise Unsupported("cat a file onto its own end")
+            return True
         if s.kind == "d" or not s.mode & 0o400:
             return False
         if s.data:
@@ -283,15 +305,15 @@ class FS:
         return True
 
     # ---- coreutils
-    def touch(self, args: list[str]) -> bool:
+    def touch(self, args: list[str], nocreate: bool = False) -> bool:
         ok = True
         for a in args:
             try:
                 p, n, node, slash = self.walk(a, True)
             except FSErr:
-                ok = False
+                ok = ok and nocreate
                 continue
-            if node is not None:
+            if node is not None or nocreate:
                 continue
             if n in (".", ".."):
                 raise Unsupported(a)
@@ -336,21 +358,38 @@ class FS:
                 ok = False
         return ok
 
-    def rmdir(self, args: list[str]) -> bool:
+    def _rmdir1(self, a: str) -> bool:
+        try:
+            p, n, node, _s = self.walk(a, False, False)
+        except FSErr:
+            return False
+        if n in (".", ".."):
+            raise Unsupported(a)
+        if node is None or node.kind != "d" or node.ents or not p.mode & 0o200:
+            return False
+        self.inside(p)
+        self._del(p, n)
+        return True
+
+    def rmdir(self, args: list[str], parents: bool = False) -> bool:
+        """rmdir; -p then removes each parent named in the path, stopping at the first that fails."""
         ok = True
         for a in args:
-            try:
-                p, n, node, _s = self.walk(a, False, False)
-            except FSErr:
+            comps = [c for c in a.split("/") if c]
+            if parents and (a.startswith("/") or any(c in (".", "..") for c in comps)):
+                raise Unsupported("rmdir -p with . / .. / an absolute path")
+            if not self._rmdir1(a):
                 ok = False
                 continue
-            if n in (".", ".."):
-                raise Unsupported(a)
-            if node is None or node.kind != "d" or node.ents or not p.mode & 0o200:
-                ok = False
-                continue
-            self.inside(p)
-            self._del(p, n)
+            while parents and len(comps) > 1:
+                comps.pop()
+                pre = "/".join(comps)
+                ln_ = self.walk(pre, False, False)[2]
+                if ln_ is not None and ln_.kind == "l":
+                    raise Unsupported("rmdir -p through a symlink")
+                if not self._rmdir1(pre):
+                    ok = False
+                    break
         return ok
 
     def _rm_tree(self, p: Node, n: str) -> None:
@@ -364,9 +403,12 @@ class FS:
             raise Unsupported("rm -r in a read-only directory")
         self._del(p, n)
 
-    def rm(self, args: list[str], rec: bool, force: bool) -> bool:
+    def rm(self, args: list[str], rec: bool, force: bool, dirs: bool = False) -> bool:
         ok = True
         for a in args:
+            if a.rstrip("/").split("/")[-1] in (".", ".."):   # "refusing to remove '.' or '..'"
+                ok = False
+                continue
             try:
                 p, n, node, _s = self.walk(a, False, True)   # lstat: a trailing slash follows a symlink
             except FSErr as e:
@@ -386,7 +428,12 @@ class FS:
                 self._del(p, n)
                 continue
             if not rec:
-                ok = False
+                if dirs and a.endswith("/") and self.walk(a, False, False)[2].kind == "l":
+                    raise Unsupported("rm -d link/")
+                if dirs and not node.ents and p.mode & 0o200:   # rm -d: an empty directory
+                    self._del(p, n)
+                else:
+                    ok = False
                 continue
             ln_ = self.walk(a, False, False)[2]
             if ln_ is not None and ln_.kind == "l":     # rm -r link/: empties the target, then fails on the link
@@ -399,8 +446,8 @@ class FS:
             self._rm_tree(p, n)
         return ok
 
-    def ln(self, target: str, link: str) -> bool:
-        """ln TARGET LINK (hard): a symlink TARGET is linked itself (-P, the default)."""
+    def ln(self, target: str, link: str, force: bool = False) -> bool:
+        """ln TARGET LINK (hard): a symlink TARGET is linked itself (-P, the default); -f replaces LINK."""
         try:
             into = self.stat(link).kind == "d"
         except FSErr:
@@ -413,17 +460,68 @@ class FS:
             dp, dn, d, _s2 = self.walk(dst, False, False)
         except FSErr:
             return False
-        if src is None or src.kind == "d" or d is not None:
+        if src is None or src.kind == "d":
             return False
         if dn in (".", ".."):
             raise Unsupported(dst)
         self.inside(dp)
-        if not dp.mode & 0o200:
+        if d is not None:
+            if not force or d.kind == "d":
+                return False
+            if d is src:     # -f onto another name of the same file: "are the same file" only for one name
+                if self.nlink(src) == 1:
+                    return False
+                if self.walk(target, False, False)[:2] == (dp, dn):
+                    return False
+                return True
+            if not dp.mode & 0o200:
+                return False
+            self._del(dp, dn)
+        elif not dp.mode & 0o200:
             return False
         self._put(dp, dn, src)
         return True
 
-    def ln_s(self, target: str, link: str, force: bool, nodere: bool) -> bool:
+    def canon(self, path: str) -> list[str]:
+        """realpath -m (canonicalize, every component may be missing): the absolute path's components."""
+        rname = [] if path.startswith("/") else [c for c in self.cwd_path().split("/") if c]
+        rest = [c for c in path.split("/") if c]
+        links = 0
+        while rest:
+            c = rest.pop(0)
+            if c == ".":
+                continue
+            if c == "..":
+                if rname:
+                    rname.pop()
+                continue
+            node = self.root
+            for x in rname:
+                node = node.ents.get(x) if node is not None and node.kind == "d" else None
+            nxt = node.ents.get(c) if node is not None and node.kind == "d" else None
+            if nxt is not None and nxt.kind == "l":
+                links += 1
+                if links > MAXLINK:
+                    raise Unsupported("symlink loop")
+                if nxt.target.startswith("/"):
+                    rname = []
+                rest = [x for x in nxt.target.split("/") if x] + rest
+                continue
+            if nxt is not None and nxt.kind == "f" and rest:
+                raise Unsupported("realpath -m through a file")
+            rname.append(c)
+        return rname
+
+    def cwd_path(self) -> str:
+        """The shell's working directory as an absolute physical path."""
+        parts, x = [], self.cwd
+        while x is not self.root:
+            par = x.parent
+            parts.append(next(n for n, c in par.ents.items() if c is x))
+            x = par
+        return "/" + "/".join(reversed(parts))
+
+    def ln_s(self, target: str, link: str, force: bool, nodere: bool, rel: bool = False) -> bool:
         into = False
         try:
             if nodere:      # -n: a symlink to a directory is replaced, not entered
@@ -443,6 +541,15 @@ class FS:
         if dn in (".", ".."):
             raise Unsupported(dst)
         self.inside(dp)
+        if rel:   # -r: the target (from the working directory) relative to the link's directory, both canonicalized
+            if force:
+                raise Unsupported("ln -srf")
+            frm = self.canon(target)
+            ldir = self.canon(dst.rsplit("/", 1)[0] if "/" in dst.rstrip("/") else ".")
+            k = 0
+            while k < min(len(frm), len(ldir)) and frm[k] == ldir[k]:
+                k += 1
+            target = "/".join([".."] * (len(ldir) - k) + frm[k:]) or "."
         if d is not None:
             if not force or d.kind == "d":
                 return False
@@ -460,26 +567,52 @@ class FS:
         self._put(dp, dn, self._new("l", 0o777, target=target))
         return True
 
-    def cp(self, opts: str, src: str, dst: str) -> bool:
-        rec = bool(set(opts) & set("rRa"))
-        arch = "a" in opts
+    def _targets(self, srcs: list[str], dst: str, notarget: bool, is_cp: bool = True) -> list[tuple[str, str]] | None:
+        """(source, destination path) per source of cp / mv: into DST when it is a directory (following a symlink),
+        DST itself for one source otherwise, with -T, or for 'dir/.'; None when several sources have no directory."""
+        if notarget and len(srcs) > 1:
+            raise Unsupported("-T with several sources")
         try:
             into = self.stat(dst).kind == "d"
         except FSErr:
             into = False
-        if dst.endswith("/") and not into:
+        if len(srcs) > 1 and not into:
+            return None                              # "target 'x' is not a directory": nothing is done
+        if is_cp and dst.endswith("/") and not into and not notarget:
             raise Unsupported("cp to a missing dir/")
-        target = _join(dst, _base(src)) if into else dst
-        try:
-            s = self.walk(src, not rec, True)[2]   # cp follows a symlink SRC; -r / -a copy it as a symlink
-        except FSErr:
-            return False
-        if s is None or (s.kind == "d" and not rec):
+        out, seen = [], set()
+        for s in srcs:
+            dot = s == "." or s.endswith("/.")      # 'cp -r dir/. dst': the directory's content into dst itself
+            t = dst if notarget or dot or not into else _join(dst, _base(s))
+            key = t.rstrip("/")
+            if key in seen:
+                raise Unsupported("two sources onto one name")
+            seen.add(key)
+            out.append((s, t))
+        return out
+
+    def cp(self, opts: str, args: list[str]) -> bool:
+        rec = bool(set(opts) & set("rRa"))
+        arch, force, deref_all = "a" in opts, "f" in opts, "L" in opts
+        follow_top = not rec or deref_all or "H" in opts   # cp follows a symlink SRC; -r / -a copy it, -H / -L follow it
+        pairs = self._targets(args[:-1], args[-1], "T" in opts)
+        if pairs is None:
             return False
         self._hl: dict = {}
-        return self._copy(s, src, target, arch, True)
+        ok = True
+        for src, target in pairs:
+            try:
+                s = self.walk(src, follow_top, True)[2]
+            except FSErr:
+                ok = False
+                continue
+            if s is None or (s.kind == "d" and not rec):
+                ok = False                           # missing, or "-r not specified; omitting directory"
+                continue
+            ok = self._copy(s, src, target, arch, True, force, deref_all) and ok
+        return ok
 
-    def _copy(self, s: Node, spath: str, dst: str, arch: bool, top: bool) -> bool:
+    def _copy(self, s: Node, spath: str, dst: str, arch: bool, top: bool, force: bool = False, deref: bool = False) -> bool:
         def fail() -> bool:
             if top:
                 return False
@@ -489,7 +622,9 @@ class FS:
         except FSErr:
             return fail()
         if dn in (".", ".."):
-            raise Unsupported(dst)
+            if not (s.kind == "d" and d is not None and d.kind == "d"):
+                raise Unsupported(dst)
+            dp, dn = d.parent, next(n for n, c in d.parent.ents.items() if c is d)
         self.inside(dp)
         if d is s:
             if s.kind == "d":
@@ -514,7 +649,8 @@ class FS:
         if s.kind == "f":
             if not s.mode & 0o400:
                 return fail()
-            if d is not None and d.kind == "l":      # writes through a symlink; not through a dangling one
+            via_link = d is not None and d.kind == "l"
+            if via_link:                             # writes through a symlink; not through a dangling one
                 try:
                     t = self.walk(dst, True)[2]
                 except FSErr:
@@ -523,10 +659,30 @@ class FS:
                     return fail()
                 d = t
             if d is not None:
-                if d.kind == "d" or d is s or not d.mode & 0o200:
+                if d.kind == "d" or d is s:
                     return fail()
                 if arch and self.nlink(s) > 1:
                     raise Unsupported("cp -a of a hard-linked file onto an existing file")
+                if arch and self.nlink(d) > 1:       # -a (--preserve=links) unlinks a destination with other names first
+                    if via_link:
+                        raise Unsupported("cp -a through a symlink onto a hard-linked file")
+                    if not dp.mode & 0o200:
+                        return fail()
+                    self._del(dp, dn)
+                    node = self._new("f", s.mode, data=s.data)
+                    self._put(dp, dn, node)
+                    self._hl[s.ino] = node
+                    return True
+                if not d.mode & 0o200:
+                    if not force or not top:
+                        return fail()
+                    if via_link or arch:
+                        raise Unsupported("cp -f through a symlink / with -a")
+                    if not dp.mode & 0o200:
+                        return False
+                    self._del(dp, dn)            # -f: the unwritable file is unlinked and a new one made
+                    self._put(dp, dn, self._new("f", s.mode & ~UMASK, data=s.data))
+                    return True
                 if d.data != s.data:
                     self._set(d, "data", s.data)
                 if arch and d.mode != s.mode:
@@ -563,17 +719,30 @@ class FS:
             if not d.mode & 0o200:
                 raise Unsupported("cp -r into a read-only directory")
             final = s.mode if arch else d.mode
+        ok = True
         for name in sorted(s.ents):
-            self._copy(s.ents[name], spath.rstrip("/") + "/" + name, dst.rstrip("/") + "/" + name, arch, False)
+            c, cpath = s.ents[name], spath.rstrip("/") + "/" + name
+            if deref and c.kind == "l":              # -L: what the symlink points to; a dangling one is an error
+                try:
+                    c = self.stat(cpath)
+                except FSErr:
+                    ok = False
+                    continue
+            ok = self._copy(c, cpath, dst.rstrip("/") + "/" + name, arch, False, False, deref) and ok
         if d.mode != final:
             self._set(d, "mode", final)
-        return True
+        return ok
 
-    def mv(self, src: str, dst: str) -> bool:
-        try:
-            into = self.stat(dst).kind == "d"
-        except FSErr:
-            into = False
+    def mv(self, opts: str, args: list[str]) -> bool:
+        pairs = self._targets(args[:-1], args[-1], "T" in opts, is_cp=False)
+        if pairs is None:
+            return False
+        ok = True
+        for src, target in pairs:
+            ok = self._mv1(src, target) and ok
+        return ok
+
+    def _mv1(self, src: str, target: str) -> bool:
         try:
             sp, sn, s, _s = self.walk(src, False, False)
         except FSErr:
@@ -584,7 +753,6 @@ class FS:
             raise Unsupported(src)
         if src.endswith("/") and s.kind != "d":      # 'mv link/ x': Not a directory
             return False
-        target = _join(dst, _base(src)) if into else dst
         try:
             dp, dn, d, dslash = self.walk(target, False, False)
         except FSErr:
@@ -801,16 +969,18 @@ hemlock larch linden myrtle oak pine poplar rowan spruce sumac teak yucca""".spl
 _LV = {   # commands, trap operations, questions about paths, starting tree (dirs, files, symlinks, hard links), tree cap
     1: ((5, 7), 1, 1, (3, 4, 0, 0), 24), 2: ((6, 8), 1, 1, (3, 4, 1, 0), 24), 3: ((8, 10), 1, 2, (4, 5, 1, 0), 28),
     4: ((15, 17), 4, 2, (4, 6, 1, 0), 36), 5: ((18, 21), 5, 2, (5, 6, 1, 0), 40), 6: ((22, 25), 6, 3, (5, 7, 2, 1), 44),
-    7: ((30, 38), 10, 3, (6, 8, 2, 1), 52), 8: ((40, 50), 13, 3, (7, 9, 3, 1), 58), 9: ((60, 75), 20, 4, (8, 10, 3, 1), 66),
-    10: ((85, 100), 28, 4, (9, 11, 3, 1), 74)}
+    7: ((30, 38), 12, 3, (6, 8, 2, 1), 52), 8: ((40, 50), 16, 4, (7, 9, 3, 1), 58), 9: ((60, 75), 28, 5, (8, 10, 3, 1), 66),
+    10: ((85, 100), 38, 6, (9, 11, 3, 1), 74)}
 _P1 = ["cp_r_into", "mv_into", "mkdir_exists", "rmdir"]
 _P2 = ["mv_over", "ln_s_rel", "write_link", "rm_r_link"]
 _P3 = ["hardlink", "cp_follow", "cat_missing", "ln_s_into", "cp_r_link", "ln_sf_dir"]
 _P4 = _P1 + _P2 + ["mv_collide", "cp_r_new"]
 _P5 = _P4 + ["cp_follow", "cat_missing", "ln_s_into", "ln_s_exists", "touch_link", "cp_dangling"]
 _P6 = _P5 + ["hardlink", "cp_r_link", "cd", "mv_self", "cp_same"]
-_P7 = _P6 + ["ln_sf_dir", "ln_hard_symlink", "cp_r_tree", "cp_a_tree", "mv_link", "cp_through", "rm_link_slash"]
-_P9 = _P7 + ["chmod_dir", "chmod_file", "ln_sfn", "mv_link_slash", "rmdir_link"]
+_P7 = _P6 + ["ln_sf_dir", "ln_hard_symlink", "cp_r_tree", "cp_a_tree", "mv_link", "cp_through", "rm_link_slash",
+             "glob_cp", "glob_rm", "multi", "cat_self", "ln_f", "cd_session"]
+_P9 = _P7 + ["chmod_dir", "chmod_file", "ln_sfn", "mv_link_slash", "rmdir_link", "glob_mv", "glob_rmdir", "glob_chmod",
+             "cp_f", "ln_sr", "rmdir_p", "cp_T", "mv_T", "rm_dot", "cp_L", "chmod_dir_mv", "rmdir_ro", "cd_session"]
 _POOLS = {1: _P1, 2: _P2, 3: _P3, 4: _P4, 5: _P5, 6: _P6, 7: _P7, 8: _P7, 9: _P9, 10: _P9}
 _FILLER = {"mkdir": 1.0, "write": 2.0, "append": 2.0, "overwrite": 1.0, "touch": 0.5, "cp": 1.5, "mv": 1.0, "rm": 0.7}
 
@@ -828,6 +998,7 @@ class _Gen:
         self.used: set[str] = set()
         self.hard_note = ""
         self.cap = _LV[level][4]
+        self.limit = _LV[level][0][1]     # the level's longest script
 
     # ---- plumbing
     def word(self) -> str:
@@ -836,9 +1007,57 @@ class _Gen:
     def pick(self, xs):
         return self.r.choice(xs) if xs else None
 
-    def do(self, cmd: str, ok: bool | None = None) -> bool:
-        """Run one command on the emulator and keep it, unless it is Unsupported (or its exit status is not `ok`)."""
+    def here(self) -> list[str]:
+        """The shell's physical directory, as components below the top."""
+        return [c for c in self.fs.cwd_path()[len(ROOT):].split("/") if c]
+
+    def R(self, p: str) -> str:
+        """A path given from the top, written relative to the shell's physical directory (the kernel resolves '..'
+        physically); a trailing '/', '/.' or glob component stays as it is."""
+        cwd = self.here()
+        if not cwd or p.startswith("/"):
+            return p
+        trail = "/" if p.endswith("/") and p.strip("/") else ""
+        parts = [c for c in p.split("/") if c]
+        if parts and parts[0] == ".":
+            parts.pop(0)
+        tail = [parts.pop()] if parts and (parts[-1] == "." or "*" in parts[-1]) else []
+        k = 0
+        while k < min(len(cwd), len(parts)) and cwd[k] == parts[k]:
+            k += 1
+        return "/".join([".."] * (len(cwd) - k) + parts[k:] + tail) + trail or "."
+
+    def render(self, cmd: str) -> str:
+        """The command with its paths relative to the shell's directory (symlink texts and cd arguments as they are)."""
+        if not self.here():
+            return cmd
+        t = cmd.split()
+        name = t[0]
+        if name == "cd":
+            return cmd
+        if name in ("echo", "cat"):
+            if name == "cat":
+                t[1] = self.R(t[1])
+            t[3] = self.R(t[3])
+            return " ".join(t)
+        sym = name == "ln" and any(x.startswith("-") and "s" in x and "r" not in x for x in t[1:])
+        out, k = [name], 0
+        for x in t[1:]:
+            if x.startswith("-"):
+                out.append(x)
+                continue
+            out.append(x if k == 0 and (name == "chmod" or sym) else self.R(x))
+            k += 1
+        return " ".join(out)
+
+    def do(self, cmd: str, ok: bool | None = None, raw: bool = False) -> bool:
+        """Run one command on the emulator and keep it, unless it is Unsupported (or its exit status is not `ok`).
+        Paths are given from the top and written relative to the shell's directory (raw: exactly as given)."""
         fs = self.fs
+        if len(self.cmds) >= self.limit:
+            return False
+        if not raw:
+            cmd = self.render(cmd)
         mark = len(fs.log)
         try:
             res = fs.run(cmd)
@@ -852,11 +1071,11 @@ class _Gen:
         self.status.append(res)
         return True
 
-    def seq(self, cmds: list[tuple[str, bool | None]]) -> bool:
-        """Several commands kept together or not at all."""
+    def seq(self, cmds: list[tuple]) -> bool:
+        """Several commands kept together or not at all: (command, wanted status[, raw])."""
         mark, n = len(self.fs.log), len(self.cmds)
-        for c, ok in cmds:
-            if not self.do(c, ok):
+        for c in cmds:
+            if not self.do(*c):
                 self.fs.rollback(mark)
                 del self.cmds[n:], self.status[n:]
                 return False
@@ -875,14 +1094,17 @@ class _Gen:
         return out
 
     def res(self, p: str) -> Node | None:
+        """What a path from the top resolves to (following symlinks)."""
+        if not p.strip("/"):
+            return self.fs.top
         try:
-            return self.fs.stat(p)
+            return self.fs.walk(p, True, True, base=self.fs.top)[2]
         except (FSErr, Unsupported):
             return None
 
     def lres(self, p: str) -> Node | None:
         try:
-            return self.fs.walk(p, False, False)[2]
+            return self.fs.walk(p, False, False, base=self.fs.top)[2]
         except (FSErr, Unsupported):
             return None
 
@@ -1421,7 +1643,9 @@ class _Gen:
             self.focus.append(f"{up}/{new}")
         if self.r.random() < 0.5:
             body.append((f"echo {self.word()} > {self.fresh('f', phys)}", True))
-        return self.seq(pre + [(f"cd {L}", True)] + body + [("cd ..", True)])
+        if self.here():
+            return False
+        return self.seq(pre + [(f"cd {L}", True, True)] + [c + (True,) for c in body] + [("cd ..", True, True)])
 
     def t_chmod_dir(self) -> bool:
         fl = self.files()
@@ -1456,6 +1680,265 @@ class _Gen:
         self.focus.append(f)
         return self.seq(steps)
 
+    # ---- levels 7-10: globs, several sources, less common options, sessions in a symlinked directory
+    def gl(self, pat: str) -> list[str]:
+        """A glob's expansion from the top."""
+        cwd, self.fs.cwd = self.fs.cwd, self.fs.top
+        try:
+            return self.fs.glob(pat)
+        finally:
+            self.fs.cwd = cwd
+
+    def _dirs_with(self, lo: int, hi: int, sub: bool | None = None) -> list[str]:
+        """Directories with lo..hi entries (sub: with / without a subdirectory among them)."""
+        out = []
+        for d in self.dirs():
+            ents = self.res(d).ents
+            if lo <= len(ents) <= hi and (sub is None or sub == any(c.kind == "d" for c in ents.values())):
+                out.append(d)
+        return out
+
+    def _pattern(self, d: str) -> str:
+        exts = sorted({n.rsplit(".", 1)[1] for n in self.res(d).ents if "." in n})
+        return f"{d}/*.{self.r.choice(exts)}" if exts and self.r.random() < 0.4 else f"{d}/*"
+
+    def _other_dir(self, d: str) -> str | None:
+        return self.pick([x for x in self.dirs(True) if x != d and not (x + "/").startswith(d + "/") and not d.startswith(x + "/")])
+
+    def t_glob_cp(self) -> bool:
+        d = self.pick(self._dirs_with(2, 6))
+        e = d and self._other_dir(d)
+        if not e:
+            return False
+        pat = self._pattern(d)
+        self.focus += [f"{e}/{x.split('/')[-1]}" for x in self.gl(pat)[:2]]
+        return self.do(f"cp {self.r.choice(['', '', '-r '])}{pat} {e}")
+
+    def t_glob_rm(self) -> bool:
+        d = self.pick(self._dirs_with(2, 6))
+        if d is None:
+            return False
+        pat = self._pattern(d)
+        self.focus.append(d)
+        return self.do(f"rm {self.r.choice(['', '', '-f ', '-r '])}{pat}")
+
+    def t_glob_mv(self) -> bool:
+        d = self.pick(self._dirs_with(2, 6))
+        e = d and self._other_dir(d)
+        if not e:
+            return False
+        pat = self._pattern(d)
+        self.focus += [e, d]
+        return self.do(f"mv {pat} {e}")
+
+    def t_glob_rmdir(self) -> bool:
+        d = self.pick(self._dirs_with(2, 6, sub=True))
+        if d is None:
+            return False
+        self.focus.append(d)
+        return self.do(f"rmdir {d}/*")
+
+    def t_glob_chmod(self) -> bool:
+        d = self.pick(self._dirs_with(2, 5))
+        if d is None:
+            return False
+        pat = self._pattern(d)
+        fl = [x for x in self.gl(pat) if (n := self.res(x)) is not None and n.kind == "f"]
+        steps = [(f"chmod a-w {pat}", None)]
+        if fl:
+            f = self.r.choice(fl)
+            steps.append((f"echo {self.word()} >> {f}", None))
+            self.focus.append(f)
+        return self.seq(steps)
+
+    def t_multi(self) -> bool:
+        fl = self.files()
+        if len(fl) < 2:
+            return False
+        a, b = self.r.sample(fl, 2)
+        d = self.pick([x for x in self.dirs(True) if self.lres(_join(x, _base(a))) is None and self.lres(_join(x, _base(b))) is None
+                       and _base(a) != _base(b)])
+        if d is None:
+            return False
+        miss = self.pick([x for x in self.focus if self.lres(x) is None]) or _join(self.dirof(a), self.fresh("f", None))
+        v = self.r.randrange(4)
+        self.focus += [_join(d, _base(a)), _join(d, _base(b))]
+        if v == 0:
+            return self.do(f"cp {a} {miss} {b} {d}")
+        if v == 1:
+            return self.do(f"mv {a} {miss} {b} {d}")
+        if v == 2:
+            return self.do(f"{self.r.choice(['cp', 'mv'])} {a} {b} {self.r.choice(fl)}")   # the last one is not a directory
+        s = self.pick([x for x in self.dirs() if 1 <= self.size(x) <= 5 and not (d + "/").startswith(x + "/")])
+        return s is not None and self.do(f"cp {self.r.choice(['', '-r '])}{s} {a} {d}")
+
+    def _pair(self) -> tuple[list, str, str] | None:
+        """Two names of one file: an existing hard link pair, or the command that makes one."""
+        c = [(a, b) for g in self._hard_groups() for a in g for b in g if a != b]
+        if c:
+            a, b = self.r.choice(c)
+            return [], a, b
+        f = self.pick(self.files())
+        if f is None:
+            return None
+        par = self.pick([x for x in self.wdirs() if x != self.dirof(f)] or [""])
+        h = _join(par, self.fresh("f", par, 0.3))
+        return [(f"ln {f} {h}", True)], f, h
+
+    def t_cp_f(self) -> bool:
+        pr = self._pair()
+        g = self.pick(self.files())
+        if pr is None or g is None:
+            return False
+        pre, a, b = pr
+        if self.res(g) is self.res(a):
+            return False
+        self.focus += [a, b]
+        return self.seq(pre + [(f"chmod {self.r.choice(['444', 'a-w'])} {b}", True), (f"cp -f {g} {b}", True),
+                               (f"echo {self.word()} >> {a}", None)])
+
+    def t_cat_self(self) -> bool:
+        pr = self._pair()
+        if pr is None:
+            return False
+        pre, a, b = pr
+        self.focus += [a, b]
+        if self.r.random() < 0.3:
+            return self.seq(pre + [(f"cat {a} > {a}", True)])
+        return self.seq(pre + [(f"cat {a} > {b}", True)])
+
+    def t_ln_f(self) -> bool:
+        fl = self.files()
+        if len(fl) < 2:
+            return False
+        a, b = self.r.sample(fl, 2)
+        self.focus += [a, b]
+        return self.seq([(f"ln -f {a} {b}", None), (f"echo {self.word()} >> {b}", None)])
+
+    def t_ln_sr(self) -> bool:
+        cand = [f"{L}/{n}" for L in self.links("d") for n in sorted(self.res(L).ents)] + self.files()
+        t = self.pick(cand)
+        d = self.pick([x for x in self.dirs(True) if "/" in x] or self.dirs(True))
+        if t is None or d is None:
+            return False
+        if self.r.random() < 0.5:
+            if self.lres(_join(d, _base(t))) is not None:
+                return False
+            self.focus.append(_join(d, _base(t)))
+            return self.do(f"ln -sr {t} {d}", True)
+        name = _join(d, self.fresh("l", d))
+        self.focus.append(name)
+        return self.do(f"ln -sr {t} {name}", True)
+
+    def t_rmdir_p(self) -> bool:
+        base = self.pick([x for x in self.dirs(True) if "/" not in x])
+        if base is None:
+            return False
+        a, b = self.fresh("d", None), self.fresh("d", None)
+        steps = [(f"mkdir -p {base}/{a}/{b}", True)]
+        if self.r.random() < 0.4:
+            steps.append((f"echo {self.word()} > {base}/{a}/{self.fresh('f', None)}", True))
+        steps.append((f"rmdir -p {base}/{a}/{b}", None))
+        self.focus += [f"{base}/{a}", base]
+        return self.seq(steps)
+
+    def t_cp_T(self) -> bool:
+        d = self.pick([x for x in self.dirs() if 1 <= self.size(x) <= 6])
+        e = d and self._other_dir(d)
+        if not e:
+            return False
+        kids = sorted(self.res(d).ents)
+        self.focus += [f"{e}/{k}" for k in kids[:2]]
+        form = self.r.choice([f"cp -rT {d} {e}", f"cp -r {d}/. {e}", f"cp -a {d}/. {e}"])
+        return self.do(form, True)
+
+    def t_mv_T(self) -> bool:
+        d = self.pick([x for x in self.dirs(True) if 1 <= self.size(x) <= 6])
+        e = self.pick([x for x in self.dirs(True) if x != d and d and not x.startswith(d + "/") and not d.startswith(x + "/")])
+        if not d or not e:
+            return False
+        self.focus += [e, d]
+        return self.do(f"mv -T {d} {e}")
+
+    def t_rm_dot(self) -> bool:
+        d = self.pick([x for x in self.dirs(True) if self.size(x) >= 1])
+        if d is None:
+            return False
+        self.focus.append(d)
+        return self.do(f"rm {self.r.choice(['-r', '-rf'])} {d}/.", False)
+
+    def t_cp_L(self) -> bool:
+        lk = self.links()
+        c = [d for d in self.dirs() if 1 <= self.size(d) <= 7 and any(q.startswith(d + "/") for q in lk)]
+        if c and self.r.random() < 0.6:
+            a = self.r.choice(c)
+            par = self.pick([x for x in self.wdirs() if not (x + "/").startswith(a + "/")])
+            new = _join(par, self.fresh("d", par))
+            self.focus += [new + q[len(a):] for q in lk if q.startswith(a + "/")]
+            return self.do(f"cp -rL {a} {new}")
+        L = self.pick([x for x in self.links("d") if self.size(self.fs.q_readlink(x)[len(ROOT) + 1:]) <= 6])
+        if L is None:
+            return False
+        par = self.pick([x for x in self.wdirs() if x != self.dirof(L)] or [""])
+        new = _join(par, self.fresh("d", par))
+        self.focus.append(new)
+        return self.do(f"cp -{self.r.choice(['rH', 'rL'])} {L} {new}", True)
+
+    def t_chmod_dir_mv(self) -> bool:
+        d = self.pick([x for x in self.dirs(True) if self.size(x) <= 4 and "/" in x])
+        e = d and self._other_dir(d)
+        if not e:
+            return False
+        new = _join(self.dirof(d), self.fresh("d", self.dirof(d)))
+        self.focus += [new, d, f"{e}/{_base(d)}"]
+        return self.seq([(f"chmod 555 {d}", True), (f"mv {d} {e}", False), (f"mv {d} {new}", True)])
+
+    def t_rmdir_ro(self) -> bool:
+        d = self.pick([x for x in self.dirs(True) if self.size(x) == 0])
+        pre = []
+        if d is None:
+            par = self.pick(self.wdirs())
+            d = _join(par, self.fresh("d", par))
+            pre = [(f"mkdir {d}", True)]
+        self.focus.append(d)
+        return self.seq(pre + [(f"chmod 555 {d}", True), (f"rmdir {d}", True)])
+
+    _SESSION = ["write", "write", "append", "append", "cp", "mv", "overwrite", "mkdir", "touch", "rm", "t_ln_s_rel",
+                "t_glob_cp", "t_cp_follow", "t_hardlink", "t_cat_missing", "t_cp_r_into", "t_mv_into", "t_cp_T", "t_multi"]
+
+    def t_cd_session(self, stay: bool = False) -> bool:
+        """cd into a symlinked directory and work there for a while: every relative path resolves physically (its '..'
+        is the real parent), while `cd ..` and `cd ../x` are logical; back to the top with `cd ..` (or stay: the end)."""
+        if self.here():
+            return False
+        c = [L for L in self.links("d") if "/" not in L and self.fs.q_readlink(L).count("/") > ROOT.count("/") + 1]
+        mark, n = len(self.fs.log), len(self.cmds)
+        if c:
+            L = self.r.choice(c)
+        else:
+            phys = self.pick([x for x in self.dirs(True) if "/" in x])
+            if phys is None:
+                return False
+            L = self.fresh("l", "")
+            if not self.do(f"ln -s {phys} {L}", True, True):
+                return False
+        ok = self.do(f"cd {L}", True, True)
+        hop = False
+        for _ in range(self.r.randint(3, 7) if ok else 0):
+            if not hop and self.r.random() < 0.25:
+                x = self.pick([p for p, nd in self.ents() if "/" not in p and nd.kind == "d"])
+                if x and self.do(f"cd ../{x}", True, True):
+                    hop = True
+                    continue
+            op = self.r.choice(self._SESSION)
+            getattr(self, op if op.startswith("t_") else "f_" + op)()
+        if ok and not stay:
+            ok = self.do("cd ..", True, True)
+        if not ok:
+            self.fs.rollback(mark)
+            del self.cmds[n:], self.status[n:]
+        return ok
+
     # ---- the script
     def generate(self) -> None:
         (lo, hi), n_traps, _nq, _t, _cap = _LV[self.level]
@@ -1477,6 +1960,9 @@ class _Gen:
             at = [r.randint(2, max(2, target - 3))]
         fill = list(_FILLER)
         w = [_FILLER[k] for k in fill]
+        stay = self.level >= 9 and r.random() < 0.5     # the script ends inside a symlinked directory: ask for pwd
+        if stay:
+            target -= 6
         tries, blocked = 0, -1
         while len(self.cmds) < target and tries < 3000:
             tries += 1
@@ -1491,6 +1977,11 @@ class _Gen:
                 if not self.f_prune():
                     self.f_rm()
                 continue
+            getattr(self, "f_" + r.choices(fill, w)[0])()
+        if stay:
+            self.t_cd_session(stay=True)
+        while len(self.cmds) < lo and tries < 4000:
+            tries += 1
             getattr(self, "f_" + r.choices(fill, w)[0])()
         self.traps_left = traps
 
@@ -1545,6 +2036,8 @@ def _pick_questions(g: _Gen, n: int) -> list[tuple[str, str]]:
 
 
 def _answer(fs: FS, kind: str, path: str) -> str:
+    if kind == "pwd":
+        return fs.pwd
     return {"cat": fs.q_cat, "ls": fs.q_ls, "readlink": fs.q_readlink}[kind](path)
 
 
@@ -1634,7 +2127,7 @@ def _grade(kind: str, exp: str, blk: str | None) -> float:
         return 1.0 if re.match(r"error\b", a, re.I) else 0.0
     if kind == "cat":
         return 1.0 if _norm_content(a) == exp.lower() else 0.0
-    if kind == "readlink":
+    if kind in ("readlink", "pwd"):
         return 1.0 if a.rstrip("/") == exp else 0.0
     if exp == "(empty)":
         return 1.0 if _norm_content(a) == "(empty)" else 0.0
@@ -1663,6 +2156,8 @@ def fs_seq(seed: int, level: int = 3) -> Item:
     fs = g.fs
     failed = [i + 1 for i, ok in enumerate(g.status) if not ok]
     pq = _pick_questions(g, _LV[level][2])
+    if fs.pwd != ROOT:     # the script ended inside a (symlinked) directory
+        pq.append(("pwd", ""))
     kinds = ["failed", "tree"] + [k for k, _p in pq]
     exp = [" ".join(map(str, failed)) or "NONE", " ; ".join(fs.listing())] + [_answer(fs, k, p) for k, p in pq]
     qtext = ["Which of the numbered commands failed (exited with a non-zero status)? Give their numbers, or NONE.",
@@ -1675,14 +2170,16 @@ def fs_seq(seed: int, level: int = 3) -> Item:
         elif k == "readlink":
             qtext.append(f"Afterwards, in {ROOT}: what does `readlink -f {p}` print? Answer with the path, or ERROR if it "
                          "fails.")
-        else:
+        elif k == "ls":
             qtext.append(f"Afterwards, in {ROOT}: which names does `ls {p}` list? Answer with the names separated by "
                          "spaces (any order), (empty) for an empty directory, or ERROR if it fails.")
+        else:
+            qtext.append("What would `pwd` print at the end of the script, in the script's shell?")
     script = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(g.cmds))
     form = "\n".join(["ANSWER 1: <numbers, or NONE>", "ANSWER 2:", "<one line per path>"]
                      + [f"ANSWER {i}: <answer>" for i in range(3, len(kinds) + 1)])
     tree = "\n".join(start)
-    prompt = (f"I run a script with bash on Linux with GNU coreutils 9.x, as an ordinary user (not root) who owns every "
+    prompt = (f"I run a script with bash on Linux with GNU coreutils 9.x and LC_ALL=C, as an ordinary user (not root) who owns every "
               f"file, with umask 022. The script is not interactive (standard input is not a terminal, so nothing asks "
               f"for confirmation) and it does not stop when a command fails. It starts in {ROOT}, which contains:\n\n"
               f"```\n{tree}\n```\n{_NOTATION}" + (f"\n{g.hard_note}" if g.hard_note else "")

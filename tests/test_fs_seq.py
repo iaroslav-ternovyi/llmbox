@@ -99,6 +99,44 @@ CASES = [
      ["./s/", "./s/k/", "./s/k/f = 1", "./t/", "./t/s/", "./t/s/k/", "./t/s/k/f = 1", "./t/s/k/g = 3"]),
     ("cp -r of a read-only dir makes a read-only copy", ["mkdir s", "echo a > s/f", "chmod 555 s", "cp -r s t", "touch t/g", "cp -a s u", "touch u/g"],
      [0, 0, 0, 0, 1, 0, 1], ["./s/", "./s/f = a", "./t/", "./t/f = a", "./u/", "./u/f = a"]),
+    # levels 7-10
+    ("cat into itself or its hard link empties it", ["echo a > f", "cat f > f", "echo b > g", "ln g h", "cat g > h"], [0] * 5,
+     ["./f = (empty)", "./g = (empty)", "./h = (empty)"]),
+    ("cp -f onto a read-only file makes a new one", ["echo a > a", "echo b > b", "ln b c", "chmod 444 b", "cp -f a b", "cp a c"],
+     [0, 0, 0, 0, 0, 1], ["./a = a", "./b = a", "./c = b"]),
+    ("rmdir: an empty read-only dir goes, one in a read-only dir stays", ["mkdir -p p/e", "chmod 555 p/e", "rmdir p/e", "mkdir -p q/e",
+                                                                           "chmod 555 q", "rmdir q/e"], [0, 0, 0, 0, 0, 1], ["./p/", "./q/", "./q/e/"]),
+    ("rmdir -p stops at the first non-empty parent", ["mkdir -p a/b/c", "echo x > a/f", "rmdir -p a/b/c", "mkdir -p z/y/x", "rmdir -p z/y/x"],
+     [0, 0, 1, 0, 0], ["./a/", "./a/f = x"]),
+    ("cp -rT", ["mkdir -p s t/u", "echo 1 > s/f", "cp -rT s t", "cp -rT s n", "echo z > zf", "cp -rT s zf"], [0, 0, 0, 0, 0, 1],
+     ["./n/", "./n/f = 1", "./s/", "./s/f = 1", "./t/", "./t/f = 1", "./t/u/", "./zf = z"]),
+    ("mv -T", ["mkdir a b c", "echo x > a/f", "echo y > c/g", "mv -T a b", "mkdir a2", "mv -T a2 c", "echo q > f", "mv -T f c", "mv -T b/f c/g"],
+     [0, 0, 0, 0, 0, 1, 0, 1, 0], ["./a2/", "./b/", "./c/", "./c/g = x", "./f = q"]),
+    ("cp -r dir/. copies the content", ["mkdir -p s/k t", "echo 1 > s/f", "echo 2 > s/k/g", "cp -r s/. t", "cp -r s/. n"], [0] * 5,
+     ["./n/", "./n/f = 1", "./n/k/", "./n/k/g = 2", "./s/", "./s/f = 1", "./s/k/", "./s/k/g = 2", "./t/", "./t/f = 1", "./t/k/", "./t/k/g = 2"]),
+    ("rm refuses . and ..", ["mkdir d", "echo x > d/f", "rm -r d/.", "rm -rf d/.", "rm -rf d/.."], [0, 0, 1, 1, 1], ["./d/", "./d/f = x"]),
+    ("ln -sr resolves symlinks in both paths", ["mkdir -p a/b c/d", "echo x > a/b/f", "ln -sr a/b/f c/d/l", "ln -s a/b L", "ln -sr L/f c/m",
+                                                "ln -sr c/d c/d/up", "ln -sr nope c/n"], [0] * 7,
+     ["./L -> a/b", "./a/", "./a/b/", "./a/b/f = x", "./c/", "./c/d/", "./c/d/l -> ../../a/b/f", "./c/d/up -> .", "./c/m -> ../a/b/f",
+      "./c/n -> ../nope"]),
+    ("globs: cp / rm skip a directory and fail", ["mkdir -p src/sub dst", "echo 1 > src/a.txt", "echo 2 > src/b.log", "echo 3 > src/sub/c",
+                                                  "cp src/* dst", "cp src/*.txt src/*.log dst/sub2", "cp *.zz dst", "rm -f *.zz", "rm src/*"],
+     [0, 0, 0, 0, 1, 1, 1, 0, 1], ["./dst/", "./dst/a.txt = 1", "./dst/b.log = 2", "./src/", "./src/sub/", "./src/sub/c = 3"]),
+    ("several sources", ["echo a > a", "echo b > b", "cp a b nodir", "echo c > c", "mv a b c", "mkdir d", "cp a nope b d", "mv a nope d"],
+     [0, 0, 1, 0, 1, 0, 1, 1], ["./b = b", "./c = c", "./d/", "./d/a = a", "./d/b = b"]),
+    ("cp -rH / -rL", ["mkdir -p s t", "echo x > t/f", "ln -s ../t s/in", "ln -s t top", "cp -rH top h", "cp -rL s L1", "cp -rH s H1",
+                      "ln -s nowhere s/dang", "cp -rL s L2"], [0] * 8 + [1],
+     ["./H1/", "./H1/in -> ../t", "./L1/", "./L1/in/", "./L1/in/f = x", "./L2/", "./L2/in/", "./L2/in/f = x", "./h/", "./h/f = x",
+      "./s/", "./s/dang -> nowhere", "./s/in -> ../t", "./t/", "./t/f = x", "./top -> t"]),
+    ("ln -f", ["echo a > a", "echo b > b", "ln -f a b", "echo c >> b", "ln -f a b"], [0] * 5, ["./a = a|c", "./b = a|c"]),
+    ("touch -c, rm -d", ["touch -c nope", "mkdir e", "rm -d e", "mkdir -p n/x", "rm -d n"], [0, 0, 0, 0, 1], ["./n/", "./n/x/"]),
+    ("a read-only dir: into / out of / links", ["mkdir d e", "echo x > f", "echo y > d/g", "chmod 555 d", "mv f d", "mv d/g e", "ln f d/h",
+                                                "ln d/g e/h", "ln -s f d/s"], [0, 0, 0, 0, 1, 1, 1, 0, 1],
+     ["./d/", "./d/g = y", "./e/", "./e/h = y", "./f = x"]),
+    ("cp -a onto a hard-linked file makes a new one, cp -r writes into it",
+     ["echo a > a", "echo b > b", "ln b c", "chmod 444 b", "cp -a a b", "cp -r a c", "echo d > d", "echo e > e", "ln e f", "cp -r d e"],
+     [0, 0, 0, 0, 0, 1, 0, 0, 0, 0], ["./a = a", "./b = a", "./c = b", "./d = d", "./e = d", "./f = d"]),
+    ("cp -rT from a symlink onto a dir", ["mkdir d e", "ln -s d l", "cp -r l e", "cp -rT l e"], [0, 0, 0, 1], ["./d/", "./e/", "./e/l -> d", "./l -> d"]),
 ]
 for name, cmds, want_st, want_tree in CASES:
     st, tree, _fs = run(cmds)
@@ -146,7 +184,7 @@ for level in range(1, T.MAX_LEVEL + 1):
         n += 1
         m = a.meta
         check(f"L{level} s{seed} deterministic", a.messages == b.messages and m["expected"] == b.meta["expected"])
-        check(f"L{level} s{seed} length", lo <= len(m["commands"]) <= hi + 4, len(m["commands"]))
+        check(f"L{level} s{seed} length", lo <= len(m["commands"]) <= hi, len(m["commands"]))
         check(f"L{level} s{seed} oracle", a.check(oracle(a)) == 1.0)
         check(f"L{level} s{seed} empty", a.check("") == 0.0)
         check(f"L{level} s{seed} nonsense", a.check("\n".join(f"ANSWER {i + 1}: 12345 nonsense" for i in range(len(m["kinds"])))) == 0.0)
