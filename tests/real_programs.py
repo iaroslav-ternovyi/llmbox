@@ -6,8 +6,11 @@ nginx:alpine and debian:stable; the routing check runs a privileged container). 
   route   techhelp.subnet (levels 6-10): the `ip rule` / `ip route` lines of the prompt applied in a network namespace of
           a real kernel (dummy interfaces, forwarding on, rp_filter off), answers from `ip route get`
   shell   knowledge.shell (levels 7-10 and the part type levels 9-10 leave out) in bash 5 with GNU coreutils, gawk, jq
+  git     techhelp.git_seq (levels 1-10): every item replayed on the local git (no Docker; --image debian:bullseye runs
+          it on that image's git instead) in a temp repo with fixed names, dates one minute apart and no user config;
+          each command's exit status, every question's answer and the whole final state compared with the emulator
 
-Run: python3 tests/real_programs.py [nginx|route|shell ...] [--seeds N]
+Run: python3 tests/real_programs.py [nginx|route|shell|git ...] [--seeds N] [--image IMAGE]
 2026-09-29, --seeds 25: 668 / 495 / 1296 checked, 0 wrong - after the fix it found (a rewrite empties $1 even when its
 regex does not match); nginx 1.31.6, kernel 6.17 + iproute2 6.15, bash 5.2.37 / coreutils 9.7 / gawk 5.2.1 / jq 1.7.
 
