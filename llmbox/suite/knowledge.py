@@ -25,6 +25,7 @@ import subprocess
 import sys
 
 from .common import Item, rng, strip_think
+from .knowledge_js import gen as js_gen
 
 BLOCK = "knowledge"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -521,9 +522,9 @@ def oracle(it: Item) -> str:
 from .knowledge_regex import regex  # noqa: E402  (v0.11; imported here: it grades with the helpers above)
 
 BANK_KINDS = ("python", "shell", "codes")   # the kinds built from knowledge_bank.json
-KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes"), "regex": regex}
+KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes"), "regex": regex, "js": js_gen}
 MAX_LEVEL = 10   # 6 = expert: implementation-specific behaviour even frontier models get wrong; 7-10: facts combined
-QUICK = ["python", "shell", "codes"]   # the quick tier did not change with regex
+QUICK = ["python", "shell", "codes"]   # the quick tier did not change with regex / js
 
 
 # ---- building the bank: run every question on the real thing ----------------------------------------------------------

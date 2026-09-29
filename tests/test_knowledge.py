@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from llmbox.suite import knowledge as K  # noqa: E402
 
+
 failed = 0
 
 
