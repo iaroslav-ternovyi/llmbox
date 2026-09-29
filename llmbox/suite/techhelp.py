@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from .common import Item, final_answer, multi_check, num, rng
+from .techhelp_sql import sql
 
 BLOCK = "techhelp"
 CONVENTIONAL = {"postgres": 5432, "db": 5432, "redis": 6379, "cache": 6379, "grafana": 3000, "minio": 9000, "keycloak": 8080,
@@ -1807,6 +1808,7 @@ def log_910(seed: int, level: int) -> Item:
                       "hosts": {s: hosts[s] for s in [root, *fail]}})
 
 
-KINDS = {"compose_port": compose_port, "nginx_route": nginx_route, "subnet": subnet, "chmod_seq": chmod_seq, "log_root": log_root}
-QUICK = list(KINDS)
+KINDS = {"compose_port": compose_port, "nginx_route": nginx_route, "subnet": subnet, "chmod_seq": chmod_seq, "log_root": log_root,
+         "sql": sql}   # v0.11: queries on a SQLite database, answered by SQLite itself (techhelp_sql.py)
+QUICK = ["compose_port", "nginx_route", "subnet", "chmod_seq", "log_root"]   # the quick tier did not change with sql
 MAX_LEVEL = 10

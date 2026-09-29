@@ -21,13 +21,15 @@ def q_of(src, text_part, fake=False):
 
 
 # the bank itself: every level has enough questions for an item, and every question has an oracle answer
-for kind in K.KINDS:
+# (the kinds built from the bank; knowledge.regex is evaluated live: tests/test_real_engines.py)
+BANK = {k: K.KINDS[k] for k in K.BANK_KINDS}
+for kind in BANK:
     for level in range(1, 6):
         check(f"{kind} L{level} real pool", len(K._pool(kind, level, False)) >= K.PER_ITEM)
         check(f"{kind} L{level} fake pool", len(K._pool(kind, level, True)) >= 3)
 
 n = 0
-for kind, gen in K.KINDS.items():
+for kind, gen in BANK.items():
     for level in range(1, 6):
         for seed in range(1, 31):
             a, b = gen(seed, level), gen(seed, level)
@@ -118,7 +120,7 @@ def codes_int(phrase):
 combos = {"python": {}, "shell": {}}
 n = 0
 SHAPE = {7: [1] * 4 + [2] * 4, 8: [1] * 2 + [2] * 3 + [3] * 3, 9: [1, 2, 3, 3, 3, 3, 4, 4], 10: [3] * 4 + [4] * 6}
-for kind, gen in K.KINDS.items():
+for kind, gen in BANK.items():
     for level in (7, 8, 9, 10):
         for seed in range(1, 61):
             a, b = gen(seed, level), gen(seed, level)

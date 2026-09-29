@@ -518,9 +518,12 @@ def oracle(it: Item) -> str:
     return "ANSWERS\n" + "\n".join(f"{i}. {a}" for i, a in enumerate(it.meta["expected"], 1))
 
 
-KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes")}
+from .knowledge_regex import regex  # noqa: E402  (v0.11; imported here: it grades with the helpers above)
+
+BANK_KINDS = ("python", "shell", "codes")   # the kinds built from knowledge_bank.json
+KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes"), "regex": regex}
 MAX_LEVEL = 10   # 6 = expert: implementation-specific behaviour even frontier models get wrong; 7-10: facts combined
-QUICK = list(KINDS)
+QUICK = ["python", "shell", "codes"]   # the quick tier did not change with regex
 
 
 # ---- building the bank: run every question on the real thing ----------------------------------------------------------
