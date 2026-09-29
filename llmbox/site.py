@@ -1497,9 +1497,10 @@ def run_page(rid: str, rec: dict, ref: dict | None, flags: dict) -> str:
         for r in items:
             f = flags.get(r["id"], {})
             fl = ('<span class="flag lo">CUT</span>' if f.get("cut") else "") + ('<span class="flag lo">LOOP</span>' if f.get("loop") else "")
-            lvl = r["id"].rsplit(".", 2)[-2]
-            body_rows.append(f'<tr><td class="l"><span class="m2">{esc(r["kind"].replace("_", " "))}</span> <span class="q">{lvl}</span>{" <span class=flag>EXPERT</span>" if lvl == "L6" else ""}</td>'
-                             f'<td>{_tile(r["score"] * 100)}</td><td>{r["seconds"]:.0f} s</td><td>{r.get("steps") or 1}</td><td>{f.get("max_reply", 0):,}</td><td class="l">{fl or "<span class=q>—</span>"}</td></tr>')
+            v = r["score"] * 100
+            body_rows.append(f'<tr><td class="l"><span class="m2">{esc(task_name(r["id"]))}</span></td>'
+                             f'<td class="l"><span class="mb {"ok" if v >= 99 else "no" if v < 1 else ""}"><i style="width:{v:.0f}%"></i></span><b class="mv">{v:.0f}</b></td>'
+                             f'<td>{r["seconds"]:.0f} s</td><td>{r.get("steps") or 1}</td><td>{f.get("max_reply", 0):,}</td><td class="l">{fl or "<span class=q>—</span>"}</td></tr>')
     argv = rt.get("argv") or []
     diff = rt.get("diff_vs_recipe")
     diff_html = ("<span class='v ok'>identical to the recipe</span>" if diff == [] else
@@ -1510,7 +1511,7 @@ def run_page(rid: str, rec: dict, ref: dict | None, flags: dict) -> str:
  <div class="id">{esc(rec.get("created", "")[:16].replace("T", " "))} · suite v{esc(rec["suite"]["version"])} · {s["wall_minutes"] / 60:.1f} h</div></div>
  <div class="acts">{'<button class="btn" id="copy">COPY SETTINGS</button>' if argv else ""}</div></section>
 <section class="panel sum">
- <div><b>{f"{vs:.0f}%" if vs is not None else "—"}</b><span>of frontier · {s["capability"]:.1f} ({s["capability_ci95"][0]:.0f}–{s["capability_ci95"][1]:.0f})</span></div>
+ <div><b>{f"{vs:.0f}%" if vs is not None else "—"}</b><span>of Claude Opus 5.5 in this run · range {s["capability_ci95"][0] / s["capability"] * vs if vs else 0:.0f}–{min(100, s["capability_ci95"][1] / s["capability"] * vs) if vs else 0:.0f}</span></div>
  <div><b class="w">{s["solved"]}</b><span>of {s["items"]} tasks solved</span></div>
  <div><b>{sp.get("decode_tps"):.0f}</b><span>tok/s in a short chat{f" · {float(report._deep(sp)):.0f} with a long context" if report._deep(sp) not in ("-", "") else ""}</span></div>
  <div><b class="w">{f"{2000/bd[0][1]['prefill_tps']:.1f} s" if bd and bd[0][1].get("prefill_tps") else "—"}</b><span>first word at 2k</span></div>
@@ -1947,7 +1948,8 @@ def _optimize_table(opts: dict, ranked: set | None = None) -> str:
             f"<th>llmbox at 32k</th><th class='l'>tuned</th></tr>{tr}</table>")
 
 
-def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None = None, ref_row: dict | None = None) -> str:
+def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None = None, ref_row: dict | None = None,
+                rs: list[dict] | None = None, look: dict | None = None) -> str:
     """How the numbers are made. The figures (weights, task counts, versions, depths) come from the code."""
     from . import suite
     per = {}
@@ -1955,33 +1957,62 @@ def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None =
         per.setdefault(b, []).append(lvl)
     from .suite import sessions
     counts = {"sessions": sum(1 for b, k, _l in suite.QUICK_ITEMS if b == "agentic" and k in sessions.KINDS), "agentic": len(per.get("agentic", []))}
-    rows = "".join(f'<tr><td class="l"><span class="m2">{esc(TIPS[b][0].split(" ·")[0])}</span></td><td>{share(b) * 100:.0f}%</td>'
-                   f'<td>{len(per.get(b, []))}</td><td class="l q">{esc(_GRADING[b].format(**counts))}</td></tr>' for b in BLOCKS)
+    rows = "".join(f'<tr class="grp"><td class="l" colspan="4">{esc(g)} · {sum(share(b) for b in bs) * 100:.0f}%</td></tr>'
+                   + "".join(f'<tr><td class="l"><span class="m2">{esc(TIPS[b][0].split(" ·")[0])}</span></td><td>{share(b) * 100:.0f}%</td>'
+                             f'<td>{len(per.get(b, []))}</td><td class="l q">{esc(_GRADING[b].format(**counts))}</td></tr>' for b in bs) for g, bs in GROUPS)
     n = len(suite.QUICK_ITEMS)
     n6 = sum(1 for *_x, lvl in suite.QUICK_ITEMS if lvl >= 6)
     ref_name = _name_of(ref) if ref else "the frontier model"
     ref_cap = (ref_row or {}).get("capability") or (ref or {}).get("summary", {}).get("capability")
+    # the margin of error on real models: the top two (not apart) and the top one against a model it is measurably ahead of
+    example = ""
+    if rs and look and len(rs) > 2:
+        order = sorted([r for r in rs if r.get("vs_ref") is not None], key=lambda r: -r["vs_ref"])
+        a, b = order[0], order[1]
+        c = next((r for r in order[2:] if surely_better(a, r)), None)
+        ax = _axis_of([r["vs_ref"] for r in order])
+        line = lambda r: (f"<div class='ex'><div class='mw'>{_marker(*look[r['id']])}<span class='m'>{esc(model_name(r))}</span></div>"
+                          f"{_fp_html(r['vs_ref'], *_range_pct(r), look[r['id']][0], ax)}</div>")
+        example = (f"<div class='exs'><div><div class='sc'>Not measurably apart</div>{line(a)}{line(b)}</div>"
+                   + (f"<div><div class='sc'>Measurably apart</div>{line(a)}{line(c)}</div>" if c else "") + "</div>")
+    toc = [("short", "In 30 seconds"), ("score", "The score"), ("tasks", "The tasks"), ("not", "What is not measured"), ("sure", "How sure the numbers are"),
+           ("speed", "Speed"), ("settings", "What the settings do"), ("differ", "Why other rankings differ"), ("records", "What a run records"), ("versions", "Versions")]
     body = f'''
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / how scores work</div><h1>How the numbers are made</h1>
  <p class="q" style="margin-top:6px">Suite v{esc(suite.VERSION)} · content hash {esc(suite.content_hash())}</p></div></section>
+<div class="mdoc"><nav class="toc">{"".join(f'<a href="#{k}">{esc(t)}</a>' for k, t in toc)}</nav>
 <article class="doc">
-<h2>The score</h2>
+<section class="short" id="short"><h2>In 30 seconds</h2><ul>
+<li><b>Real work, graded by programs.</b> {n} tasks from coding, tool use, questions about your own machine, documents and writing; hidden tests and checkers grade them, no model grades another.</li>
+<li><b>Fresh tasks every run.</b> Tasks are generated from a seed, so a model cannot have seen the answers.</li>
+<li><b>% of Claude Opus 5.5.</b> The score is the share of what a frontier model gets on the same tasks, with a 95% range; overlapping ranges mean "not measurably apart yet".</li>
+<li><b>Speed on a real PC.</b> Timed on the reference PC with the settings shown on each model page, and predicted for yours from the model file and your memory speeds.</li></ul></section>
+
+<h2 id="score">The score</h2>
 <p>Every model gets the same {n} tasks. A program grades each one from 0 to 100; no model grades another. The blocks are
 weighted by how people use local models, and the weighted average is the <b>capability</b>.</p>
 <p>The <b>score</b> is that capability as a share of what a frontier model gets on the same tasks: {esc(ref_name)}{f" scored {ref_cap:.1f}, which is 100%" if ref_cap else ""}.
 It runs under the same conditions as a local model: the task's own system prompt, the same tools and the same graders.
 Only the model differs.</p>
 
-<h2>The tasks</h2>
+<h2 id="tasks">The tasks</h2>
+<p>Nine blocks, shown on the site as four uses. The number after a use is its share of the score.</p>
 <div class="tw"><table><tr><th class="l">BLOCK</th><th>WEIGHT</th><th>TASKS</th><th class="l">WHAT AND HOW IT IS GRADED</th></tr>{rows}</table></div>
-<p>The weights are those of suite v{esc(suite.VERSION.split("-")[0])}, set for people who download and run local models, mostly developers.
+<p>The weights are set for people who download and run local models, mostly developers.
 Saved runs are re-weighted with them, and each task keeps the score it got.</p>
-<p>Each kind of task has difficulty levels. The quick suite uses hard ones (levels 4–5), a few easier ones so that weak models
-still register, and {n6} expert tasks (level 6) that local models rarely solve, so the frontier has room above them.
-Tasks are generated from a seed: a new seed gives fresh tasks that test the same rules with other names, numbers and files,
-so a model cannot have seen the answers. Most tasks ask several questions and give credit per question, test or constraint.</p>
+<p>Each kind of task has difficulty levels from 1 to 10. The quick suite uses hard ones, a few easier ones so that weak models
+still register, and {n6} expert tasks that local models rarely solve, so the frontier has room above them.
+Tasks are generated from a seed: a new seed gives fresh tasks that test the same rules with other names, numbers and files.
+Most tasks ask several questions and give credit per question, test or constraint.</p>
 
-<h2>How sure the numbers are</h2>
+<h2 id="not">What is not measured</h2>
+<p>The test covers what developers and agent builders do with local models. It does not measure <b>{NOT_MEASURED}</b>.
+Those are most of what people do with chatbots: in OpenAI's usage data for ChatGPT (June 2026) practical guidance is 32% of messages,
+writing 22%, seeking information 19%, and technical help 4%. For open-weight models served on OpenRouter, roleplay was about half of all
+tokens in 2025 (OpenRouter and a16z, "State of AI"). A score here says nothing about those uses: they need a human or model judge,
+and this site grades only what a program can check.</p>
+
+<h2 id="sure">How sure the numbers are</h2>
 <p>A model's score is estimated from every answer it gave, in every run on these tasks, with item response theory. Each task family
 (kind × level) has a measured difficulty and sharpness, calibrated on all measured models; a model has an overall level plus its own
 strength or weakness per block. The score is the expected weighted result on the quick suite at that level, and the range next to it
@@ -1989,40 +2020,57 @@ is its 95% interval. Every further run adds answers and narrows the range.</p>
 <p>A run is either <b>fixed</b> (every task family once: 40–110 minutes, depending on the model's speed) or <b>adaptive</b> (40 minutes:
 after each task, the next one is the task that narrows the range most per second of this model's time, and tasks it always or never
 solves are skipped). Measured on fresh tasks: six runs of one model, three of each kind, agreed within ±2.6 points.</p>
-<p>Models are listed by place (1, 2, 3...). Two models are <b>measurably apart</b> when the gap between their scores is larger than the 95% margin of that gap; overlapping ranges alone do not mean a tie. A dashed line in the ranking separates groups: each group starts with the first model that is measurably worse than the top of the group above. Inside a group the order can still change with more runs.
-Verdicts: 85% of the frontier or more is excellent, 70% very good, 50% good.</p>
+<p>Two models are <b>measurably apart</b> when the gap between their scores is larger than the 95% margin of that gap; overlapping lines
+alone do not settle it. A dashed line in the ranking separates groups: each group starts with the first model that is measurably worse
+than the top of the group above. Inside a group the order can still change with more runs.</p>
+{example}
 
-<h2>Speed</h2>
+<h2 id="speed">Speed</h2>
 <p>Speed is measured with one conversation at a time, the way one person uses the model: a fresh prompt of real code at about 2k, 30k
 and 90k tokens, so nothing comes from the cache, with code as the answer, so speculative decoding sees realistic text.
 <b>Tok/s</b> is how fast the answer is written; <b>first word</b> is how long the model reads the whole context before it starts.</p>
 <p>Speed on other boxes is predicted: a token needs the active weights read once, from VRAM for what fits on the card and from system RAM for the rest,
 so the time per token follows from the model file and the two memory speeds. The prediction is then scaled by what the measured run got
-against the same prediction on its own box. When most of a model moves onto a bigger card, it is outside what was measured, and the page says
-<i>rough estimate</i>.</p>
+against the same prediction on its own box. When most of a model moves onto a bigger card, or onto a Mac, it is outside what was measured,
+and the page says <i>rough</i>.</p>
 
 {_optimize_table(opts or {}, ranked)}
-<h2>What a run records</h2>
+
+<h2 id="differ">Why other rankings differ</h2>
+<p>Public leaderboards mostly run full-precision models on public question sets. Here the same model is the 4-bit (or smaller) file people
+actually download, run with the settings on its page, on tasks generated fresh for each run, so a model cannot have learned the answers.
+The blocks are weighted for developer work, and the score is relative to Claude Opus 5.5 on the same tasks, not an absolute percentage.
+A fine-tune can land above or below its base model: it is measured, not assumed.</p>
+
+<h2 id="records">What a run records</h2>
 <p>Every run keeps the server's exact command line and sampling defaults, the llama.cpp build, the model file's sha256, and the GPU and CPU
 temperature, power and memory every five seconds. The settings are compared with the recipe: differences in speed settings keep the
-recipe's score; differences in sampling, template, KV cache or model file make it a different recipe that needs its own score.</p>
+recipe's score; differences in sampling, template, KV cache or model file make it a different recipe that needs its own score.
+Replies are capped at 32k tokens with room kept for the answer after the thinking; a reply cut there, or thinking that repeats itself
+(detected from the text, not from its length), is flagged on the run page and still counts as it was graded.</p>
 
-<h2>Thinking</h2>
-<p>Replies are capped at 32k tokens and thinking at 24k, so there is always room left for the answer. A reply cut at that limit, or
-thinking that repeats itself (detected from the text, not from its length), is flagged on the run page. Flagged tasks still count as they were graded.</p>
-
-<h2>Versions</h2>
-<p>Scores compare only within one suite version. The content hash identifies the exact tasks and graders; a changed task means a new version,
-and older results stay on their own version.</p>
-</article>'''
+<h2 id="versions">Versions</h2>
+<p>Scores compare only within one suite version. The content hash identifies the exact tasks and graders. Answers to tasks that did not
+change carry over to the next version; a changed task needs new answers.</p>
+</article></div>'''
     return _page(f"llmbox · how scores work (suite v{suite.VERSION})", "METHOD", body, _METHOD_CSS)
 
 
 _METHOD_CSS = """
-.doc{max-width:860px;margin:10px 0 0;padding:6px 22px 10px}
-.doc h2{font:600 22px "IBM Plex Sans Condensed";margin:34px 0 10px}
+.mdoc{display:grid;grid-template-columns:200px minmax(0,1fr);gap:34px;align-items:start}
+.toc{position:sticky;top:18px;display:flex;flex-direction:column;gap:2px;margin-top:34px;border-left:1px solid var(--line);padding-left:14px}
+.toc a{font-size:12.5px;color:var(--muted);padding:3px 0}.toc a:hover{color:var(--amber);text-decoration:none}
+.doc{max-width:880px;margin:10px 0 0;padding:6px 0 10px}
+.doc h2{font:600 22px "IBM Plex Sans Condensed";margin:34px 0 10px;scroll-margin-top:16px}
 .doc p{font-size:14px;line-height:1.75;color:var(--soft);max-width:74ch;margin-top:10px}.doc p b{color:var(--ink);font-weight:500}
 .doc table{margin-top:12px}.doc td.q{font-size:12.5px;line-height:1.55;padding:12px 8px}.doc td{vertical-align:top}
+.doc tr.grp td{font:600 15px "IBM Plex Sans Condensed";color:var(--amber);padding:18px 8px 6px;border-bottom:1px solid var(--line)}
+.short{border:1px solid var(--line);padding:4px 22px 16px;margin-top:22px;background:rgba(255,176,0,.03)}.short h2{margin-top:14px}
+.short li{list-style:none;font-size:14px;line-height:1.65;color:var(--soft);padding:5px 0 5px 16px;position:relative}.short li:before{content:"›";position:absolute;left:0;color:var(--amber)}
+.short b{color:var(--ink);font-weight:500}
+.exs{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin:18px 0 6px}.exs .sc{margin-bottom:8px}
+.ex{display:grid;grid-template-columns:200px minmax(0,1fr);gap:12px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)}.ex .m{font:600 14px "IBM Plex Sans Condensed"}
+@media (max-width:900px){.mdoc{grid-template-columns:1fr}.toc{display:none}.exs{grid-template-columns:1fr}.ex{grid-template-columns:1fr}}
 """
 
 
@@ -2083,7 +2131,7 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
             os.remove(os.path.join(out_dir, old))
     w("compare.html", compare_app(compare_data(rs, clouds, ranks, local, look, data, rel)))
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
-    w("method.html", method_page(ref, opts, set(local), ref_row))
+    w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
     try:
         np_ = new_page(rs, data, host)
     except Exception as e:   # the list needs Hugging Face; the rest of the site must not depend on it
@@ -2148,7 +2196,9 @@ _RUN_CSS = """
 .sys dl{display:grid;grid-template-columns:90px 1fr;row-gap:7px;font-size:12.5px;padding:18px 22px}.sys dt{color:var(--muted)}.sys dd{word-break:break-word}.sys dd.todo{color:var(--red)}
 .argv{padding:16px 22px;font-size:12px;line-height:1.7;color:var(--soft);columns:2 260px;column-gap:28px}.argv span{display:block;word-break:break-all}
 .diff{padding:10px 22px 16px;border-top:1px solid var(--line2);font-size:12.5px}
-.tasks td{padding:7px 8px;font-size:12.5px}.tasks .tile{min-width:46px;font-size:13px;padding:3px 4px 2px}
+.tasks td{padding:7px 8px;font-size:12.5px}.tasks .m2{font:500 13px "IBM Plex Mono";color:var(--ink)}
+.mb{display:inline-block;width:90px;height:5px;background:var(--line);position:relative;vertical-align:middle;margin-right:10px}.mb i{position:absolute;left:0;top:0;bottom:0;background:var(--soft);opacity:.7}
+.mb.ok i{background:var(--amber);opacity:.9}.mb.no{background:rgba(255,90,54,.25)}.mv{font:500 13px "IBM Plex Mono";color:var(--ink)}
 .tasks tr.grp td{color:var(--muted);font-size:11px;letter-spacing:.16em;padding:16px 10px 6px;border-bottom:1px solid var(--line)}
 @media (max-width:900px){.sum{grid-template-columns:1fr 1fr}.sum>div{border-bottom:1px solid var(--line2)}.two{grid-template-columns:1fr}}
 """
