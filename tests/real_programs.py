@@ -194,9 +194,182 @@ def shell(n):
     return report("knowledge.shell vs bash 5 / GNU", by)
 
 
+FS_IMAGES = ("debian:stable", "ubuntu:24.04", "ubuntu:22.04")   # coreutils 9.7 / 9.4 / 8.32, bash 5.2 / 5.2 / 5.1
+
+
+def _fs_item_script(it) -> str:
+    """One techhelp.fs_seq item as bash: a fresh /home/dev/proj, the starting tree, each numbered command with its exit
+    status, the shell's $PWD, the questions asked from the project directory, then every entry (type, mode, inode,
+    symlink target) and every regular file's bytes."""
+    from llmbox.suite import techhelp_fs as FSM
+    m = it.meta
+    sh = ["cd /home/dev || exit 1", "chmod -R u+rwX proj 2>/dev/null; rm -rf proj; mkdir proj && cd proj || exit 1"]
+    sh += [f"{{ {c} ; }} >/dev/null 2>&1 || echo '@@SETUPFAIL {i}'" for i, c in enumerate(m["setup"])]
+    sh += [f"{{ {c} ; }} >/dev/null 2>&1; echo \"@@RC {i + 1} $?\"" for i, c in enumerate(m["commands"])]
+    sh += ['echo "@@PWD $PWD"', f"cd {FSM.ROOT} || exit 1"]
+    run = {"cat": "cat", "readlink": "readlink -f", "ls": "LC_ALL=C ls"}
+    for j, (k, p) in enumerate(zip(m["kinds"][2:], m["paths"])):
+        sh.append(f"{{ {run[k]} {p} ; }} > /tmp/q 2>/dev/null; echo \"@@Q {j} $? $(base64 -w0 /tmp/q)\"")
+    sh += ["find . -mindepth 1 -printf '@@E %y %m %i %p\\t%l\\n'", "chmod -R u+rX . 2>/dev/null",
+           "find . -mindepth 1 -type f -print | while IFS= read -r p; do echo \"@@F $p $(base64 -w0 < \"$p\")\"; done"]
+    return "\n".join(sh) + "\n"
+
+
+def _fs_real(image: str, scripts: list[str], workers: int = 6) -> list[str]:
+    """Run the item scripts in `image` as uid 1234 (umask 022, stdin /dev/null, a tmpfs home), `workers` containers at
+    a time; one output text per script."""
+    import base64  # noqa: F401  (used by the caller)
+    chunks = [list(range(k, len(scripts), workers)) for k in range(workers)]
+    procs = []
+    for chunk in chunks:
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "items"))
+        for i in chunk:
+            open(os.path.join(d, "items", f"{i}.sh"), "w").write(scripts[i])
+        open(os.path.join(d, "drv.sh"), "w").write(
+            "umask 022\n" + "".join(f"echo '@@ITEM {i}'; bash --norc --noprofile /w/items/{i}.sh < /dev/null\n" for i in chunk))
+        open(os.path.join(d, "run.sh"), "w").write(
+            "mkdir -p /home/dev && chown 1234:1234 /home/dev && cd / && "
+            "exec setpriv --reuid=1234 --regid=1234 --clear-groups env HOME=/home/dev bash /w/drv.sh\n")
+        procs.append(subprocess.Popen(["docker", "run", "--rm", "--tmpfs", "/home/dev:rw,exec", "-v", f"{d}:/w", image,
+                                       "sh", "/w/run.sh"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True))
+    out = [""] * len(scripts)
+    for p in procs:
+        text = p.communicate(timeout=7200)[0]
+        for part in re.split(r"^@@ITEM ", text, flags=re.M)[1:]:
+            i, _, body = part.partition("\n")
+            out[int(i)] = body
+    return out
+
+
+def _fs_parse(text: str) -> dict:
+    import base64
+    r = {"rc": {}, "q": {}, "ent": {}, "data": {}, "setupfail": [], "pwd": None}
+    for line in text.splitlines():
+        if line.startswith("@@RC "):
+            _, i, rc = line.split()
+            r["rc"][int(i)] = int(rc)
+        elif line.startswith("@@Q "):
+            parts = line.split(" ", 3)
+            r["q"][int(parts[1])] = (int(parts[2]), base64.b64decode(parts[3] if len(parts) > 3 else "").decode())
+        elif line.startswith("@@E "):
+            head, _, tgt = line[4:].partition("\t")
+            y, mode, ino, path = head.split(" ", 3)
+            r["ent"][path] = (y, int(mode, 8), int(ino), tgt)
+        elif line.startswith("@@F "):
+            path, _, b = line[4:].rpartition(" ")
+            r["data"][path] = base64.b64decode(b).decode()
+        elif line.startswith("@@SETUPFAIL"):
+            r["setupfail"].append(line)
+        elif line.startswith("@@PWD "):
+            r["pwd"] = line[6:]
+    return r
+
+
+def _fs_compare(it, real: dict) -> list[tuple[str, str]]:
+    """Where the emulator (the answer key) and the real run disagree: [(category, detail)]."""
+    from llmbox.suite import techhelp_fs as FSM
+    m = it.meta
+    fs, st = FSM.replay(m["setup"], m["commands"])
+    bad = []
+    if real["setupfail"]:
+        return [("setup", " ".join(real["setupfail"]))]
+    for i, ok in enumerate(st):
+        rc = real["rc"].get(i + 1)
+        if rc is None or (rc == 0) != ok:
+            bad.append(("command", f"{i + 1}. {m['commands'][i]}: emulator {'ok' if ok else 'fails'}, real rc={rc}"))
+    failed = " ".join(str(i + 1) for i in sorted(real["rc"]) if real["rc"][i]) or "NONE"
+    if failed != m["expected"][0]:
+        bad.append(("failed", f"key {m['expected'][0]!r}, real {failed!r}"))
+    lines, modes, inos = [], {}, {}
+    for path, (y, mode, ino, tgt) in sorted(real["ent"].items()):
+        if y == "d":
+            lines.append(path + "/")
+        elif y == "l":
+            lines.append(f"{path} -> {tgt}")
+        else:
+            data = real["data"].get(path, "")
+            try:
+                lines.append(f"{path} = {FSM.content(data)}")
+            except FSM.Unsupported:
+                lines.append(f"{path} = {data!r}")
+        if y != "l":
+            modes[path] = mode
+        inos.setdefault(ino, []).append(path)
+    emu = fs.listing()
+    if sorted(lines) != sorted(emu) or " ; ".join(emu) != m["expected"][1]:
+        miss, extra = sorted(set(emu) - set(lines)), sorted(set(lines) - set(emu))
+        bad.append(("tree", f"emulator only {miss[:6]}, real only {extra[:6]}"))
+    em_modes, em_ino = {}, {}
+
+    def rec(d, pre):
+        for name in sorted(d.ents):
+            n = d.ents[name]
+            p = pre + name
+            if n.kind != "l":
+                em_modes[p] = n.mode & 0o7777
+            em_ino.setdefault(n.ino, []).append(p)
+            if n.kind == "d":
+                rec(n, p + "/")
+    rec(fs.top, "./")
+    for p in sorted(set(modes) & set(em_modes)):
+        if modes[p] != em_modes[p]:
+            bad.append(("mode", f"{p}: emulator {em_modes[p]:o}, real {modes[p]:o}"))
+    if sorted(map(sorted, inos.values())) != sorted(map(sorted, em_ino.values())):
+        bad.append(("hard links", f"{[g for g in inos.values() if len(g) > 1]} vs {[g for g in em_ino.values() if len(g) > 1]}"))
+    if real["pwd"] != fs.pwd:
+        bad.append(("pwd", f"emulator {fs.pwd}, real {real['pwd']}"))
+    for j, (k, p) in enumerate(zip(m["kinds"][2:], m["paths"])):
+        rc, out = real["q"].get(j, (None, ""))
+        if rc != 0:
+            got = "ERROR"
+        elif k == "cat":
+            try:
+                got = FSM.content(out)
+            except FSM.Unsupported:
+                got = repr(out)
+        elif k == "readlink":
+            got = out.strip()
+        else:
+            got = " ".join(sorted(out.split())) or "(empty)"
+        if got != m["expected"][2 + j]:
+            bad.append(("question", f"{k} {p}: key {m['expected'][2 + j]!r}, real {got!r}"))
+    return bad
+
+
+def fs(n):
+    """techhelp.fs_seq: every level's items replayed by bash with GNU coreutils in a fresh directory, as an ordinary
+    user, on coreutils 9.7 (debian:stable), 9.4 and 8.32; exit statuses, the tree (types, symlink targets, contents),
+    modes, hard-link groups, $PWD and the question answers compared with the emulator's."""
+    from llmbox.suite import techhelp as T
+    items = [T.KINDS["fs_seq"](s, lv) for lv in range(1, T.MAX_LEVEL + 1) for s in range(1, n + 1)]
+    scripts = [_fs_item_script(it) for it in items]
+    n_q = sum(len(it.meta["kinds"]) for it in items)
+    n_c = sum(len(it.meta["commands"]) for it in items)
+    total = 0
+    for image in FS_IMAGES:
+        outs = _fs_real(image, scripts)
+        by = {}
+        shown = 0
+        for it, out in zip(items, outs):
+            lv = f"L{it.meta['level']}"
+            by.setdefault(lv, [0, 0])
+            by[lv][0] += 1
+            diff = _fs_compare(it, _fs_parse(out)) if out else [("run", "no output")]
+            if diff:
+                by[lv][1] += 1
+                for cat, det in diff[:3]:
+                    if shown < 40:
+                        print(f"  {image} {it.id} [{cat}] {det}")
+                        shown += 1
+        print(f"{image}: {len(items)} items, {n_c} commands, {n_q} questions")
+        total += report(f"fs_seq vs {image}", by)
+    return total
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     n = int(args[args.index("--seeds") + 1]) if "--seeds" in args else 25
-    todo = [a for a in args if a in ("nginx", "route", "shell")] or ["nginx", "route", "shell"]
-    bad = sum({"nginx": nginx, "route": route, "shell": shell}[t](n) for t in todo)
+    todo = [a for a in args if a in ("nginx", "route", "shell", "fs")] or ["nginx", "route", "shell", "fs"]
+    bad = sum({"nginx": nginx, "route": route, "shell": shell, "fs": fs}[t](n) for t in todo)
     sys.exit(1 if bad else 0)

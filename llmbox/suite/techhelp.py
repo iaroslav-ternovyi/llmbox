@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from .common import Item, final_answer, multi_check, num, rng
+from .techhelp_fs import fs_seq
 
 BLOCK = "techhelp"
 CONVENTIONAL = {"postgres": 5432, "db": 5432, "redis": 6379, "cache": 6379, "grafana": 3000, "minio": 9000, "keycloak": 8080,
@@ -1808,5 +1809,6 @@ def log_910(seed: int, level: int) -> Item:
 
 
 KINDS = {"compose_port": compose_port, "nginx_route": nginx_route, "subnet": subnet, "chmod_seq": chmod_seq, "log_root": log_root}
-QUICK = list(KINDS)
+KINDS["fs_seq"] = fs_seq   # techhelp_fs.py: what a shell script leaves in a directory tree
+QUICK = ["compose_port", "nginx_route", "subnet", "chmod_seq", "log_root"]
 MAX_LEVEL = 10
