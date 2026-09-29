@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS answers (run_id TEXT, n INTEGER, item_id TEXT, family
     PRIMARY KEY (run_id, n));
 CREATE TABLE IF NOT EXISTS speed_points (run_id TEXT, depth TEXT, depth_k REAL, decode_tps REAL, prefill_tps REAL,
     PRIMARY KEY (run_id, depth));
+CREATE TABLE IF NOT EXISTS verifications (run_id TEXT, n INTEGER, item_id TEXT, block TEXT, client_score REAL,
+    server_score REAL, status TEXT, reason TEXT, bundle TEXT, code TEXT, at TEXT, PRIMARY KEY (run_id, n, bundle));
 CREATE INDEX IF NOT EXISTS answers_family ON answers (family);
 CREATE INDEX IF NOT EXISTS runs_recipe ON runs (recipe_id, suite_version);
 CREATE VIEW IF NOT EXISTS hardware_classes AS

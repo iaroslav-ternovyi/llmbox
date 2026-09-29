@@ -129,6 +129,26 @@ def cmd_tune(a: argparse.Namespace) -> None:
         tune.run(a.host, rid)
 
 
+def cmd_verify(a: argparse.Namespace) -> None:
+    from . import results, verify
+    todo = [(p, None) for p in a.results] or [(p, r) for p, r in results.files() if r.get("kind") == "suite"]
+    tot: dict = {}
+    for path, rec in todo:
+        res = verify.run_one(path, rec)
+        name = os.path.basename(path)
+        if res.get("error"):
+            print(f"{name}: {res['error']}")
+            continue
+        verify.save(res)
+        for k, v in res["counts"].items():
+            tot[k] = tot.get(k, 0) + v
+        print(f"{name}: v{res['version']} " + ", ".join(f"{k} {v}" for k, v in sorted(res["counts"].items())) + f"  ({res['seconds']} s)")
+        for r in res["rows"]:
+            if r["status"] in ("mismatch", "error") or (a.verbose and r["status"] == "unverifiable"):
+                print(f"    {r['status']:12s} {r['id']:32s} saved {r.get('client')} server {r.get('server')} {r.get('reason') or ''}")
+    print("total: " + ", ".join(f"{k} {v}" for k, v in sorted(tot.items())))
+
+
 def cmd_db(a: argparse.Namespace) -> None:
     from . import db
     if a.action == "sync":
@@ -640,6 +660,10 @@ def main(argv: list[str] | None = None) -> None:
     tp.add_argument("--host", default="box")
     tp.add_argument("--plan", action="store_true", help="list the variants only, measure nothing")
     tp.set_defaults(fn=cmd_tune)
+    vp = sub.add_parser("verify", help="re-grade saved runs from their answers (the server-side check of a submitted run)")
+    vp.add_argument("results", nargs="*", help="result files (default: every suite run)")
+    vp.add_argument("-v", "--verbose", action="store_true", help="also list the answers that cannot be re-graded")
+    vp.set_defaults(fn=cmd_verify)
     dp = sub.add_parser("db", help="the results database (~/.llmbox/llmbox.db): sync the result files in, stats, read-only SQL")
     dp.add_argument("action", choices=["sync", "stats", "sql"])
     dp.add_argument("query", nargs="?", default="SELECT recipe_id, suite_version, tier, capability FROM runs WHERE kind='suite' ORDER BY created DESC")
