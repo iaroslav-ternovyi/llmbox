@@ -1,7 +1,7 @@
-"""Levels 9-10 of the tools block (v0.12): deterministic items built in well under a second, full credit for the oracle,
+"""Levels 9-10 of the tools block (v0.11): deterministic items built in well under a second, full credit for the oracle,
 none for doing nothing, partial credit for the typical wrong strategies (obeying the CEO, merging every flagged pair,
 ignoring currency and credits, retrying a 429 that went through). Levels 1-8 staying as they were is
-tests/test_levels_stable.py. Run: python3 tests/test_levels_910.py"""
+tests/test_levels_stable.py. Run: python3 tests/test_levels_910_tools.py"""
 import inspect
 import os
 import re
