@@ -23,6 +23,7 @@ from .suite.common import Item
 
 ANSWER_KINDS = {("reasoning", k) for k in ("arith", "dates", "logic", "code_trace", "table", "schedule", "budget")} | \
                {("longctx", k) for k in ("lookup", "multihop", "count", "latest", "total", "audit")} | {("tools", "total")}
+ANSWER_KINDS |= {("techhelp", "git_seq")}   # format variants too (tests/test_git_seq.py adds fences and spacing)
 ANSWER_KINDS |= {("techhelp", "fs_seq")}   # its own parser (a tree over many lines): the answer shapes are checked too
 
 
@@ -205,6 +206,9 @@ def oracle(it: Item) -> str | None:
     if it.block == "knowledge":
         from .suite import knowledge
         return knowledge.oracle(it)
+    if (it.block, it.kind) == ("techhelp", "sql"):   # v0.11: every query's rows, as SQLite returned them
+        from .suite import techhelp_sql
+        return techhelp_sql.oracle(it)
     if it.block == "techhelp":   # several questions per machine (v0.10-dev5): one numbered line each
         return _answer_oracle(it)
     if (it.block, it.kind) in ANSWER_KINDS and it.block != "tools":
@@ -219,6 +223,17 @@ def oracle(it: Item) -> str | None:
         from .suite import code
         return code.oracle(it)
     return None   # code levels 1-6: the expected outputs ARE the reference implementation; checked via null + frontier
+
+
+def _kind_variants(b: str, k: str):
+    """Kinds with their own answer layout name the other shapes a right answer comes in (v0.11: sql, regex)."""
+    if (b, k) == ("techhelp", "sql"):
+        from .suite import techhelp_sql
+        return techhelp_sql.variants
+    if (b, k) == ("knowledge", "regex"):
+        from .suite import knowledge_regex
+        return knowledge_regex.variants
+    return None
 
 
 def _variants(text: str) -> list[str]:
@@ -257,8 +272,8 @@ def check_kind(b: str, k: str, lvl: int, seeds=(1, 2, 3), frontier: str | None =
         txt = oracle(a)
         if txt is not None:
             res["oracle"].append(round(float(a.check(txt, {})), 3))
-            if (b, k) in ANSWER_KINDS:
-                for v in _variants(txt):
+            if (b, k) in ANSWER_KINDS or _kind_variants(b, k):
+                for v in (_kind_variants(b, k) or _variants)(txt):
                     fresh = gen(sd, lvl)
                     if b == "tools":
                         oracle(fresh)           # re-do the world actions (none for 'total')

@@ -26,7 +26,7 @@ from .hosts import HOME
 # dotted paths; a table name covers everything under it
 PORTABLE = ("description", "notes", "model.hf_repo", "model.file", "model.sha256", "chat", "sampling", "antiloop",
             "placement.kv_type")
-HARDWARE = ("model.path", "runtime", "placement.ctx", "placement.fit", "placement.fit_target_mib", "placement.flash_attn",
+HARDWARE = ("model.path", "runtime", "placement.ctx", "placement.fit", "placement.fit_target_mib", "placement.n_cpu_moe", "placement.flash_attn",
             "placement.load_mode", "placement.batch", "placement.ubatch", "placement.slots", "placement.kv_unified",
             "placement.cache_ram", "placement.cache_ram_headroom_mib", "placement.cache_reuse", "placement.kv_offload",
             "speculative", "serve", "extra")   # speculative decoding is lossless: whether it pays is a speed question

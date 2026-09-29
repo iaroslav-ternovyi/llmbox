@@ -26,6 +26,8 @@ def oracle(it):
 
 n = 0
 for kind, gen in T.KINDS.items():
+    if kind == "sql":   # rows per query, not ANSWER lines: tests/test_real_engines.py
+        continue
     for level in range(1, T.MAX_LEVEL + 1):
         for seed in range(1, 41):
             a, b = gen(seed, level), gen(seed, level)

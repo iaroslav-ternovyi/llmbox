@@ -25,6 +25,7 @@ import subprocess
 import sys
 
 from .common import Item, rng, strip_think
+from .knowledge_js import gen as js_gen
 
 BLOCK = "knowledge"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -352,7 +353,9 @@ _LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?\s*(\d{1,2})\s*[.):]\s*(?:\*\*)?\s
 
 
 def answers(text: str, n: int) -> dict[int, str]:
-    """Numbered answer lines after the last ANSWERS header (or anywhere, the last line per number wins)."""
+    """Numbered answer lines after the last ANSWERS header (or anywhere). The first line per number wins: notes after
+    the block ("- **7:** because ...") must not replace the answers (2026-09-29: an Opus reply lost 3 of 10 that way;
+    1 of 274 saved answers parses differently, and it is that one)."""
     t = strip_think(text or "")
     heads = list(re.finditer(r"(?im)^[#*\s]*answers\W*$", t))
     if heads:
@@ -360,7 +363,7 @@ def answers(text: str, n: int) -> dict[int, str]:
     out: dict[int, str] = {}
     for line in t.splitlines():
         m = _LINE.match(line)
-        if m and 1 <= int(m.group(1)) <= n:
+        if m and 1 <= int(m.group(1)) <= n and int(m.group(1)) not in out:
             out[int(m.group(1))] = m.group(2)
     return out
 
@@ -518,9 +521,12 @@ def oracle(it: Item) -> str:
     return "ANSWERS\n" + "\n".join(f"{i}. {a}" for i, a in enumerate(it.meta["expected"], 1))
 
 
-KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes")}
+from .knowledge_regex import regex  # noqa: E402  (v0.11; imported here: it grades with the helpers above)
+
+BANK_KINDS = ("python", "shell", "codes")   # the kinds built from knowledge_bank.json
+KINDS = {"python": _gen("python"), "shell": _gen("shell"), "codes": _gen("codes"), "regex": regex, "js": js_gen}
 MAX_LEVEL = 10   # 6 = expert: implementation-specific behaviour even frontier models get wrong; 7-10: facts combined
-QUICK = list(KINDS)
+QUICK = ["python", "shell", "codes"]   # the quick tier did not change with regex / js
 
 
 # ---- building the bank: run every question on the real thing ----------------------------------------------------------
