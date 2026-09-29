@@ -56,8 +56,8 @@ for j, it in enumerate(ucases):
     script.append(f"( set +e; umask {it['umask']}; touch $D/{i}; $C {it['start']} $D/{i}; " + "; ".join(
         f"$C {shlex.quote(s)} $D/{i} 2>/dev/null" for s in it["steps"]) + f"; echo {i} $(stat -c %a $D/{i}) )")
 cases_ = cases_ + ucases
-# levels 7-8 (gnu_chmod): directories with setgid / sticky, 3-5 digit and operator-octal modes, copies, several operators
-ucases = [dict(f, umask=it.meta["umask"]) for level in (7, 8) for seed in range(1, 60) for it in [T.chmod_seq(seed, level)]
+# levels 7-10 (gnu_chmod): directories with setgid / sticky, 3-5 digit and operator-octal modes, copies, several operators
+ucases = [dict(f, umask=it.meta["umask"]) for level in range(7, T.MAX_LEVEL + 1) for seed in range(1, 60) for it in [T.chmod_seq(seed, level)]
           for f in it.meta["files"]]
 for j, it in enumerate(ucases):
     i = len(cases_) + j
@@ -115,7 +115,7 @@ if shutil.which("gchmod") and shutil.which("gstat"):
                      "umask": R.choice(["022", "027", "077", "002"])})
         m = int(rand[-1]["start"], 8)
         rand[-1]["expected"] = f"{T.gnu_chmod(m, spec, True, int(rand[-1]['umask'], 8)):04o}"
-    local = [dict(f, umask=it.meta.get("umask", "0022")) for level in range(1, 9) for seed in range(1, 30)
+    local = [dict(f, umask=it.meta.get("umask", "0022")) for level in range(1, T.MAX_LEVEL + 1) for seed in range(1, 30)
              for it in [T.chmod_seq(seed, level)] for f in it.meta["files"]] + rand
     lines = ["D=$(mktemp -d)", "cd $D", "chgrp $(id -g) ."]
     for i, f in enumerate(local):
@@ -179,16 +179,25 @@ for pkt, want in [({"src": "192.168.1.5", "dst": "8.8.8.8", "iif": "lan0"}, "wg0
                   ({"src": "192.168.1.5", "dst": "10.1.9.9", "iif": "lan0"}, "wg0")]:         # /16 <= 16: suppressed, next rules
     check(f"route7 {pkt}", T.route_lookup7(rr, rt, pkt) == want, T.route_lookup7(rr, rt, pkt))
 
-# logs: read the generated logs back with zoneinfo (not TZ_SEPT) and re-derive every answer
+# logs: read the generated logs back with zoneinfo (not TZ_SEPT / TZ_OCT_*) and re-derive every answer; a syslog line
+# in a repeated local hour (levels 9-10: the EU leaves summer time) is placed by the order of the file, as a reader must
 try:
     import zoneinfo
     for name, off in T.TZ_SEPT.items():
         for day in range(1, 31):
             u = datetime(2026, 9, day, 12, tzinfo=timezone.utc).astimezone(zoneinfo.ZoneInfo(name)).utcoffset()
             check(f"tz {name} 2026-09-{day}", u == timedelta(minutes=off), str(u))
+    for name, (before, after) in T.TZ_OCT_EU.items():
+        z = zoneinfo.ZoneInfo(name)
+        check(f"tz {name} before the switch", (T.EU_SWITCH - timedelta(seconds=1)).astimezone(z).utcoffset() == timedelta(minutes=before))
+        check(f"tz {name} after the switch", T.EU_SWITCH.astimezone(z).utcoffset() == timedelta(minutes=after))
+    for name, off in T.TZ_OCT_US.items():
+        for day in (24, 25, 26):
+            u = datetime(2026, 10, day, 12, tzinfo=timezone.utc).astimezone(zoneinfo.ZoneInfo(name)).utcoffset()
+            check(f"tz {name} 2026-10-{day}", u == timedelta(minutes=off), str(u))
 except ImportError:
     zoneinfo = None
-for level in (7, 8):
+for level in (7, 8, 9, 10):
     for seed in range(1, 41 if zoneinfo else 1):
         it = T.log_root(seed, level)
         msg = it.messages[0]["content"]
@@ -196,7 +205,10 @@ for level in (7, 8):
         events = []   # (utc time, service, upstream it gave up on or None, kind)
         for head, body in re.findall(r"^(box-\w .*?):\n```\n(.*?)\n```", msg, re.M | re.S):
             host = head.split()[0]
-            skew = re.search(r"System clock is (\d+) seconds behind", body)
+            clock = re.search(r"System clock is (\d+) seconds (behind|ahead)", body)   # chronyd, later in the same log
+            skew = int(clock.group(1)) * (1 if clock.group(2) == "behind" else -1) if clock else 0
+            zone = re.search(r"/etc/timezone is (\S+)\)", head)
+            prev = None
             for line in body.splitlines():
                 if host == "box-e":
                     boot = datetime.strptime(re.search(r"booted at (\S+)\)", head).group(1), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -205,15 +217,18 @@ for level in (7, 8):
                     if k:
                         events.append((boot + timedelta(seconds=float(mono)), k.group(1), None, "root"))
                     continue
-                if host == "box-d":
-                    zone = zoneinfo.ZoneInfo(re.search(r"/etc/timezone is (\S+)\)", head).group(1))
-                    stamp, svc_, text = re.match(r"(\w{3} [ \d]\d \d\d:\d\d:\d\d) box-d (\w+)\[\d+\]: (.*)", line).groups()
-                    t = datetime.strptime("2026 " + stamp, "%Y %b %d %H:%M:%S").replace(tzinfo=zone).astimezone(timezone.utc)
+                if zone:   # syslog: local time, no offset
+                    stamp, svc_, text = re.match(r"(\w{3} [ \d]\d \d\d:\d\d:\d\d) box-\w (\w+)\[\d+\]: (.*)", line).groups()
+                    naive = datetime.strptime("2026 " + stamp, "%Y %b %d %H:%M:%S")
+                    t = naive.replace(tzinfo=zoneinfo.ZoneInfo(zone.group(1))).astimezone(timezone.utc)
+                    if prev and t < prev:   # the second pass through a repeated hour
+                        t = naive.replace(tzinfo=zoneinfo.ZoneInfo(zone.group(1)), fold=1).astimezone(timezone.utc)
+                    check(f"log_root L{level} s{seed} {host} in order", prev is None or t >= prev, line)
+                    prev = t
                 else:
                     stamp, svc_, text = re.match(r"(\S+) box-\w (\w+)\[\d+\]: (.*)", line).groups()
                     t = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S%z").astimezone(timezone.utc)
-                    if host == "box-c" and skew:
-                        t += timedelta(seconds=int(skew.group(1)))
+                    t += timedelta(seconds=skew)
                 up = re.search(r"(\d+\.\d+\.\d+\.\d+:\d+)", text)
                 if "giving up" in text:
                     events.append((t, svc_, svc_at[up.group(1)], "dep"))
@@ -226,11 +241,64 @@ for level in (7, 8):
             if e[2] in chain:
                 chain.add(e[1])
                 deps.append(e)
-        want = [root, deps[0][1], deps[-1][1], str(round((deps[-1][0] - root_t).total_seconds()))]
+        nth = {9: 2, 10: 3}.get(level, 1)   # levels 9-10 also ask for the second (and third) consequence
+        want = [root] + [d[1] for d in deps[:nth]] + [deps[-1][1], str(round((deps[-1][0] - root_t).total_seconds()))]
         if level >= 8:
             want.append(root_t.strftime("%H:%M:%S"))
         check(f"log_root L{level} s{seed} re-derived", want == it.meta["expected"], f"{want} vs {it.meta['expected']}")
         check(f"log_root L{level} s{seed} gaps", all((b[0] - a[0]).total_seconds() >= 2 for a, b in zip(deps, deps[1:])))
+        if level >= 9:   # the root cause before the EU switch, its consequences after it
+            check(f"log_root L{level} s{seed} across the switch", root_t < T.EU_SWITCH <= deps[0][0])
+
+# nginx 9-10: variables in proxy_pass, $request_uri / $uri, rewrite and the query string, redirects, captures
+srw9 = [(r"^/lookup\?id=(\d+)$", "/api/items/$1", "last"), (r"^/v1/(.*)$", "/api/$1", None)]
+nl9 = [("", "/", {"proxy": ("root", None)}), ("", "/api/", {"proxy": ("api", "/internal/")}),
+       ("~", r"^/u/(\d+)/(\w+)$", {"proxy": ("users", "/users/$1/$2")}),
+       ("", "/files/", {"rw": [(r"^/files/(.*)$", "/f/$1", "break")], "proxy": ("files", "$request_uri")}),
+       ("", "/go/", {"rw": [(r"^/go/(.*)$", "/new/$1", "permanent")], "proxy": ("root", None)}),
+       ("", "/tmp/", {"rw": [(r"^/tmp/(.*)$", "/scratch/$1?", "redirect")], "proxy": ("root", None)}),
+       ("", "/n/", {"proxy": ("n", "$uri")}),
+       ("~", r"^/img/(\w+)\.(gif|webp)$", {"rw": [(r"^/img/(\w)\w*\.gif$", "/thumbs/$1.gif", "break")], "proxy": ("cdn", "/cdn/$1")})]
+for req, want in [("/u/42/profile?tab=2", ("users", "/users/42/profile")),      # variables: sent as is, no arguments
+                  ("/files/a.txt?v=3", ("files", "/files/a.txt?v=3")),         # $request_uri ignores the rewrite
+                  ("/lookup?id=7", ("root", "/lookup?id=7")),                  # rewrite never sees the query string
+                  ("/go/x?ref=2", ("301", "/new/x?ref=2")), ("/tmp/x?y=1", ("302", "/scratch/x")),   # '?' at the end: no args
+                  ("/n//a/b?x=1", ("n", "/n/a/b")), ("/v1/u/5/x", ("api", "/internal/u/5/x")),
+                  ("/img/cat.gif", ("cdn", "/cdn/c")), ("/img/cat.webp?s=1", ("cdn", "/cdn/cat")),
+                  ("/api?x=1", ("301", "/api/?x=1")), ("/files", ("301", "/files/")),   # a proxying "/name/" location
+                  ("/go", ("root", "/go"))]:                                            # ... but /go/ only redirects
+    check(f"nginx 9 {req}", T.ngx_proxy9(srw9, nl9, req) == want, T.ngx_proxy9(srw9, nl9, req))
+for req in ["/v1/users?page=2", "/api//users", "/static//a.css?v=1", "/apps/list", "/old/users", "/name/bob?x=1", "/s/cart.php",
+            "/s/cart", "/q/cats?page=2", "/health?full=1"]:   # without variables and redirects, ngx_proxy9 is ngx_proxy
+    check(f"nginx 9 = 7 {req}", T.ngx_proxy9(srw, nl, req) == T.ngx_proxy(srw, nl, req))
+
+# policy routing 9-10: OpenVPN's def1 routes are /1, so suppress_prefixlength 0 keeps them; 'not' inverts the whole
+# selector; ipproto/dport; the local table; goto; prohibit
+rt9 = {"local": [{"net": "192.168.1.1/32", "type": "local"}],
+       "main": [{"net": "0.0.0.0/0", "dev": "wan", "metric": 100}, {"net": "0.0.0.0/1", "dev": "tun5"}, {"net": "128.0.0.0/1", "dev": "tun5"},
+                {"net": "192.168.1.0/24", "dev": "lan0"}],
+       "400": [{"net": "0.0.0.0/0", "dev": "eth5"}], "500": [{"net": "198.51.100.0/25", "dev": "eth3"}],
+       "300": [{"net": "0.0.0.0/0", "dev": "wan", "metric": 10}, {"net": "203.0.113.0/26", "type": "blackhole"}],
+       "51820": [{"net": "0.0.0.0/0", "dev": "wg0"}]}
+rr9 = [{"prio": 0, "table": "local"}, {"prio": 102, "from": "192.168.2.0/24", "goto": 32766},
+       {"prio": 105, "from": "192.168.1.0/24", "proto": "tcp", "dport": (443, 443), "table": "400"},
+       {"prio": 106, "from": "192.168.3.0/24", "action": "prohibit"}, {"prio": 110, "mark": 0x100, "mask": 0xf00, "table": "300"},
+       {"prio": 115, "not": True, "from": "192.168.1.0/24", "mark": 0x10, "table": "500"},
+       {"prio": 32764, "table": "main", "suppress": 0}, {"prio": 32765, "not": True, "mark": 0xca6c, "table": "51820"},
+       {"prio": 32766, "table": "main"}]
+for pkt, want in [({"src": "192.168.1.5", "dst": "8.8.8.8", "proto": "udp", "dport": 53, "iif": "lan0"}, "tun5"),   # /1 beats /0, kept
+                  ({"src": "192.168.1.5", "dst": "8.8.8.8", "proto": "tcp", "dport": 443, "iif": "lan0"}, "eth5"),
+                  ({"src": "192.168.1.5", "dst": "198.51.100.9", "proto": "tcp", "dport": 80, "mark": 0x10, "iif": "lan0"}, "tun5"),
+                  ({"src": "10.8.0.2", "dst": "198.51.100.9", "proto": "tcp", "dport": 80, "iif": "wg0"}, "eth3"),   # not(false)
+                  ({"src": "192.168.1.5", "dst": "192.168.1.1", "proto": "tcp", "dport": 22, "iif": "lan0"}, "local"),
+                  ({"src": "192.168.2.5", "dst": "203.0.113.5", "proto": "tcp", "dport": 80, "mark": 0x101, "iif": "lan1"}, "tun5"),  # goto skips 110
+                  ({"src": "192.168.1.5", "dst": "203.0.113.5", "proto": "tcp", "dport": 80, "mark": 0x101, "iif": "lan0"}, "none"),
+                  ({"src": "192.168.3.5", "dst": "8.8.8.8", "proto": "tcp", "dport": 443, "iif": "lan2"}, "none")]:          # prohibit
+    check(f"route9 {pkt}", T.route_lookup9(rr9, rt9, pkt) == want, T.route_lookup9(rr9, rt9, pkt))
+for pkt in [{"src": "192.168.1.5", "dst": "8.8.8.8", "iif": "lan0"}, {"src": "81.2.3.4", "dst": "8.8.8.8", "mark": 0xca6c, "iif": "lo"},
+            {"src": "10.8.0.7", "dst": "172.16.5.70", "iif": "wg0"}, {"src": "192.168.1.5", "dst": "10.1.9.9", "iif": "lan0"},
+            {"src": "192.168.1.5", "dst": "203.0.113.5", "mark": 0x1ab, "iif": "lan0"}]:   # route_lookup9 is route_lookup7 there
+    check(f"route9 = route7 {pkt}", T.route_lookup9(rr, rt, pkt) == T.route_lookup7(rr, rt, pkt))
 
 # compose: the generated files through the real `docker compose config` when Docker Compose is installed
 try:
@@ -241,16 +309,18 @@ if have_compose:
     import json
     import tempfile
     n_c = 0
-    for level in (7, 8):
+    for level in (7, 8, 9, 10):
         for seed in range(1, 7):
             it = T.compose_port(seed, level)
             d = tempfile.mkdtemp()
             for name, text in it.meta["files"].items():
+                os.makedirs(os.path.dirname(os.path.join(d, name)), exist_ok=True)
                 open(os.path.join(d, name), "w").write(text)
-            svc, tport = it.meta["service"], it.meta["container_port"]
-            for cmd, want in zip(it.meta["commands"], it.meta["expected"]):
+            tport = it.meta["container_port"]
+            svcs = it.meta.get("services") or [it.meta["service"]] * len(it.meta["commands"])
+            for cmd, svc, want in zip(it.meta["commands"], svcs, it.meta["expected"]):
                 parts = shlex.split(cmd)
-                env = {k: v for k, v in os.environ.items() if not k.startswith("COMPOSE_") and not k.endswith("_PORT")}
+                env = {k: v for k, v in os.environ.items() if not k.startswith("COMPOSE_") and not k.endswith("_PORT") and k != "DEBUG"}
                 while "=" in parts[0]:
                     k, v = parts.pop(0).split("=", 1)
                     env[k] = v
@@ -266,10 +336,10 @@ if have_compose:
                 got = sorted({str(x["published"]) for x in (s_ or {}).get("ports", []) if started and x["target"] == tport
                               and x["protocol"] == "tcp" and x.get("published") and "-" not in str(x["published"])})
                 n_c += 1
-                check(f"compose L{level} s{seed} {cmd!r} vs docker compose config", (", ".join(got) or "NONE") == want,
+                check(f"compose L{level} s{seed} {cmd!r} {svc} vs docker compose config", (", ".join(got) or "NONE") == want,
                       f"compose says {got}, ours {want}; {p.stderr[-200:]}")
             shutil.rmtree(d, ignore_errors=True)
-    print(f"{n_c} compose commands checked against `docker compose config`")
+    print(f"{n_c} compose questions checked against `docker compose config`")
 
 print("all passed" if not failed else f"{failed} FAILED")
 sys.exit(1 if failed else 0)
