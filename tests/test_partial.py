@@ -169,5 +169,62 @@ check("rewrite L8 all rules", near(it.check(good), 1.0), it.check(good))
 check("rewrite L8 delay in digits", near(it.check(good.replace("four days", "4 days")), 13 / 14))
 check("rewrite L8 empty", it.check("") == 0.0)
 
+# v0.11 levels 9-10 (aimed at the frontier): several answers per question, credit per answer, lists graded per id
+check("MAX_LEVEL 10", L.MAX_LEVEL == 10 and W.MAX_LEVEL == 10)
+for kind in ("lookup", "multihop", "count", "latest", "total"):
+    for level in (9, 10):
+        it, again = L.KINDS[kind](2, level), L.KINDS[kind](2, level)
+        exp = it.meta["expected"]
+        lines = [f"ANSWER {i + 1}: {e}" for i, e in enumerate(exp)]
+        check(f"{kind} L{level} deterministic", it.messages == again.messages and it.meta == again.meta)
+        check(f"{kind} L{level} oracle", near(it.check("\n".join(reversed(lines))), 1.0))
+        check(f"{kind} L{level} one right", near(it.check(lines[0]), 1 / len(exp)))
+        check(f"{kind} L{level} empty", it.check("") == 0.0)
+        check(f"{kind} L{level} NOT STATED everywhere", it.check("\n".join(f"ANSWER {i + 1}: NOT STATED" for i in range(len(exp)))) == 0.0)
+        check(f"{kind} L{level} size", it.meta["doc_tokens_est"] <= 68_000, it.meta["doc_tokens_est"])
+it = L.lookup(2, 9)   # a list answer: half the ids earn half of it, a wrong id cancels one
+ids = it.meta["expected"][0].split(", ")
+half = ids[: len(ids) // 2]
+other = next(x for x in sorted(set(__import__("re").findall(r"INC-\d+", it.messages[0]["content"]))) if x not in ids)
+n = len(it.meta["expected"])
+check("lookup L9 half a list", near(it.check("ANSWER 1: " + ", ".join(half)), len(half) / len(ids) / n))
+check("lookup L9 false alarm", near(it.check("ANSWER 1: " + ", ".join(half + [other])), (len(half) - 1) / len(ids) / n))
+for level in (9, 10):
+    it = L.audit(2, level)
+    wrong = [x.strip() for x in it.meta["expected"].split(",")]
+    ids = sorted(set(__import__("re").findall(r"INC-\d+", it.messages[0]["content"].split("Draft reliability report")[1])))
+    extra = next(i for i in ids if i not in wrong)
+    check(f"audit L{level} all right", near(it.check("ANSWER: " + ", ".join(wrong)), 1.0))
+    check(f"audit L{level} one false alarm", near(it.check("ANSWER: " + ", ".join(wrong + [extra])), (len(wrong) - 1) / len(wrong)))
+    check(f"audit L{level} everything", it.check("ANSWER: " + ", ".join(ids)) == 0.0)
+    check(f"audit L{level} size", it.meta["doc_tokens_est"] <= 68_000, it.meta["doc_tokens_est"])
+for kind in ("extract", "minutes", "i18n", "proofread"):
+    for level in (9, 10):
+        it = W.KINDS[kind](3, level)
+        check(f"{kind} L{level} oracle", near(it.check(V.oracle(it)), 1.0), it.check(V.oracle(it)))
+        check(f"{kind} L{level} empty", it.check("") == 0.0)
+it = W.i18n(3, 10)     # every plain string has a screen limit: one character over it costs that key
+ref = _json.loads(V.oracle(it))
+k = sorted(it.meta["limits"])[0]
+ref[k] = ref[k] + "!" * (it.meta["limits"][k] - len(ref[k]) + 1)
+check("i18n L10 over the limit", near(it.check(_json.dumps(ref, ensure_ascii=False)), (len(ref) - 1) / len(ref)))
+it = W.proofread(3, 10)   # an unrequested edit costs as much as a missed error
+clean = V.oracle(it)
+check("proofread L10 one edit", near(it.check(clean.replace("the", "teh", 1)), 1 - 1 / it.meta["errors"]))
+# the kinds without an oracle: answers that meet every rule (written by the frontier reference, checked here) score 1.0,
+# and breaking one rule costs one share
+fixtures = _json.load(open(os.path.join(os.path.dirname(__file__), "writing_answers_910.json")))
+for item_id, answer in fixtures.items():
+    _, kind, lv, sd = item_id.split(".")
+    it = W.KINDS[kind](int(sd), int(lv[1:]))
+    check(f"{item_id} answer", near(it.check(answer), 1.0), it.check(answer))
+    check(f"{item_id} empty", it.check("") == 0.0)
+    lines = answer.split("\n")   # one word less in the first sentence / bullet
+    i = next(k for k, l in enumerate(lines) if l.startswith("- ")) if kind in ("summarize", "translate") else 1 if kind == "rewrite" else 2
+    toks = lines[i].split(" ")
+    del toks[-2]
+    broken = "\n".join(lines[:i] + [" ".join(toks)] + lines[i + 1:])
+    check(f"{item_id} broken", 0 < it.check(broken) < 1.0, it.check(broken))
+
 print("all passed" if not failed else f"{failed} failed")
 sys.exit(1 if failed else 0)
