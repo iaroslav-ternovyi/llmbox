@@ -264,7 +264,7 @@ for req, want in [("/u/42/profile?tab=2", ("users", "/users/42/profile")),      
                   ("/lookup?id=7", ("root", "/lookup?id=7")),                  # rewrite never sees the query string
                   ("/go/x?ref=2", ("301", "/new/x?ref=2")), ("/tmp/x?y=1", ("302", "/scratch/x")),   # '?' at the end: no args
                   ("/n//a/b?x=1", ("n", "/n/a/b")), ("/v1/u/5/x", ("api", "/internal/u/5/x")),
-                  ("/img/cat.gif", ("cdn", "/cdn/c")), ("/img/cat.webp?s=1", ("cdn", "/cdn/cat")),
+                  ("/img/cat.gif", ("cdn", "/cdn/c")), ("/img/cat.webp?s=1", ("cdn", "/cdn/")),   # a failed rewrite empties $1
                   ("/api?x=1", ("301", "/api/?x=1")), ("/files", ("301", "/files/")),   # a proxying "/name/" location
                   ("/go", ("root", "/go"))]:                                            # ... but /go/ only redirects
     check(f"nginx 9 {req}", T.ngx_proxy9(srw9, nl9, req) == want, T.ngx_proxy9(srw9, nl9, req))

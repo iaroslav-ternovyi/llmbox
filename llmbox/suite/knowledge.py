@@ -289,7 +289,8 @@ def _combo_pool910(kind: str) -> tuple[list, list]:
             bool(q["accept"].get("exc") or q["accept"].get("canon"))
         qs = bank()["questions"]
         return [q for q in qs if ok(q, 7)], [q for q in qs if ok(q, 6)]
-    if kind == "shell":   # no ' inside "..." inside "$(...)": bash before 5.2 scanned those wrongly (only checkable there)
+    if kind == "shell":   # no ' inside "..." inside "$(...)": bash 3.2 scans those wrongly (bash 5.2 does not:
+        # tests/real_programs.py); left out as when the levels were measured
         return [], [p for p in _combo_pool(kind, 7) if "\"'" not in p["text"]]
     return [], [f for f in _codes_facts() if f["level"] == 5] + _exit_facts()
 

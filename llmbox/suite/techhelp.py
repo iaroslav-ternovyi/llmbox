@@ -1357,7 +1357,8 @@ def compose_910(seed: int, level: int) -> Item:
 def ngx_proxy9(server_rw: list[tuple], locs: list[tuple], request: str) -> tuple[str, str]:
     """ngx_proxy plus (nginx docs): a `proxy_pass` URI with variables is evaluated and sent as is - the request's
     arguments are not added; $request_uri is the original request line URI with its arguments, $uri the current
-    normalized URI without them; $1..$9 come from the last regular expression that matched (a location's or a rewrite's);
+    normalized URI without them; $1..$9 come from the location's regex, but every `rewrite` evaluated after it replaces
+    them with its own groups - empty when it does not match or has none (checked on nginx 1.31: tests/test_techhelp.py);
     `rewrite ... permanent|redirect` answers the client (301 / 302) with the new URI and the arguments; a request for a
     prefix location's name without its trailing slash, when that location proxies, gets a 301 to the name with the slash
     (and the arguments) - unless an exact location matches (docs: location)."""
@@ -1369,10 +1370,10 @@ def ngx_proxy9(server_rw: list[tuple], locs: list[tuple], request: str) -> tuple
 
     def sub(rx, repl):
         nonlocal uri, args, caps
-        m = re.search(rx, uri)
-        caps = m.groups() or caps
+        caps = re.search(rx, uri).groups()
         uri, args = _ngx_sub(rx, repl, uri, args)
     for rx, repl, flag in server_rw:
+        caps = ()   # an evaluated rewrite regex resets the captures, matching or not
         if re.search(rx, uri):
             sub(rx, repl)
             changed = True
@@ -1392,6 +1393,7 @@ def ngx_proxy9(server_rw: list[tuple], locs: list[tuple], request: str) -> tuple
         body = loc[2]
         again = broke = False
         for rx, repl, flag in body.get("rw", []):
+            caps = ()   # an evaluated rewrite regex resets the captures, matching or not
             if re.search(rx, uri):
                 sub(rx, repl)
                 changed = True
@@ -1451,7 +1453,7 @@ def nginx_910(seed: int, level: int) -> Item:
     reqs = [f"/u/{n}/{word}?tab={k}",               # variables in proxy_pass: sent as is, the arguments are dropped
             f"/files/{word2}.txt?v={k}",            # $request_uri: the original URI, whatever rewrite ... break did
             f"/img/{name}.gif",                     # the rewrite's capture replaces the location's $1
-            f"/img/{name}.webp?s={k}",              # no rewrite match: $1 is still the location's; arguments dropped
+            f"/img/{name}.webp?s={k}",              # the rewrite does not match, yet it empties $1; arguments dropped
             f"/n//{word}/{word2}?x={k}",            # $uri: normalized, without arguments
             f"/{v1}/u/{n}/{word}",                  # server rewrite first: the ^/u/ regex no longer matches
             f"/go/{word}?ref={k}",                  # rewrite ... permanent: a 301 with the arguments appended
