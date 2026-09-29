@@ -353,7 +353,9 @@ _LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?\s*(\d{1,2})\s*[.):]\s*(?:\*\*)?\s
 
 
 def answers(text: str, n: int) -> dict[int, str]:
-    """Numbered answer lines after the last ANSWERS header (or anywhere, the last line per number wins)."""
+    """Numbered answer lines after the last ANSWERS header (or anywhere). The first line per number wins: notes after
+    the block ("- **7:** because ...") must not replace the answers (2026-09-29: an Opus reply lost 3 of 10 that way;
+    1 of 274 saved answers parses differently, and it is that one)."""
     t = strip_think(text or "")
     heads = list(re.finditer(r"(?im)^[#*\s]*answers\W*$", t))
     if heads:
@@ -361,7 +363,7 @@ def answers(text: str, n: int) -> dict[int, str]:
     out: dict[int, str] = {}
     for line in t.splitlines():
         m = _LINE.match(line)
-        if m and 1 <= int(m.group(1)) <= n:
+        if m and 1 <= int(m.group(1)) <= n and int(m.group(1)) not in out:
             out[int(m.group(1))] = m.group(2)
     return out
 
