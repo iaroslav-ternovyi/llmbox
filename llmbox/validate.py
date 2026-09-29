@@ -23,6 +23,7 @@ from .suite.common import Item
 
 ANSWER_KINDS = {("reasoning", k) for k in ("arith", "dates", "logic", "code_trace", "table", "schedule", "budget")} | \
                {("longctx", k) for k in ("lookup", "multihop", "count", "latest", "total", "audit")} | {("tools", "total")}
+ANSWER_KINDS |= {("techhelp", "git_seq")}   # format variants too (tests/test_git_seq.py adds fences and spacing)
 
 
 def _cleanup(it: Item) -> None:
