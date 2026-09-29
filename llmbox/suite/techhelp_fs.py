@@ -599,6 +599,7 @@ class FS:
         if pairs is None:
             return False
         self._hl: dict = {}
+        self._stack: list = []
         ok = True
         for src, target in pairs:
             try:
@@ -719,6 +720,9 @@ class FS:
             if not d.mode & 0o200:
                 raise Unsupported("cp -r into a read-only directory")
             final = s.mode if arch else d.mode
+        if any(x is s for x in self._stack):
+            raise Unsupported("a directory cycle (cp -L through a symlink to an ancestor)")
+        self._stack.append(s)
         ok = True
         for name in sorted(s.ents):
             c, cpath = s.ents[name], spath.rstrip("/") + "/" + name
@@ -729,6 +733,7 @@ class FS:
                     ok = False
                     continue
             ok = self._copy(c, cpath, dst.rstrip("/") + "/" + name, arch, False, False, deref) and ok
+        self._stack.pop()
         if d.mode != final:
             self._set(d, "mode", final)
         return ok
@@ -969,8 +974,8 @@ hemlock larch linden myrtle oak pine poplar rowan spruce sumac teak yucca""".spl
 _LV = {   # commands, trap operations, questions about paths, starting tree (dirs, files, symlinks, hard links), tree cap
     1: ((5, 7), 1, 1, (3, 4, 0, 0), 24), 2: ((6, 8), 1, 1, (3, 4, 1, 0), 24), 3: ((8, 10), 1, 2, (4, 5, 1, 0), 28),
     4: ((15, 17), 4, 2, (4, 6, 1, 0), 36), 5: ((18, 21), 5, 2, (5, 6, 1, 0), 40), 6: ((22, 25), 6, 3, (5, 7, 2, 1), 44),
-    7: ((30, 38), 12, 3, (6, 8, 2, 1), 52), 8: ((40, 50), 16, 4, (7, 9, 3, 1), 58), 9: ((60, 75), 28, 5, (8, 10, 3, 1), 66),
-    10: ((85, 100), 38, 6, (9, 11, 3, 1), 74)}
+    7: ((30, 38), 12, 3, (6, 8, 2, 1), 52), 8: ((40, 50), 16, 4, (7, 9, 3, 1), 58), 9: ((85, 100), 40, 7, (10, 13, 4, 2), 90),
+    10: ((170, 200), 80, 9, (12, 16, 5, 2), 130)}
 _P1 = ["cp_r_into", "mv_into", "mkdir_exists", "rmdir"]
 _P2 = ["mv_over", "ln_s_rel", "write_link", "rm_r_link"]
 _P3 = ["hardlink", "cp_follow", "cat_missing", "ln_s_into", "cp_r_link", "ln_sf_dir"]
@@ -999,6 +1004,7 @@ class _Gen:
         self.hard_note = ""
         self.cap = _LV[level][4]
         self.limit = _LV[level][0][1]     # the level's longest script
+        self.touch: dict[int, int] = {}   # inode -> how many commands changed it (levels 9-10 ask about the busiest)
 
     # ---- plumbing
     def word(self) -> str:
@@ -1067,6 +1073,9 @@ class _Gen:
         except Unsupported:
             fs.rollback(mark)
             return False
+        for e in {id(x[1] if x[0] == "attr" else x[4]): x for x in fs.log[mark:] if x[0] == "attr" or (x[0] == "ent" and x[4])}.values():
+            node = e[1] if e[0] == "attr" else e[4]
+            self.touch[node.ino] = self.touch.get(node.ino, 0) + 1
         self.cmds.append(cmd)
         self.status.append(res)
         return True
@@ -1174,7 +1183,7 @@ class _Gen:
             files.append(f)
             cmds.append(f"echo {self.word()} > {f}")
             assert self.fs.run(cmds[-1]), cmds[-1]
-            if r.random() < 0.3:
+            for _ in range(r.choice([1, 1, 2]) if self.level >= 9 and r.random() < 0.6 else 1 if r.random() < 0.3 else 0):
                 cmds.append(f"echo {self.word()} >> {f}")
                 assert self.fs.run(cmds[-1]), cmds[-1]
         self.setup += cmds
@@ -1197,7 +1206,7 @@ class _Gen:
             c = f"ln {f} {h}"
             assert self.fs.run(c), c
             self.setup.append(c)
-            self.hard_note = f"`./{f}` and `./{h}` are hard links to the same file."
+            self.hard_note += f"`./{f}` and `./{h}` are hard links to the same file.\n"
         self.fs.log.clear()
 
     # ---- filler: ordinary work between the traps
@@ -2008,6 +2017,15 @@ def _pick_questions(g: _Gen, n: int) -> list[tuple[str, str]]:
             kinds = ["cat"]
         cands += [(k, p) for k in kinds]
     r.shuffle(cands)
+    if g.level >= 9:   # the paths whose answer took the most commands or symlinks to get right come first
+        for p, nd in g.ents():
+            if p not in seen and ((nd.kind == "f" and g.touch.get(nd.ino, 0) >= 3) or nd.kind == "l"):
+                seen.add(p)
+                t = g.res(p)
+                cands.append(("readlink", p) if nd.kind == "l" and (t is None or t.kind == "d" or r.random() < 0.5)
+                             else ("cat", p) if t is not None and t.kind == "f" else ("readlink", p))
+        r.shuffle(cands)
+        cands.sort(key=lambda kp: -_hardness(g, *kp))
     out: list = []
     used: set = set()
     errors = [0 if r.random() < 0.4 else 1]
@@ -2033,6 +2051,22 @@ def _pick_questions(g: _Gen, n: int) -> list[tuple[str, str]]:
         take("cat", p)
     r.shuffle(out)
     return out
+
+
+def _hardness(g: _Gen, kind: str, p: str) -> int:
+    """How much of the script a question's answer depends on: the changes to the file it reaches, the symlinks on the
+    way, the lines to reproduce."""
+    parts, links = p.split("/"), 0
+    for i in range(1, len(parts) + 1):
+        n = g.lres("/".join(parts[:i]))
+        links += n is not None and n.kind == "l"
+    t = g.res(p)
+    h = 2 * links
+    if t is not None and t.kind == "f":
+        h += g.touch.get(t.ino, 0) + t.data.count("\n") // 2
+    if t is not None and t.kind == "d":
+        h += sum(g.touch.get(c.ino, 0) > 0 for c in t.ents.values())
+    return h
 
 
 def _answer(fs: FS, kind: str, path: str) -> str:
@@ -2182,7 +2216,7 @@ def fs_seq(seed: int, level: int = 3) -> Item:
     prompt = (f"I run a script with bash on Linux with GNU coreutils 9.x and LC_ALL=C, as an ordinary user (not root) who owns every "
               f"file, with umask 022. The script is not interactive (standard input is not a terminal, so nothing asks "
               f"for confirmation) and it does not stop when a command fails. It starts in {ROOT}, which contains:\n\n"
-              f"```\n{tree}\n```\n{_NOTATION}" + (f"\n{g.hard_note}" if g.hard_note else "")
+              f"```\n{tree}\n```\n{_NOTATION}" + (f"\n{g.hard_note.strip()}" if g.hard_note else "")
               + f"\n\nThe script:\n```\n{script}\n```\n\n" + "\n".join(f"{i + 1}. {q}" for i, q in enumerate(qtext))
               + "\n\nThink it through, then finish with the answers in exactly this form (the tree one path per line "
               f"after `ANSWER 2:`):\n{form}")
