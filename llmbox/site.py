@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import sqlite3
+import statistics
 import time
 from datetime import datetime
 
@@ -179,6 +180,53 @@ def rank_ranges(rs: list[dict]) -> dict:
     return out
 
 
+SHORT = {"agentic": "agentic coding", "code": "code", "tools": "tools", "techhelp": "tech help", "knowledge": "knowledge",
+         "explain": "explaining", "longctx": "long docs", "writing": "writing", "reasoning": "reasoning"}
+
+
+def _marker(col: str, kind: str, s: int = 14) -> str:
+    """The chart's marker: filled = the maker's release, ring = a fine-tune, diamond = an uncensored remix."""
+    c, r = s / 2, s / 2 - 2
+    mk = (f'<path d="M{c} {c - r - 1}L{c + r + 1} {c}L{c} {c + r + 1}L{c - r - 1} {c}Z" fill="none" stroke="{col}" stroke-width="2"/>' if kind == "uncensored"
+          else f'<circle cx="{c}" cy="{c}" r="{r}" fill="{"none" if kind == "fine-tune" else col}" stroke="{col}" stroke-width="2"/>')
+    return f'<svg class="mk" width="{s}" height="{s}" aria-hidden="true">{mk}</svg>'
+
+
+def _pct(v: float | None) -> str:
+    return "—" if v is None else f"{v:.0f}%"
+
+
+def _spd(sp: dict) -> str:
+    tps, deep = sp.get("decode_tps"), report._deep(sp)
+    return f"<b>{tps:.0f}</b><small>{'' if deep == '-' else f'{float(deep):.0f} long'}</small>" if tps else "—"
+
+
+def _stands_out(blocks: dict, med: dict, gap: float = 6) -> str:
+    """The blocks where a model is clearly above or below the typical local model (the median), two of each at most."""
+    d = {b: blocks[b] - med[b] for b in BLOCKS if blocks.get(b) is not None and b in med}
+    up = [b for b, v in sorted(d.items(), key=lambda x: -x[1]) if v >= gap][:2]
+    dn = [b for b, v in sorted(d.items(), key=lambda x: x[1]) if v <= -gap][:2]
+    if d and all(v <= -gap for v in d.values()):
+        return '<span class="dn">▼ behind on every block</span>'
+    out = ([f'<span class="up">▲ {" · ".join(SHORT[b] for b in up)}</span>'] if up else []) + ([f'<span class="dn">▼ {" · ".join(SHORT[b] for b in dn)}</span>'] if dn else [])
+    return "".join(out) or '<span class="ev">even, close to typical</span>'
+
+
+def _profile(r: dict, med: dict, col: str, rank: tuple) -> str:
+    """Under a ranking line: the nine block scores as bars, with a tick at the typical local model's score."""
+    rid = r["id"]
+    bars = "".join(f"<div class='bb'><span class='bn'>{SHORT[b]}<small>{share(b) * 100:.0f}%</small></span><span class='bt'><i style='width:{r['blocks'][b]:.0f}%;background:{col}'></i>"
+                   f"<u style='left:{med[b]:.0f}%' title='typical local model: {med[b]:.0f}'></u></span><b>{r['blocks'][b]:.0f}</b></div>"
+                   for b in BLOCKS if r["blocks"].get(b) is not None and b in med)
+    pl, lo, hi, _ = rank
+    k = (r.get("vs_ref") or 0) / r["capability"] if r["capability"] else 0
+    return (f"<div class='pf'><div class='pfb'>{bars}</div><div class='pfl'>"
+            + (f"<p>Overall {r['vs_ref']:.0f}% of Claude Opus 5.5 · 95% range {r['ci'][0] * k:.0f}–{min(100, r['ci'][1] * k):.0f}</p>" if k else "")
+            + f"<p>Overall place {pl}{f', tied with places {lo}–{hi}' if lo != hi else ''}</p>"
+            f"<p class='q'>Bar: the block's score out of 100 · <u></u> the typical local model · small number: the block's share of the score</p>"
+            f"<a href='recipe-{esc(rid)}.html'>File, settings and every task →</a><a href='hardware-{esc(rid)}.html'>Speed on other boxes →</a></div></div>")
+
+
 def pareto(points: list[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
     """Non-dominated points in (speed, quality), sorted by speed."""
     front = [p for p in points if not any(q[0] >= p[0] and q[1] >= p[1] and (q[0] > p[0] or q[1] > p[1]) for q in points)]
@@ -272,58 +320,47 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     dup = {n for n in names0.values() if list(names0.values()).count(n) > 1}
     labels = {rid: n + (f" · {_quant(next(r['file'] for r in local if r['id'] == rid)).split(' ')[0]}" if n in dup else "") for rid, n in names0.items()}
 
-    # the answer first: computed from the data, no editorial text
-    def best(key, label, fmt, cid=""):
-        c = [r for r in local if key(r) is not None]
-        if not c:
-            return ""
-        b = max(c, key=key)
-        return (f'<div{f" id={cid}" if cid else ""}><span class="sc">{label}</span><a class="pk" href="recipe-{esc(b["id"])}.html">{esc(labels.get(b["id"], model_name(b)))}</a>'
-                f'<span class="pv">{fmt(b)}</span></div>')
-    picks = "".join([
-        best(lambda r: r.get("vs_ref"), "Best overall", lambda r: f'{r["vs_ref"]:.0f}% of frontier'),
-        best(lambda r: r["speed"].get("decode_tps"), "Fastest on your box", lambda r: f'{r["speed"]["decode_tps"]:.0f} tok/s', "fastest"),
-        best(lambda r: r["blocks"].get("agentic"), "Best for agentic coding", lambda r: f'agentic {r["blocks"]["agentic"]:.0f}'),
-        best(lambda r: r["blocks"].get("longctx"), "Best for long documents", lambda r: f'long docs {r["blocks"]["longctx"]:.0f}'),
-    ])
-
     def pop(label: str, title: str, text: str) -> str:
         return f'<span class="tip">{label}<span class="pop"><b>{esc(title)}</b>{esc(text)}</span></span>'
     # what llmbox's settings are worth: the biggest measured gains over stock llama.cpp, same model, same box
     opts = {k: v for k, v in optimize_records(host).items() if k in {r["id"] for r in local}}
     gain = lambda o: o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1
-    top = sorted(opts.items(), key=lambda kv: -gain(kv[1]))[:3]
-    optline = ("" if not top or gain(top[0][1]) < 0.15 else
-               '<section class="optl"><span class="sc">What the settings are worth</span><span class="q">same model, same PC: stock llama.cpp → llmbox settings</span>'
-               + "".join(f'<a href="recipe-{esc(rid)}.html"><b>{esc(names0[rid])}</b> {o["summary"]["stock"]["decode"]:.0f} → {o["summary"]["llmbox"]["decode"]:.0f} tok/s '
-                         f'<em>{gain(o) * 100:+.0f}%</em></a>' for rid, o in top)
-               + '<a class="more" href="method.html#settings">all models →</a></section>')
-    head = ("<tr><th>#</th><th class='l'>MODEL</th><th data-sort='score'>" + pop("SCORE ↕", "Score · % of frontier",
-            "How close the model gets to Claude Opus 5.5 on the same tasks (Opus = 100%). The small number under it is the capability "
-            "on a 0-100 scale, the weighted average of the blocks to the right. Click a column to sort.") + "</th>"
-            + "".join(f"<th data-sort='{b}'>{_tip(b)}</th>" for b in BLOCKS)
-            + "<th data-sort='speed'>" + pop("TOK/S ↕", "Speed on your box", "Tokens per second while writing the answer, in a short chat (big number) "
-            "and with a ~90k-token document in context (small). Measured on the reference PC, predicted for the box you pick.")
-            + "<br><span class='faint'>chat · long ctx</span></th><th>" + pop("FITS", "Does it fit?", "Whether the model and its context fit in the "
-            "graphics card plus RAM of the box you pick, and the largest context that does.") + "</th><th></th></tr>")
+    top = sorted(opts.items(), key=lambda kv: -gain(kv[1]))[:4]
+    optpanel = ("" if not top or gain(top[0][1]) < 0.15 else
+                '<section class="panel feed optp"><div class="lbl">What the settings are worth</div><p class="q nf0">Same model, same PC: stock llama.cpp → llmbox settings.</p><ul>'
+                + "".join(f'<li><a href="recipe-{esc(rid)}.html">{esc(names0[rid])}</a> <span class="fv">{o["summary"]["stock"]["decode"]:.0f} → {o["summary"]["llmbox"]["decode"]:.0f} tok/s</span>'
+                          f'<em>{gain(o) * 100:+.0f}%</em></li>' for rid, o in top)
+                + '</ul><p class="q nf"><a href="method.html#settings">all models →</a></p></section>')
+    # the ranking: one line per model (place, name, score with its range, speed, fit, what stands out); the nine block
+    # scores open under the line. Colour and marker as on the chart.
+    med = {b: statistics.median(v) for b in BLOCKS if (v := [r["blocks"][b] for r in local if r["blocks"].get(b) is not None])}
+    head = ("<tr><th class='rk'>#</th><th class='l'>MODEL</th><th class='sch' data-sort='score'><div class='fp'><div class='trk axis'></div><span class='num'>"
+            + pop("SCORE ↕", "Score · % of Claude Opus 5.5", "How close the model gets to Claude Opus 5.5 on the same tasks (Opus = 100%). "
+                  "The dot is the score, the line its 95% range: models whose lines overlap are not measurably apart yet. Click to sort.")
+            + "</span></div></th><th class='r' data-sort='speed'>" + pop("TOK/S ↕", "Speed on your box", "Tokens per second while writing the answer, "
+            "in a short chat (big number) and with a long document in context (small). Measured on the reference PC, predicted for the box you pick. Click to sort.")
+            + "</th><th class='r'>" + pop("FITS", "Does it fit?", "Whether the model and its context fit in the graphics card plus RAM of the box you pick, "
+            "and the largest context that does.") + "</th><th class='l'>" + pop("STANDS OUT", "Stands out", "Blocks where the model scores at least "
+            "6 points above (▲) or below (▼) the typical (median) local model here. Click a row for all nine.") + "</th><th></th></tr>")
     body = []
-    for i, r in enumerate(local, 1):
-        tps, deep = r["speed"].get("decode_tps"), report._deep(r["speed"])
-        pl, lo, hi, grp = ranks[r["id"]]
+    for r in local:
+        rid, nm = r["id"], model_name(r)
+        pl, lo, hi, grp = ranks[rid]
         tip = f"not measurably apart from places {lo}–{hi}" if lo != hi else "measurably apart from every other model"
-        body.append(f"<tr data-rid='{esc(r['id'])}' data-g='{grp}'><td class='rk' title='{tip}'>{pl}</td>"
-                    f"<td class='l mod'><a class='m' href='recipe-{esc(r['id'])}.html'>{esc(model_name(r))}</a>"
-                    f"<span class='qt'>{esc(' · '.join(x for x in (_quant(r['file']), _size(sd['recipes'].get(r['id']), model_name(r))) if x))}</span></td>"
-                    f"<td class='sco'>{_tile(r.get('vs_ref'), f'{r['capability']:.1f}', big=True)}</td>"
-                    + "".join(f"<td class='b'>{_tile(r['blocks'].get(b))}</td>" for b in BLOCKS)
-                    + f"<td class='spd'>{_tile(tps, f'{deep} long') if tps else '—'}</td><td class='fit'>—</td>"
-                    f"<td><label class='pick2' title='pick two to compare'><input type='checkbox' value='{esc(r['id'])}'></label></td></tr>")
-    # cloud models: context for the local ones (same tasks, same scale), not places in a ranking of what runs on a box
+        col, kind = family((sd["recipes"].get(rid) or {}).get("arch"))[1], _kind(r.get("hf_repo"))
+        sub = " · ".join(x for x in (_quant(r["file"]), _size(sd["recipes"].get(rid), nm), kind if kind != "release" else "") if x)
+        body.append(f"<tr class='mr' data-rid='{esc(rid)}' data-g='{grp}'><td class='rk' title='{tip}'>{pl}</td>"
+                    f"<td class='l mod'><div class='mw'>{_marker(col, kind)}<a class='m' href='recipe-{esc(rid)}.html'>{esc(nm)}</a><span class='qt'>{esc(sub)}</span></div></td>"
+                    f"<td class='sco'>{_pct(r.get('vs_ref'))}</td><td class='spd r'>{_spd(r['speed'])}</td><td class='fit r'>—</td>"
+                    f"<td class='l so'>{_stands_out(r['blocks'], med)}</td>"
+                    f"<td class='act'><label class='pick2' title='tick two to compare'><input type='checkbox' value='{esc(rid)}' aria-label='compare {esc(nm)}'></label>"
+                    f"<button class='exp' aria-expanded='false' aria-label='all block scores of {esc(nm)}'>▾</button></td></tr>")
+        body.append(f"<tr class='prof' data-for='{esc(rid)}' hidden><td colspan='7'>{_profile(r, med, col, ranks[rid])}</td></tr>")
+    # cloud models: reference lines in the order (same tasks, same scale), not places in a ranking of what runs on a box
     for r in clouds:
         note = "cloud · the 100% mark" if ref and r["id"] == ref["id"] else "cloud · for comparison"
-        body.append(f"<tr class='cloud' data-rid='{esc(r['id'])}'><td class='rk'>☁</td><td class='l mod'><span class='m'>{esc(model_name(r))}</span><span class='qt'>{note}</span></td>"
-                    f"<td class='sco'>{_tile(r.get('vs_ref'), f'{r['capability']:.1f}', big=True)}</td>" + "".join(f"<td class='b'>{_tile(r['blocks'].get(b))}</td>" for b in BLOCKS)
-                    + "<td class='spd'>cloud</td><td class='fit'>—</td><td></td></tr>")
+        body.append(f"<tr class='cloud' data-rid='{esc(r['id'])}'><td class='rk'>☁</td><td class='l mod'><div class='mw'><span></span><span class='m'>{esc(model_name(r))}</span><span class='qt'>{note}</span></div></td>"
+                    f"<td class='sco'>{_pct(r.get('vs_ref'))}</td><td class='spd r'></td><td class='fit'></td><td class='so'></td><td class='act'></td></tr>")
     qline = ""
     run = next((j for j in q if j["status"] == "running"), None)
     nxt = [j["model"] for j in q if j is not run]
@@ -378,7 +415,6 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
  <span class="bl" id="bwl">speed</span><select id="bw" aria-label="RAM speed"></select>
  <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
  <span id="boxnote" class="q">speeds measured on this box</span></section>
-<section class="picks">{picks}</section>{optline}
 <section class="panel chart hero"><h2 class="ch2">Smarter or faster: what runs best on your box</h2>
  <div id="scatter">{_scatter(local)}</div>
  <p class="cap">Each point is a model with the settings it was measured with. Higher = closer to Claude Opus 5.5 on the same tasks;
@@ -387,12 +423,11 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
 <section class="panel rankp"><div class="lbl">Ranking <span class="faint">· suite v{esc(suite_version)}{" · preliminary: runs of this version are still coming in" if "-dev" in suite_version else ""}</span></div>
  <div class="rhead"><div class="seg" role="group" aria-label="rank by"><span class="sc">Rank by</span>{presets}</div>
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
- <div class="tw"><table class="rank">{head}{''.join(body)}</table></div>
- <p class="rnote">Places by score. A dashed line: every model above it is measurably better than the models below; inside a group the order is not settled yet (hover a place for its tie range).</p>{qline}</section>
-<div class="below">
- <div class="side"><section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
+ <div class="tw"><table class="rank"><thead>{head}</thead><tbody>{''.join(body)}</tbody></table></div>
+ <p class="rnote">Places by score. A dashed line between rows: every model above it is measurably better than the ones below; inside a group the order is not settled yet.
+ Click a row for its nine block scores.</p>{qline}</section>
+<div class="below">{optpanel}<section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
  {_news_panel({r["id"] for r in local})}</div>
-</div>
 <footer><span>Every number comes from a saved run. The score does not depend on the box; speed does. <a href="method.html">How scores work →</a></span><span>generated {time.strftime('%b %d, %Y %H:%M')}</span></footer>
 </div>
 <script>const DATA = {json.dumps(data)};
@@ -466,8 +501,6 @@ _HOME_CSS = """
 .newbie dt{color:var(--amber);font-size:12px;padding-top:1px;max-width:150px}.newbie dd{margin:0;color:var(--soft)}
 @media (max-width:760px){.newbie .nb{grid-template-columns:1fr}.newbie .gl{grid-template-columns:1fr}.newbie dd{margin-bottom:6px}}
 .boxbar .bl{font-size:12px;color:var(--muted);margin-left:6px}
-.picks .pk{overflow-wrap:anywhere}
-.optl{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 22px;padding:12px 18px;border:1px solid var(--line);border-top:0;font-size:13px}
 .side{display:flex;flex-direction:column;gap:22px;min-width:0}
 .hero{padding:22px 22px 14px;margin:0 0 22px}.hero .ch2{font:600 22px "IBM Plex Sans Condensed";margin:0 0 12px;color:var(--ink)}
 .hero .cap{font-size:12.5px;line-height:1.6;color:var(--muted);max-width:110ch;margin:8px 4px 2px}
@@ -480,44 +513,80 @@ _HOME_CSS = """
 .clg i{width:10px;height:10px;border-radius:50%;display:inline-block}.clg .k{color:var(--muted)}
 .ctip{position:absolute;z-index:5;width:270px;background:#15160f;border:1px solid var(--amber-dim);padding:10px 12px;font-size:12px;line-height:1.55;pointer-events:none}
 .ctip b{display:block;color:var(--ink);font-weight:500;margin-bottom:2px}.ctip span{display:block;color:var(--muted)}.ctip em{font-style:normal;color:var(--amber)}
-.below{grid-template-columns:minmax(0,1fr)!important}.below .side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
-@media (max-width:760px){.below .side{grid-template-columns:1fr}.hero{padding:16px 10px 10px}}
 
 .news .nt{display:inline-block;font-size:10px;letter-spacing:.08em;padding:1px 5px;margin-right:4px;border:1px solid var(--amber-dim);color:var(--amber)}
 .news .nt.repo_update,.news .nt.runtime,.news .nt.pr{border-color:var(--line);color:var(--muted)}
 .news .nd{display:block;font-size:12px;color:var(--faint);margin-top:3px;overflow-wrap:anywhere}.news .nr{font-size:12px;margin-left:8px}
 .news .nf{font-size:11.5px;padding:0 18px 14px;margin:0}
-.optl .q{font-size:12px}.optl a{color:var(--soft)}.optl a b{color:var(--ink);font-weight:500}.optl em{font-style:normal;color:var(--amber)}.optl .more{margin-left:auto;color:var(--muted)}
 .boxbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;border:1px solid var(--line);background:var(--panel)}
 .boxbar .sc{margin-right:4px}
 .boxbar select,.boxbar input{background:#0b0c09;color:var(--ink);border:1px solid var(--line);padding:6px 8px;font:13px "IBM Plex Mono"}
 .boxbar select:focus,.boxbar input:focus{border-color:var(--amber);outline:none}.boxbar select:disabled,.boxbar input:disabled{opacity:.35}
 .boxbar #boxnote{margin-left:auto}
-.picks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-top:0}
-.picks>div{padding:16px 18px;border-right:1px solid var(--line2)}.picks>div:last-child{border-right:0}
-.picks .pk{display:block;font:600 22px "IBM Plex Sans Condensed";color:var(--ink);margin:4px 0 0}
-.picks .pv{font-size:13px;color:var(--amber)}
 .rhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding:18px 16px 6px}
 .seg{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.seg .sc{margin-right:8px}
 .seg button{background:none;border:1px solid transparent;color:var(--muted);font:12px "IBM Plex Mono";padding:5px 10px;cursor:pointer;white-space:nowrap}
 .seg button:hover{color:var(--ink)}.seg button.on{color:var(--amber);border-color:var(--amber-dim)}
 .cmp{display:flex;align-items:center;gap:12px}.cmp .btn[aria-disabled=true]{opacity:.4;pointer-events:none}
-.rank th{padding:10px 5px}.rank td{padding:10px 5px}.rank th[data-sort]{cursor:pointer;user-select:none}.rank th[data-sort].on .tip{color:var(--amber)}.rank th[data-sort]:hover,.rank th[data-sort].on{color:var(--amber)}
-.rank td.rk{color:var(--muted);width:44px;font-size:13px;white-space:nowrap}
-.rank tr.gs td{border-top:2px dashed rgba(255,176,0,.6)}.rank tr.cloud td{opacity:.62}.rank tr.cloud td.rk{font-size:15px}.rank td.rk{cursor:help}
 .rnote{padding:8px 16px 0;font-size:12px;color:var(--faint)}
-.rank td.mod{min-width:170px}.rank td.mod .m{display:block;white-space:nowrap}.rank .qt{display:block;font-size:11px;color:var(--faint)}
-.rank .tile{min-width:44px}.rank td.sco .tile{min-width:70px;font-size:20px}
-.rank tr.ref td{color:var(--faint);font-size:13px}.rank tr.ref .m{color:var(--muted);font-weight:500}
-.rank tr.nofit td{opacity:.45}
-.rank td.fit{font-size:12px;color:var(--soft);white-space:nowrap}.rank td.fit .no{color:var(--red)}
+.rank th[data-sort]{cursor:pointer;user-select:none}.rank th[data-sort]:hover,.rank th[data-sort].on{color:var(--amber)}.rank th[data-sort].on .tip{color:var(--amber)}
+.rank th,.rank td{padding:12px 10px}.rank th{vertical-align:bottom}.rank .r{text-align:right}
+.rank td.rk{color:var(--muted);width:30px;font-size:13px;white-space:nowrap;cursor:help}
+.rank tr.mr{cursor:pointer}.rank tr.mr:hover td,.rank tr.open td{background:rgba(255,255,255,.022)}
+.rank td.mod{min-width:190px}.mw{display:grid;grid-template-columns:14px minmax(0,1fr);column-gap:10px;align-items:baseline}
+.mw .mk{align-self:center}.mw .m{white-space:nowrap}.mw .qt{grid-column:2;font-size:11px;color:var(--faint)}
+.rank td.sco,.rank th.sch{width:31%;min-width:230px}
+.fp{display:flex;align-items:center;gap:14px}.fp .trk{position:relative;flex:1;height:14px}.fp .num{width:46px;text-align:right;font:500 17px "IBM Plex Mono";color:var(--ink);flex:none}
+.fp .trk s{position:absolute;top:-13px;bottom:-13px;width:1px;background:var(--line2)}
+.fp .trk i{position:absolute;top:6px;height:2px;opacity:.5}
+.fp .trk b{position:absolute;top:2px;width:10px;height:10px;margin-left:-5px;border-radius:50%}
+.fp .trk b.rf{top:-6px;height:26px;width:0;margin:0;border-radius:0;border-left:1px dashed #8b877b}
+.fp .trk em{position:absolute;left:14px;top:-1px;font:normal 11px "IBM Plex Mono";color:var(--red)}
+.sch .fp{align-items:flex-end}.sch .num{font:inherit;color:inherit;width:auto;white-space:nowrap}
+.axis span{position:absolute;bottom:0;transform:translateX(-50%);font-size:10.5px;letter-spacing:0;color:var(--faint)}
+.rank td.spd b{display:block;font:500 17px "IBM Plex Mono";color:var(--ink)}.rank td.spd b.pred{color:var(--soft)}
+.rank td.spd small{display:block;font-size:11px;color:var(--faint)}
+.rank td.fit{font-size:12.5px;color:var(--soft);white-space:nowrap}.rank td.fit .no{color:var(--red)}
+.rank td.so{font-size:12.5px;line-height:1.55;min-width:170px}.so span{display:block;white-space:nowrap}.so .up{color:var(--amber)}.so .dn{color:#e0826a}.so .ev{color:var(--faint)}
+.rank td.act{white-space:nowrap;width:60px}
+.exp{background:none;border:0;color:var(--muted);font-size:13px;padding:2px 6px;cursor:pointer;transition:transform .15s}.rank tr.open .exp{transform:rotate(180deg);color:var(--amber)}
+.rank tr.gs td{border-top:1px dashed rgba(255,176,0,.6)}
+.rank tr.cloud td{padding-top:7px;padding-bottom:7px;color:var(--muted)}.rank tr.cloud .m{font-size:14px;color:var(--muted);font-weight:500}.rank tr.cloud .num{color:var(--muted);font-size:14px}
+.rank tr.cloud td.rk{font-size:13px;cursor:default}
+.rank tr.nofit td{opacity:.42}
+.rank tr.prof>td{padding:4px 10px 20px 50px;text-align:left;background:rgba(255,255,255,.022)}
+.pf{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:18px 40px}
+.pfb{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 28px}
+.bb{display:grid;grid-template-columns:minmax(0,1fr) 30px;gap:3px 8px;align-items:center;font-size:12.5px}
+.bb .bn{grid-column:1;color:var(--soft)}.bb .bn small{color:var(--faint);margin-left:6px;font-size:10.5px}.bb b{grid-column:2;grid-row:1/3;font:500 15px "IBM Plex Mono";text-align:right;color:var(--ink)}
+.bb .bt{grid-column:1;grid-row:2;position:relative;height:4px;background:var(--line)}.bb .bt i{position:absolute;left:0;top:0;bottom:0;opacity:.8}
+.bt u,.pfl u{position:absolute;top:-4px;height:12px;width:2px;background:var(--ink);opacity:.55}
+.pfl{font-size:12.5px;color:var(--soft);line-height:1.6}.pfl p{margin:0 0 4px}.pfl .q{margin:8px 0 10px}.pfl u{position:relative;display:inline-block;top:1px;height:10px;margin:0 3px}
+.pfl a{display:block;margin-top:4px}
+.below{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;align-items:start}
+.optp .nf0{padding:14px 18px 0;margin:0;font-size:12px}.optp .nf{padding:0 18px 14px;margin:0}.optp li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}.optp .fv{margin-left:0}.optp em{font-style:normal;color:var(--amber);margin-left:auto}
+@media (max-width:1100px){.below{grid-template-columns:1fr 1fr}.pfb{grid-template-columns:repeat(2,minmax(0,1fr))}.pf{grid-template-columns:1fr}}
+@media (max-width:760px){
+ .hero{padding:16px 10px 10px}.below{grid-template-columns:1fr}.cmp{width:100%;justify-content:space-between}
+ .rank thead{display:none}.rank,.rank tbody{display:block}
+ .rank tr.mr{display:grid;grid-template-columns:24px max-content minmax(0,1fr) auto;grid-template-areas:"rk mod mod act" "rk sco sco sco" "rk spd fit so";column-gap:12px;border-bottom:1px solid var(--line2);padding:10px 0}
+ .rank tr.mr td{display:block;border:0;padding:2px 0;min-width:0;width:auto;background:none!important}
+ .rank td.rk{grid-area:rk;padding-top:4px}.rank td.mod{grid-area:mod}.rank td.act{grid-area:act;text-align:right}.rank td.sco{grid-area:sco;padding:8px 0 6px}
+ .rank td.spd{grid-area:spd;text-align:left}.rank td.fit{grid-area:fit;text-align:left;padding-top:4px}.rank td.so{grid-area:so;font-size:12px}
+ .rank td.spd b{font-size:15px}.fp .num{font-size:15px}.fp .trk s{top:0;bottom:0}.rank td.spd b::after{content:" tok/s";font:400 11px "IBM Plex Mono";color:var(--faint)}
+ .rank tr.gs{border-top:1px dashed rgba(255,176,0,.6)}.rank tr.gs td{border-top:0}
+ .rank tr.cloud{display:grid;grid-template-columns:24px minmax(0,1fr) minmax(0,1.3fr);grid-template-areas:"rk mod sco";column-gap:12px;align-items:center;border-bottom:1px solid var(--line2);padding:4px 0}
+ .rank tr.cloud td{display:block;border:0;padding:2px 0;min-width:0;width:auto}.rank tr.cloud td.spd,.rank tr.cloud td.fit,.rank tr.cloud td.so,.rank tr.cloud td.act{display:none}
+ .rank tr.cloud .qt{display:none}
+ .rank tr.prof{display:block}.rank tr.prof[hidden]{display:none}.rank tr.prof>td{display:block;padding:6px 0 16px 36px;border:0}
+ .pfb{grid-template-columns:1fr}
+}
 .pick2 input{accent-color:#FFB000;width:15px;height:15px;cursor:pointer}
 .queue{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:12px 16px;border-top:1px solid var(--line2);font-size:13px}
 .queue b{font-weight:500}.queue .nx{margin-left:auto}
 .live{color:#ffd27a;animation:blink 1.4s steps(2) infinite}@keyframes blink{50%{opacity:.45}}
 @media (prefers-reduced-motion:reduce){.live{animation:none}}
 .prog{width:120px;height:4px;background:var(--line);display:inline-block}.prog i{display:block;height:100%;background:var(--amber)}
-.below{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:22px}
 .chart{padding:18px 16px 10px}.scatter{width:100%;height:auto;display:block}
 .sc2 .ci{stroke-opacity:.35}#scatter.hov .pt{opacity:.25}#scatter.hov .pt.on{opacity:1}#scatter .pt.on .ci{stroke-opacity:1}
 .lgd2{list-style:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 18px;margin:8px 8px 0;font-size:13px}
@@ -530,8 +599,6 @@ _HOME_CSS = """
 .feed .fv{color:var(--soft);margin-left:6px}.feed .when{display:block;font-size:11px;color:var(--faint)}
 @media (max-width:900px){
  .q1{font-size:26px}.boxbar #boxnote{margin-left:0;width:100%}.boxbar select{max-width:100%;min-width:0}.boxbar #gpu{width:100%}
- .picks{grid-template-columns:1fr 1fr}.picks>div:nth-child(2){border-right:0}.picks>div:nth-child(-n+2){border-bottom:1px solid var(--line2)}
- .below{grid-template-columns:1fr}.cmp{width:100%;justify-content:space-between}
 }
 """
 
@@ -540,9 +607,6 @@ const $ = s => document.querySelector(s);
 const fmt = v => v.toFixed(0);
 const kfmt = c => `${Math.round(c / 1024)}k`;
 function sameClass(hw) { const r = DATA.ref; return hw.gpu === r.gpu && Math.abs(hw.rambw - r.rambw) / r.rambw < 0.15 && hw.ram >= r.ram * 0.9; }
-function tile(v, small, pred) { if (v == null) return `<span class="tile">—<small>${small}</small></span>`;   // no reference on this scale: no percent, the rest of the page still draws
-  const c = v >= 85 ? "hi" : v >= 50 ? "mid" : "lo";
-  return `<span class="tile ${c}${pred ? " pred" : ""}">${pred ? "~" : ""}${fmt(v)}<small>${small}</small></span>`; }
 function weighted(b, w) { let s = 0, n = 0; for (const k in w) { s += (b[k] || 0) * w[k]; n += w[k]; } return n ? s / n : 0; }
 function scatter(pts) {   // up = closer to Claude Opus, right = faster on the box picked. Names sit at their points.
   // a phone gets its own proportions (narrower and taller), not the desktop chart shrunk until its names are unreadable
@@ -631,42 +695,61 @@ document.querySelectorAll(".rank th[data-sort]").forEach(th => th.addEventListen
   document.querySelectorAll(".rank th[data-sort]").forEach(t => t.classList.toggle("on", t === th)); render(); }));
 const measured = {};
 document.querySelectorAll("tr[data-rid]").forEach(r => measured[r.dataset.rid] = r.querySelector(".spd").innerHTML);
+function axisOf(pts) {   // the score column's scale: as the chart's, from just under the weakest model at >= 50% to 100%
+  const loc = pts.filter(p => !p.cloud && p.vs != null), main = loc.filter(p => p.vs >= 50);
+  if (!loc.length) return null;
+  const min = Math.max(0, Math.floor((Math.min(...(main.length ? main : loc).map(p => p.vs)) - 6) / 5) * 5);
+  return { min, step: 100 - min > 40 ? 10 : 5, X: v => Math.max(0, Math.min(100, (v - min) / (100 - min) * 100)) };
+}
+function scoreCell(p, ax) {   // a dot at the score, a line over its 95% range; a Claude model: a dashed mark, its score being a reference
+  if (p.vs == null || !ax) return "—";   // no reference model on this scale: no percent
+  const c = p.cloud ? "#8b877b" : (Object.fromEntries(DATA.families)[p.fam] || "#9AA0A6");
+  let g = ""; for (let v = ax.min; v <= 100; v += ax.step) g += `<s style="left:${ax.X(v)}%"></s>`;
+  if (p.cloud) return `<div class="fp"><div class="trk">${g}<b class="rf" style="left:${ax.X(p.vs)}%"></b></div><span class="num">${Math.round(p.vs)}%</span></div>`;
+  const k = p.vs / p.cap, lo = p.ci[0] * k, hi = Math.min(100, p.ci[1] * k);
+  return `<div class="fp" title="95% range ${Math.round(lo)}–${Math.round(hi)}%"><div class="trk">${g}<i style="left:${ax.X(lo)}%;width:${ax.X(hi) - ax.X(lo)}%;background:${c}"></i>` +
+    `<b style="left:${ax.X(p.vs)}%;background:${c}"></b>${p.vs < ax.min ? `<em>◂ ${Math.round(p.vs)}%</em>` : ""}</div><span class="num">${Math.round(p.vs)}%</span></div>`;
+}
 function render() {
   const w = DATA.presets[preset], refW = weighted(DATA.refBlocks, w);
   const pts = DATA.points.map(p => Object.assign({}, p, preset ? { vs: 100 * weighted(p.blocks, w) / refW, cap: weighted(p.blocks, w), ci: [p.ci[0] / p.cap * weighted(p.blocks, w), p.ci[1] / p.cap * weighted(p.blocks, w)] } : {}));
-  let fastest = null;
+  const ax = axisOf(pts);
+  let lab = ""; if (ax) for (let v = ax.min; v <= 100; v += ax.step) lab += `<span style="left:${ax.X(v)}%">${v}</span>`;
+  $(".rank .axis").innerHTML = lab;
   for (const p of pts) {
     const sh = DATA.recipes[p.id], row = document.querySelector(`tr[data-rid="${p.id}"]`);
     if (!row) continue;
-    row.querySelector(".sco").innerHTML = tile(p.vs, p.cap.toFixed(1)).replace("<small>", "%<small>");
+    row.querySelector(".sco").innerHTML = scoreCell(p, ax);
     row.classList.remove("nofit");
     if (p.cloud) continue;   // no box to predict for
     if (sh && hwNow && !sameClass(hwNow)) {
       const f = forBox(sh, hwNow); p.t2 = f.t2; p.td = f.td; p.pred = true;
-      row.querySelector(".spd").innerHTML = f.fits ? tile(f.t2, `~${fmt(f.td)} long`, true) : "—";
-      row.querySelector(".fit").innerHTML = f.fits ? `✓ ${kfmt(f.ctx)} ctx` : `<span class="no">✗ too big</span>`;
+      row.querySelector(".spd").innerHTML = f.fits ? `<b class="pred">~${fmt(f.t2)}</b><small>~${fmt(f.td)} long</small>` : "—";
+      row.querySelector(".fit").innerHTML = f.fits ? `✓ ${kfmt(f.ctx)}` : `<span class="no">✗ too big</span>`;
       if (!f.fits) { row.classList.add("nofit"); p.t2 = null; }
     } else {
       row.querySelector(".spd").innerHTML = measured[p.id];
-      row.querySelector(".fit").innerHTML = sh ? `✓ ${kfmt(sh.ctx)} ctx` : "—";
+      row.querySelector(".fit").innerHTML = sh ? `✓ ${kfmt(sh.ctx)}` : "—";
     }
-    if (p.t2 && (!fastest || p.t2 > fastest.t2)) fastest = p;
   }
-  const tb = document.querySelector(".rank tbody") || document.querySelector(".rank"), refRow = document.querySelector(".rank tr.ref");
-  const key = sortBy === "speed" ? p => p.t2 || 0 : sortBy === "score" ? p => p.vs ?? -1 : p => p.blocks[sortBy] ?? -1;
+  const tb = $(".rank tbody");
+  const key = sortBy === "speed" ? p => p.t2 || 0 : p => p.vs ?? -1;
   const by = (a, b) => sortDir * (key(b) - key(a)) || (b.vs ?? -1) - (a.vs ?? -1);
   const ranked = pts.filter(p => !p.cloud).sort((a, b) => (b.vs ?? -1) - (a.vs ?? -1)).map(p => p.id);
   const byScore = !preset && sortBy === "score" && sortDir === 1;   // group lines only make sense in the score order they were cut in
   let prevG = null;
   pts.slice().sort(by).forEach((p) => { const i = ranked.indexOf(p.id); const row = document.querySelector(`tr[data-rid="${p.id}"]`);
-    if (p.cloud) { tb.insertBefore(row, null); return; }
+    if (p.cloud) { tb.appendChild(row); return; }
     row.querySelector(".rk").textContent = preset ? i + 1 : p.rank[0];
-    row.classList.toggle("gs", byScore && prevG !== null && p.rank[3] !== prevG); prevG = p.rank[3]; tb.insertBefore(row, null); });
-  if (fastest && $("#fastest")) { $("#fastest .pk").textContent = fastest.name || fastest.id; $("#fastest .pk").href = `recipe-${fastest.id}.html`;
-    $("#fastest .pv").textContent = `${fastest.pred ? "~" : ""}${fmt(fastest.t2)} tok/s${fastest.pred ? " predicted" : ""}`; }
+    row.classList.toggle("gs", byScore && prevG !== null && p.rank[3] !== prevG); prevG = p.rank[3];
+    tb.appendChild(row); tb.appendChild(document.querySelector(`tr.prof[data-for="${p.id}"]`)); });
   $("#scatter").innerHTML = scatter(pts);
   hoverScatter(pts);
 }
+document.querySelectorAll(".rank tr.mr").forEach(tr => tr.addEventListener("click", e => {   // a row opens its nine block scores
+  if (e.target.closest("a, label, input")) return;
+  const pr = document.querySelector(`tr.prof[data-for="${tr.dataset.rid}"]`), open = pr.hidden;
+  pr.hidden = !open; tr.classList.toggle("open", open); tr.querySelector(".exp").setAttribute("aria-expanded", String(open)); }));
 function readBox() {
   const g = DATA.gpus.find(x => x[0] === $("#gpu").value);
   ["#ram", "#bw", "#bwn"].forEach(s => $(s).disabled = !g);
@@ -675,7 +758,7 @@ function readBox() {
   hwNow = boxFrom(g, parseInt($("#ram").value), bw);
   ["#bw", "#bwn"].forEach(s => $(s).disabled = !!hwNow.mac);   // a Mac's memory speed comes with the chip
   $("#boxnote").textContent = hwNow.mac ? "Mac: rough, for MLX-class engines (llama.cpp on Metal is often slower) - nothing here is measured on a Mac" :
-    sameClass(hwNow) ? "same class as the reference box: measured speeds" : "speeds predicted for this box (dashed)";
+    sameClass(hwNow) ? "same class as the reference box: measured speeds" : "speeds predicted for this box (~)";
   try { localStorage.setItem("llmbox-box", JSON.stringify({ gpu: $("#gpu").value, ram: $("#ram").value, bw: $("#bw").value, bwn: $("#bwn").value })); } catch (e) {}
   history.replaceState(null, "", `#gpu=${encodeURIComponent(g[0])}&ram=${$("#ram").value}&bw=${bw}`);
   render();
