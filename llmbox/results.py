@@ -40,15 +40,32 @@ def save(host: str, rec: dict) -> str:
     name = f"{rec['created'][:19].replace(':', '')}-{rec['kind']}-{(rec.get('recipe') or {}).get('id', 'x')}.json"
     path = os.path.join(d, name)
     json.dump(rec, open(path, "w"), indent=1)
+    try:   # into the results database right away (readers would take it in on their next look anyway)
+        from . import db
+        db.sync()
+    except Exception:
+        pass
     return path
 
 
-def load_all(host: str | None = None) -> list[dict]:
+def files(host: str | None = None) -> list[tuple[str, dict]]:
+    """(path, record) of every result, per host directory in file-name order: from the results database
+    (llmbox/db.py), or straight from the JSON files with LLMBOX_NO_DB=1."""
+    if not os.environ.get("LLMBOX_NO_DB"):
+        from . import db
+        return db.files(host)
     root = os.path.join(HOME, "results")
     out = []
-    for h in ([host] if host else (os.listdir(root) if os.path.isdir(root) else [])):
+    for h in ([host] if host else sorted(os.listdir(root)) if os.path.isdir(root) else []):
         d = os.path.join(root, h)
         for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
             if f.endswith(".json"):
-                out.append(json.load(open(os.path.join(d, f))))
+                try:
+                    out.append((os.path.join(d, f), json.load(open(os.path.join(d, f)))))
+                except ValueError:
+                    continue
     return out
+
+
+def load_all(host: str | None = None) -> list[dict]:
+    return [rec for _p, rec in files(host)]

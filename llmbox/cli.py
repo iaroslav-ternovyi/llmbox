@@ -129,6 +129,25 @@ def cmd_tune(a: argparse.Namespace) -> None:
         tune.run(a.host, rid)
 
 
+def cmd_db(a: argparse.Namespace) -> None:
+    from . import db
+    if a.action == "sync":
+        print(f"{db.sync(progress=print)} result file(s) taken in -> {db.DB}")
+    elif a.action == "stats":
+        st = db.stats()
+        for k, v in st.items():
+            print(f"  {k:18s} {v}")
+    elif a.action == "sql":   # read-only: the database is derived from the result files and must not drift from them
+        db.sync()
+        import sqlite3
+        c = sqlite3.connect(f"file:{db.DB}?mode=ro", uri=True)
+        cur = c.execute(a.query)
+        cols = [d[0] for d in cur.description or []]
+        print("\t".join(cols))
+        for r in cur.fetchmany(a.limit):
+            print("\t".join("" if x is None else str(x) for x in r))
+
+
 def cmd_watch(a: argparse.Namespace) -> None:
     from . import watch
     if a.list:
@@ -621,6 +640,11 @@ def main(argv: list[str] | None = None) -> None:
     tp.add_argument("--host", default="box")
     tp.add_argument("--plan", action="store_true", help="list the variants only, measure nothing")
     tp.set_defaults(fn=cmd_tune)
+    dp = sub.add_parser("db", help="the results database (~/.llmbox/llmbox.db): sync the result files in, stats, read-only SQL")
+    dp.add_argument("action", choices=["sync", "stats", "sql"])
+    dp.add_argument("query", nargs="?", default="SELECT recipe_id, suite_version, tier, capability FROM runs WHERE kind='suite' ORDER BY created DESC")
+    dp.add_argument("--limit", type=int, default=50)
+    dp.set_defaults(fn=cmd_db)
     wp = sub.add_parser("watch", help="look for new models, new files of measured models, runtime releases and watched PRs (daily job)")
     wp.add_argument("--list", type=int, metavar="N", help="print the newest N events instead of looking")
     wp.set_defaults(fn=cmd_watch)

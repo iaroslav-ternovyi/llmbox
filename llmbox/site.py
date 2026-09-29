@@ -671,14 +671,8 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
     import json as _json
     out, ref, runs = {}, None, {}
     for h in (host, "cloud"):
-        d = os.path.join(HOME, "results", h)
-        for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-            if not f.endswith(".json"):
-                continue
-            try:
-                rec = _json.load(open(os.path.join(d, f)))
-            except ValueError:
-                continue
+        for path, rec in report.results.files(h):
+            f = os.path.basename(path)
             su = rec.get("suite") or {}
             from . import report as _report, suite as _suite
             cur = suite_version == _suite.VERSION and bool(_report.current_pool())
@@ -687,7 +681,7 @@ def load_records(host: str, suite_version: str, tier: str) -> dict:
                 continue   # the current suite: any run of a model whose answers still cover every block (report.current_pool)
             from . import bench
             rec = bench.rescore(rec)   # current suite weights: the task scores are the run's, the weighting is today's
-            rec["_path"] = os.path.join(d, f)
+            rec["_path"] = path
             rid = (rec.get("recipe") or {}).get("id")
             runs.setdefault((h, rid), []).append(rec)
             if h == "cloud":
@@ -706,13 +700,8 @@ def optimize_records(host: str) -> dict:
     """{recipe id: newest "optimize" record} - stock llama.cpp vs the tuned recipe, measured back to back (llmbox optimize)."""
     import json as _json
     out = {}
-    d = os.path.join(HOME, "results", host)
-    for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-        if f.endswith(".json") and "-optimize-" in f:
-            try:
-                rec = _json.load(open(os.path.join(d, f)))
-            except ValueError:
-                continue
+    for path, rec in report.results.files(host):
+        if "-optimize-" in os.path.basename(path):
             s = rec.get("summary") or {}
             if (s.get("stock") or {}).get("decode") and (s.get("llmbox") or {}).get("decode"):
                 out[(rec.get("recipe") or {}).get("id")] = rec   # sorted by name = by time: the newest wins

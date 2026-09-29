@@ -24,6 +24,7 @@ import os
 import statistics
 from dataclasses import dataclass, field
 
+from . import results
 from .hosts import HOME
 
 GRID = [(-4.0 + 0.02 * i) for i in range(501)]   # theta from -4 to 6
@@ -60,11 +61,7 @@ def responses(content_hash: str | list | None = None, hosts_: tuple = ("box", "c
     hashes = set().union(*(equivalent(h) for h in hashes)) if hashes else hashes
     out = []
     for h in hosts_:
-        for f in sorted(glob.glob(os.path.join(HOME, "results", h, "*.json"))):
-            try:
-                r = json.load(open(f))
-            except ValueError:
-                continue
+        for f, r in results.files(h):
             su = r.get("suite") or {}
             if r.get("kind") != "suite" or su.get("blocks") or su.get("tier") not in ("quick", "adaptive", "medium", "deep") \
                     or (hashes and su.get("content_hash") not in hashes):
@@ -110,11 +107,7 @@ def pool(hosts_: tuple = ("box", "cloud")) -> dict:
     cur = suite.content_hash()
     recs = []
     for h in hosts_:
-        for f in sorted(glob.glob(os.path.join(HOME, "results", h, "*.json"))):
-            try:
-                r = json.load(open(f))
-            except ValueError:
-                continue
+        for f, r in results.files(h):
             su = r.get("suite") or {}
             if r.get("kind") != "suite" or su.get("tier") not in ("quick", "adaptive", "medium", "deep") or not su.get("content_hash"):
                 continue
