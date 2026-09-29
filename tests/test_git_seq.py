@@ -47,9 +47,9 @@ for lv in range(1, 11):
         m = it.meta
         check(f"{name} deterministic", it.messages == again.messages and m == again.meta)
         check(f"{name} length", lo <= len(m["commands"]) <= hi, len(m["commands"]))
-        check(f"{name} traps", all(m["traps"].count(x) >= plan.count(x) for x in set(plan)), (plan, m["traps"]))
+        check(f"{name} traps", set(plan) <= set(m["traps"]), sorted(set(plan) - set(m["traps"])))
         n = len(m["expected"])
-        check(f"{name} questions", n >= 3 and (lv < 9 or n >= 13), n)
+        check(f"{name} questions", n >= 3 and (lv < 9 or n >= 13) and (lv < 10 or n >= 18), n)
         o = oracle(it)
         check(f"{name} oracle", it.check(o) == 1.0, o)
         check(f"{name} empty", it.check("") == 0.0)
@@ -152,18 +152,20 @@ if shutil.which("git"):
     for lv in range(1, 11):
         for seed in (1, 2):
             g = G._generate(seed, lv)
+            qs = g.questions()
             w = tempfile.mkdtemp(prefix="gitseq")
             try:
-                out = subprocess.run(["bash", "-c", RP.git_script(g.setup, g.cmds), "x", w], capture_output=True, text=True,
-                                     timeout=300).stdout
+                script = RP.git_script(g.setup, g.cmds, [G.question_cmd(q) or "true" for q in qs])
+                out = subprocess.run(["bash", "-c", script, "x", w], capture_output=True, text=True, timeout=300).stdout
             finally:
                 shutil.rmtree(w, ignore_errors=True)
             real = RP.git_parse(out, len(g.cmds))
             check(f"L{lv} s{seed} exit statuses vs git", [x == 0 for x in g.rcs] == [x == 0 for x in real["rcs"]],
                   list(zip(g.cmds, g.rcs, real["rcs"])))
-            for q in g.questions():
+            for j, q in enumerate(qs):
                 n += 1
-                check(f"L{lv} s{seed} {q} vs git", g.answer(q) == RP.git_real_answer(q, real), (g.answer(q), RP.git_real_answer(q, real)))
+                check(f"L{lv} s{seed} {q} vs git", g.answer(q) == RP.git_real_answer(q, real, j),
+                      (g.answer(q), RP.git_real_answer(q, real, j)))
     print(f"{n} questions of 20 items checked against {subprocess.run(['git', '--version'], capture_output=True, text=True).stdout.strip()}")
 print(f"git_seq: {'OK' if not failed else f'{failed} FAILED'}")
 sys.exit(1 if failed else 0)

@@ -546,7 +546,11 @@ _LEVEL = {
     7: ((30, 40), 5, 2, _L7),
     8: ((40, 50), 5, 2, _L8),
     9: ((65, 80), 5, 2, _L9),
-    10: ((86, 100), 6, 3, _L10),
+    # level 10 (v0.11-dev3: Claude Opus answered 86-100 commands over 4 branches at 1.0): 150-175 commands over 5
+    # branches, most traps twice, revisions two and three commits back, 20+ questions
+    10: ((150, 185), 6, 4, _L10 + ["detached", "cherry_pick", "revert", "stash_pop", "merge_true", "merge_true",
+                                    "checkout_refused", "amend", "reset_soft", "reset_hard", "stash_untracked", "rm_cached",
+                                    "merge_noff", "restore", "reset_mixed", "switch_carry", "commit_a", "add_deleted"]),
 }
 # commands a trap emits on average with its setup (measured): filler goes in only while the planned traps still fit
 _COSTS = {"merge_refused": 6.5, "stash_pop": 6.5, "detached": 5.1, "merge_true": 4.3, "cherry_pick": 4.0,
@@ -574,7 +578,7 @@ class _Gen:
         (lo, hi), self.n_files, n_br, self.plan = _LEVEL[level]
         self.target = r.randint(lo, hi)
         self.hi = hi
-        self.pool = r.sample(_BRANCHES, n_br + {9: 1, 10: 0}.get(level, 2 if level >= 4 else 0))   # new names + spares
+        self.pool = r.sample(_BRANCHES, n_br + {9: 1, 10: 2}.get(level, 2 if level >= 4 else 0))   # new names + spares
         self.owned: dict[str, set] = {"main": set()}     # files a branch mostly works on (keeps merges clean)
         self.deleted: list[str] = []
         self.done: list[str] = []                        # traps that happened, in order
@@ -689,6 +693,10 @@ class _Gen:
         self.settle()
         if name is None:
             o = [b for b in self.others() if b != "main" and self.peek(f"git switch {b}") == 0]
+            h = self.repo.head()
+            behind = [b for b in o if self.repo.branches[b] in self.repo.ancestors(h)]
+            if self.level >= 10 and behind:              # then it ends up ahead of HEAD (a merge fast-forwards)
+                o = behind
             if not o:
                 return None
             name = self.r.choice(o)
@@ -741,9 +749,19 @@ class _Gen:
             return False
         return self.do(f"git reset {self.r.choice(['', '--mixed '])}HEAD~1", want=True)
 
+    def back(self) -> str:
+        """HEAD~1; level 10 also goes two commits back (first parents: the exact chain after amends, resets, merges)."""
+        if self.level >= 10 and self.repo.resolve("HEAD~2") is not None and self.r.random() < 0.5:
+            return "HEAD~2"
+        return "HEAD~1"
+
+    def deep(self, *x) -> tuple:
+        """Extra revisions only level 10 uses (levels 1-9 draw exactly as before)."""
+        return x if self.level >= 10 else ()
+
     def m_reset_mixed(self) -> bool:
         if self.r.random() < 0.5 and self.repo.commits[self.repo.head()].parents:
-            return self.do(f"git reset {self.r.choice(['', '--mixed '])}HEAD~1", want=True)
+            return self.do(f"git reset {self.r.choice(['', '--mixed '])}{self.back()}", want=True)
         p = self.edit()
         if p:
             self.do(f"git add {p}")
@@ -769,7 +787,7 @@ class _Gen:
             return self.do(self.r.choice(["git reset --hard", "git reset --hard HEAD"]), want=True)
         if v < 0.75 and self.repo.commits[self.repo.head()].parents:
             self.edit()
-            return self.do("git reset --hard HEAD~1", want=True)
+            return self.do(f"git reset --hard {self.back()}", want=True)
         o = self.others()
         if o:
             return self.do(f"git reset --hard {self.r.choice(o)}", want=True)
@@ -974,10 +992,10 @@ class _Gen:
     def pick_cands(self, revert: bool = False) -> list[str]:
         h = self.repo.head()
         if revert:
-            return [x for x in ("HEAD", "HEAD~1", "HEAD~2") if self.peek(f"git revert --no-edit {x}") == 0]
+            return [x for x in ("HEAD", "HEAD~1", "HEAD~2", *self.deep("HEAD~3")) if self.peek(f"git revert --no-edit {x}") == 0]
         out = []
         for b in self.others():
-            for rev in (b, f"{b}~1"):
+            for rev in (b, f"{b}~1", *self.deep(f"{b}~2")):
                 c = self.repo.resolve(rev)
                 if c is not None and c not in self.repo.ancestors(h) and self.peek(f"git cherry-pick {rev}") == 0:
                     out.append(rev)
@@ -1016,7 +1034,7 @@ class _Gen:
         """Check out an older commit, commit on the detached HEAD, then leave it: the commit stays only if a branch
         was made for it."""
         self.settle()
-        revs = [x for x in ["HEAD~1", "HEAD~2"] + [f"{b}~1" for b in self.others()] + self.others()[:0]
+        revs = [x for x in ["HEAD~1", "HEAD~2", *self.deep("HEAD~3")] + [f"{b}~{n}" for b in self.others() for n in (1, *self.deep(2))]
                 if self.repo.resolve(x) is not None and self.peek(f"git checkout {x}") == 0]
         if not revs:
             return False
@@ -1161,7 +1179,7 @@ class _Gen:
         self.owned["main"] = set(files[: len(files) // 2])
         if self.level >= 9:                              # the branches first: 3-4 lines of work to merge and pick from
             spare = [f for f in files if f not in self.owned["main"]]
-            for i in range(2 if self.level == 9 else 3):
+            for i in range(2 if self.level == 9 else 4):
                 self.owned[self.pool[i]] = {spare[i % len(spare)]}
                 self.make_side(commits=r.choice([1, 2]), back=True)
         plan = list(self.plan)
@@ -1191,10 +1209,14 @@ class _Gen:
         R, r, L = self.repo, self.r, self.level
         qs: list[tuple] = [("status", None)]
         branches = sorted(R.branches)
-        nlog = {1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 2, 8: 3, 9: 4, 10: 5}[L]
+        nlog = {1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 2, 8: 3, 9: 4, 10: 6}[L]
         order = ([R.branch] if R.branch else []) + [b for b in r.sample(branches, len(branches)) if b != R.branch]
         qs += [("log", b) for b in order[:nlog]]
-        qs += self.content_questions({1: 1, 2: 1, 3: 2, 4: 2, 5: 2, 6: 2, 7: 3, 8: 3, 9: 4, 10: 4}[L])
+        if L >= 10:                                      # first parents two commits back, through merges and amends
+            rel = [f"{b}~2" for b in branches if R.resolve(f"{b}~2") is not None]
+            if rel:
+                qs.append(("log", r.choice(rel)))
+        qs += self.content_questions({1: 1, 2: 1, 3: 2, 4: 2, 5: 2, 6: 2, 7: 3, 8: 3, 9: 4, 10: 6}[L])
         if L >= 3:
             qs.append(("failed", None))
         if any(c.startswith("git stash") for c in self.cmds):
@@ -1206,6 +1228,10 @@ class _Gen:
         if L >= 9:
             merged = [b for b in branches if any(len(R.commits[c].parents) > 1 for c in R.ancestors(R.branches[b]))]
             qs.append(("count", r.choice(merged or branches)))
+        if L >= 10:
+            rel = [f"{b}~1" for b in branches if R.resolve(f"{b}~1") is not None and ("count", b) not in qs]
+            if rel:
+                qs.append(("count", r.choice(rel)))
         if L >= 9 or (L >= 6 and self.deleted):
             qs.append(("branches", None))
         return qs
@@ -1217,7 +1243,7 @@ class _Gen:
         H, I, W = R.head_tree(), R.index, R.wt
         trees = {b: self.tree(b) for b in sorted(R.branches)}
         paths = sorted(set(H) | set(I) | set(W) | {p for t in trees.values() for p in t})
-        cands: dict[str, list] = {"cat": [], "index": [], "show": []}
+        cands: dict[str, list] = {"cat": [], "index": [], "show": [], "rel": []}
         for p in paths:
             w, i, h = W.get(p), I.get(p), H.get(p)
             cands["cat"].append((4 if w != i else 1, ("cat", p)))
@@ -1225,7 +1251,11 @@ class _Gen:
             for b, t in trees.items():
                 diff = t.get(p) != h or any(o.get(p) != t.get(p) for o in trees.values())
                 cands["show"].append((3 if diff else 0.3, ("show", f"{b}:{p}")))
-        kinds = (["cat", "index", "show"] * 2)[:k]
+                for n in (1, 2) if self.level >= 10 else ():
+                    c = R.resolve(f"{b}~{n}")
+                    if c is not None:
+                        cands["rel"].append((3 if R.commits[c].tree.get(p) != t.get(p) else 0.5, ("show", f"{b}~{n}:{p}")))
+        kinds = ["cat", "index", "show", "rel", "rel", "index"] if self.level >= 10 else (["cat", "index", "show"] * 2)[:k]
         r.shuffle(kinds)
         out = []
         for kd in kinds:
@@ -1241,14 +1271,14 @@ class _Gen:
         if kind == "status":
             return R.status()
         if kind == "log":
-            return R.log(R.branches[arg])
+            return R.log(R.resolve(arg))
         if kind == "cat":
             return _lines(R.wt.get(arg))
         if kind == "index":
             return _lines(R.index.get(arg))
         if kind == "show":
-            b, p = arg.split(":")
-            return _lines(self.tree(b).get(p))
+            rev, p = arg.split(":")
+            return _lines(R.commits[R.resolve(rev)].tree.get(p))
         if kind == "failed":
             return [i for i, rc in enumerate(self.rcs, 1) if rc != 0]
         if kind == "stash":
@@ -1258,7 +1288,7 @@ class _Gen:
         if kind == "head":
             return R.commits[R.head()].subject
         if kind == "count":
-            return len(R.ancestors(R.branches[arg]))
+            return len(R.ancestors(R.resolve(arg)))
         if kind == "branches":
             return sorted(R.branches)
         raise ValueError(kind)
@@ -1422,6 +1452,16 @@ def _grader(q: tuple, ans):
     raise ValueError(kind)
 
 
+def question_cmd(q: tuple) -> str | None:
+    """The shell command a question asks about (None: the failed commands, which are the exit statuses)."""
+    kind, arg = q
+    return {"status": "git status --porcelain --untracked-files=all --no-renames", "log": f"git log --format=%s {arg}",
+            "cat": f"cat {arg}", "index": f"git show :{arg}", "show": f"git show {arg}",
+            "stash": "git stash list --format=%gs", "current": "git branch --show-current", "head": "git log -1 --format=%s",
+            "count": f"git rev-list --count {arg}", "branches": "git for-each-ref --format='%(refname:short)' refs/heads",
+            "failed": None}[kind]
+
+
 def _question(q: tuple) -> str:
     kind, arg = q
     return {"status": "What does `git status --porcelain --untracked-files=all --no-renames` print?",
@@ -1447,7 +1487,7 @@ def _generate(seed: int, level: int, tries: int = 60) -> _Gen:
     for t in range(tries):
         g = _Gen(rng(BLOCK, f"git{level}" + (f"/{t}" if t else ""), seed), level)
         g.build()
-        missing = sum(max(0, plan.count(m) - g.done.count(m)) for m in set(plan))
+        missing = sum(1 for m in set(plan) if m not in g.done)   # every trap at least once (level 10 plans most twice)
         n = len(g.cmds)
         key = (missing, max(0, lo - n, n - hi))
         if key == (0, 0):

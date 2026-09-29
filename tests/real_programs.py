@@ -200,9 +200,10 @@ def shell(n):
 GIT_T0 = 1767225600   # 2026-01-01; every command one minute after the previous one (git log order = creation order)
 
 
-def git_script(setup, cmds):
+def git_script(setup, cmds, probes=()):
     """bash script (argument: an empty work dir) that replays an item's setup and numbered commands on real git with a
-    clean environment and fixed identities and dates, then dumps everything the questions can ask."""
+    clean environment and fixed identities and dates, runs the commands the questions ask about (probes), then dumps
+    the whole state."""
     sh = ['W="$1"', 'mkdir -p "$W/home" "$W/repo" && cd "$W/repo" || exit 3',
           'export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null HOME="$W/home" XDG_CONFIG_HOME="$W/home" LC_ALL=C LANG=C '
           'GIT_AUTHOR_NAME=dev GIT_AUTHOR_EMAIL=dev@example.com GIT_COMMITTER_NAME=dev GIT_COMMITTER_EMAIL=dev@example.com '
@@ -216,6 +217,8 @@ def git_script(setup, cmds):
         t += 60
         sh.append(f"export GIT_AUTHOR_DATE='{t} +0000' GIT_COMMITTER_DATE='{t} +0000'; {{ {c}; }} >/dev/null 2>&1 </dev/null; "
                   f"echo \"@@rc {i} $?\"")
+    for k, c in enumerate(probes):
+        sh.append(f"echo '@@q {k}'; {c} 2>/dev/null; echo \"@@qrc {k} $?\"")
     sh += ["echo @@version; git --version",
            "echo @@status; git status --porcelain --untracked-files=all --no-renames",
            "echo @@branch; git branch --show-current",
@@ -232,12 +235,16 @@ def git_script(setup, cmds):
 
 def git_parse(out, n_cmds):
     st = {"rcs": {}, "status": [], "branch": [], "head": [], "stash": [], "version": [], "log": {}, "count": {}, "wt": {},
-          "idx": {}, "tree": {}}
+          "idx": {}, "tree": {}, "q": {}, "qrc": {}}
     sec = None
     for line in out.splitlines():
         if line.startswith("@@rc "):
             _, i, rc = line.split()
             st["rcs"][int(i)] = int(rc)
+        elif line.startswith("@@qrc "):
+            _, i, rc = line.split()
+            st["qrc"][int(i)] = int(rc)
+            sec = None
         elif line.startswith("@@"):
             k, _, arg = line[2:].partition(" ")
             if arg:
@@ -250,34 +257,27 @@ def git_parse(out, n_cmds):
     return {"rcs": [st["rcs"].get(i) for i in range(1, n_cmds + 1)], "status": st["status"],
             "branch": (st["branch"] or [""])[0] or None, "head": (st["head"] or [None])[0], "stash": st["stash"],
             "logs": st["log"], "counts": {b: int(v[0]) for b, v in st["count"].items()}, "wt": st["wt"], "index": st["idx"],
-            "trees": st["tree"], "version": " ".join(st["version"])}
+            "trees": st["tree"], "version": " ".join(st["version"]),
+            "q": {int(k): v for k, v in st["q"].items()}, "qrc": st["qrc"]}
 
 
-def git_real_answer(q, real):
-    kind, arg = q
-    if kind == "status":
-        return real["status"]
-    if kind == "log":
-        return real["logs"].get(arg)
-    if kind == "cat":
-        return real["wt"].get(arg)
-    if kind == "index":
-        return real["index"].get(arg)
-    if kind == "show":
-        return real["trees"].get(arg)
+def git_real_answer(q, real, k):
+    """What git printed for question k (its probe): lines, None when the command failed (the file is not there)."""
+    kind = q[0]
     if kind == "failed":
         return [i for i, rc in enumerate(real["rcs"], 1) if rc != 0]
-    if kind == "stash":
-        return real["stash"]
+    out, rc = real["q"].get(k), real["qrc"].get(k)
+    if out is None or rc is None:
+        return "NO PROBE OUTPUT"
+    if kind in ("log", "cat", "index", "show"):
+        return out if rc == 0 else None
     if kind == "current":
-        return real["branch"]
+        return out[0] if out and out[0] else None
     if kind == "head":
-        return real["head"]
+        return out[0] if out else None
     if kind == "count":
-        return real["counts"].get(arg)
-    if kind == "branches":
-        return sorted(real["logs"])
-    raise ValueError(kind)
+        return int(out[0]) if rc == 0 and out else None
+    return out                                           # status, stash, branches
 
 
 def git(n, image=None):
@@ -296,8 +296,9 @@ def git(n, image=None):
     os.makedirs(os.path.join(d, "s"))
     os.makedirs(os.path.join(d, "o"))
     for k, (lv, s) in enumerate(specs):
-        g, _qs = gens[(lv, s)]
-        open(os.path.join(d, "s", f"{k}.sh"), "w").write(git_script(g.setup, g.cmds))
+        g, qs = gens[(lv, s)]
+        probes = [TG.question_cmd(q) or "true" for q in qs]
+        open(os.path.join(d, "s", f"{k}.sh"), "w").write(git_script(g.setup, g.cmds, probes))
     if image:
         run = (f"cd /w && ls s | sed 's/.sh$//' | xargs -P 8 -I{{}} sh -c 'bash s/{{}}.sh /tmp/r{{}} > o/{{}}.out 2>&1; rm -rf /tmp/r{{}}'")
         docker(["-v", f"{d}:/w", image, "sh", "-c", "(command -v git >/dev/null || (apt-get update -qq >/dev/null 2>&1 && "
@@ -325,9 +326,9 @@ def git(n, image=None):
                 row["bad_rc"] += 1
                 problems.append(f"exit status of {i} `{g.cmds[i - 1]}`: ours {a}, git {b}")
         lines = lambda v: None if v is None else v.splitlines()   # noqa: E731
-        for q in qs:
+        for j, q in enumerate(qs):
             row["questions"] += 1
-            ours, theirs = g.answer(q), git_real_answer(q, real)
+            ours, theirs = g.answer(q), git_real_answer(q, real, j)
             if ours != theirs:
                 row["bad_q"] += 1
                 problems.append(f"question {q}: ours {ours!r}, git {theirs!r}")
