@@ -405,6 +405,9 @@ HARD = ("expr", "lru", "csv", "rooms")
 
 def make(kind: str):
     def gen(seed: int, level: int = 3) -> Item:
+        if level >= 9 and kind in HARD:   # levels 9-10: code_l9.py
+            from . import code_l9
+            return code_l9.gen(kind, seed, level)
         if level >= 7 and kind in HARD:
             return _gen7(kind, seed, level)
         r = rng(BLOCK, f"{kind}{level}", seed)
@@ -491,6 +494,9 @@ _CRON_CASES = [
 
 def cron(seed: int, level: int = 6) -> Item:
     """Expert: next run times of a 5-field cron schedule in an IANA time zone, across DST changes. Credit per case."""
+    if level >= 9:   # levels 9-10: code_l9.py
+        from . import code_l9
+        return code_l9.gen("cron", seed, level)
     if level >= 7:
         return _cron7(seed, level)
     r = rng(BLOCK, f"cron{level}", seed)
@@ -524,7 +530,7 @@ KINDS["cron"] = cron
 # branches to _gen7 with its own random stream. Each spec is a list of rules that interact, and the hidden tests aim at
 # those rules one by one, so the share passed grades how many of them a solution gets right. The reference functions
 # below compute the hidden tests and are the oracle's reply (validate); _JS7 are their JavaScript ports.
-MAX_LEVEL = 8
+MAX_LEVEL = 10   # 9-10: code_l9.py
 
 
 def _ref7_expr(src: str, env: dict, level: int):
@@ -1504,6 +1510,9 @@ def oracle(it: Item) -> str | None:
     p = it.meta.get("params")
     if p is None:
         return None
+    if p.get("level", 0) >= 9:
+        from . import code_l9
+        return code_l9.oracle(it)
     if it.kind == "cron":
         return f"```python\n{inspect.getsource(_ref_cron7)}\n\nnext_runs = _ref_cron7\n```"
     if it.kind not in HARD:

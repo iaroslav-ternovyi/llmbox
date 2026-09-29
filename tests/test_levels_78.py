@@ -20,7 +20,7 @@ def check(name, ok, detail=""):
         print(f"FAIL {name}  {detail}")
 
 
-check("MAX_LEVEL", R.MAX_LEVEL == 8 and C.MAX_LEVEL == 8)
+check("MAX_LEVEL", R.MAX_LEVEL >= 8 and C.MAX_LEVEL >= 8)
 
 # reasoning: several numbered results per item, credit per result
 for kind, gen in R.KINDS.items():

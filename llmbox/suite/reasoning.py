@@ -44,6 +44,9 @@ def _str_check(expected: str):
 
 def arith(seed: int, level: int = 3) -> Item:
     """Order pricing with interacting rules; level adds items and rules."""
+    if level >= 9:   # levels 9-10: reasoning_l9.py
+        from . import reasoning_l9
+        return reasoning_l9.arith(seed, level)
     if level >= 7:
         return _arith_hard(seed, level)
     r = rng(BLOCK, f"arith{level}", seed)
@@ -103,6 +106,9 @@ def arith(seed: int, level: int = 3) -> Item:
 
 
 def dates(seed: int, level: int = 3) -> Item:
+    if level >= 9:   # levels 9-10: reasoning_l9.py
+        from . import reasoning_l9
+        return reasoning_l9.dates(seed, level)
     if level >= 7:
         return _dates_hard(seed, level)
     r = rng(BLOCK, f"dates{level}", seed)
@@ -136,6 +142,9 @@ def dates(seed: int, level: int = 3) -> Item:
 
 def logic(seed: int, level: int = 3) -> Item:
     """N people in a row of houses, each with a drink and a city; indirect + positional clues until unique."""
+    if level >= 9:   # levels 9-10: reasoning_l9.py
+        from . import reasoning_l9
+        return reasoning_l9.logic(seed, level)
     if level >= 7:
         return _logic_hard(seed, level)
     r = rng(BLOCK, f"logic{level}", seed)
@@ -228,6 +237,9 @@ def logic(seed: int, level: int = 3) -> Item:
 
 
 def code_trace(seed: int, level: int = 3) -> Item:
+    if level >= 9:   # levels 9-10: reasoning_l9.py
+        from . import reasoning_l9
+        return reasoning_l9.code_trace(seed, level)
     if level >= 7:
         return _code_trace_hard(seed, level)
     r = rng(BLOCK, f"code_trace{level}", seed)
@@ -269,6 +281,9 @@ def code_trace(seed: int, level: int = 3) -> Item:
 
 def table(seed: int, level: int = 3) -> Item:
     """Two tables (orders + customers); filter, join, group, pick; level grows rows and conditions."""
+    if level >= 9:   # levels 9-10: reasoning_l9.py
+        from . import reasoning_l9
+        return reasoning_l9.table(seed, level)
     if level >= 7:
         return _table_hard(seed, level)
     r = rng(BLOCK, f"table{level}", seed)
@@ -316,6 +331,9 @@ def schedule(seed: int, level: int = 3) -> Item:
     The minimum makespan needs real search - a greedy plan is usually a day or two late. Verified exactly: every optimal
     schedule is reproduced by placing tasks in order of their optimal start times at the earliest feasible moment, so a
     search over precedence-consistent orders with that placement is exact."""
+    if level >= 9:   # levels 9-10: reasoning_l9.py
+        from . import reasoning_l9
+        return reasoning_l9.schedule(seed, level)
     if level >= 7:
         return _schedule_hard(seed, level)
     r = rng(BLOCK, f"schedule{level}", seed)
@@ -369,6 +387,9 @@ def schedule(seed: int, level: int = 3) -> Item:
 def budget(seed: int, level: int = 3) -> Item:
     """Portfolio choice: maximize value under a budget (and a people cap from level 4) with requires / excludes /
     at-least-one constraints. Verified by enumerating all subsets."""
+    if level >= 9:   # levels 9-10: reasoning_l9.py
+        from . import reasoning_l9
+        return reasoning_l9.budget(seed, level)
     if level >= 7:
         return _budget_hard(seed, level)
     r = rng(BLOCK, f"budget{level}", seed)
@@ -410,7 +431,7 @@ def budget(seed: int, level: int = 3) -> Item:
 # Levels 1-6 stay exactly as they were (answers to them are pooled across suite versions): every kind branches to its
 # own generator below at level >= 7, with its own random stream. Harder through more interacting rules, deeper state
 # and several graded results per item (numbered answers, credit per result), not through longer answers.
-MAX_LEVEL = 8
+MAX_LEVEL = 10   # 9-10: reasoning_l9.py
 
 
 def _cents(x):
