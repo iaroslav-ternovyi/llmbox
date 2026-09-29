@@ -32,9 +32,10 @@ def _cleanup(it: Item) -> None:
 
 
 def _call(w, name: str, a: dict):
+    """One tool call as a careful agent makes it: a 429 is retried - unless it says the write went through (levels 9-10)."""
     for _ in range(20):
         res = w.call(name, a)
-        if not (isinstance(res, dict) and "429" in str(res.get("error", ""))):
+        if not (isinstance(res, dict) and "429" in str(res.get("error", ""))) or res.get("applied"):
             return res
     return res
 
@@ -53,6 +54,12 @@ def _tools_oracle(it: Item) -> str | None:
     user = next(m["content"] for m in it.messages if m["role"] == "user")
     e = it.meta.get("expected")
     k = it.kind
+    if it.meta.get("level", 0) >= 9 and isinstance(e, dict) and "actions" in e:
+        # levels 9-10 (v0.12): the generator lists the actions a perfect agent performs; replay them exactly once each
+        # through the world's own tools (rate limits and 429s that went through included) and give its reply
+        for name, args in e["actions"]:
+            _call(w, name, args)
+        return e.get("reply") or "done"
     if k == "total":
         return f"ANSWER: {e}"
     if k == "reminders":
