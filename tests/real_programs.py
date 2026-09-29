@@ -194,9 +194,170 @@ def shell(n):
     return report("knowledge.shell vs bash 5 / GNU", by)
 
 
+GIT_T0 = 1767225600   # 2026-01-01; every command one minute after the previous one (git log order = creation order)
+
+
+def git_script(setup, cmds):
+    """bash script (argument: an empty work dir) that replays an item's setup and numbered commands on real git with a
+    clean environment and fixed identities and dates, then dumps everything the questions can ask."""
+    sh = ['W="$1"', 'mkdir -p "$W/home" "$W/repo" && cd "$W/repo" || exit 3',
+          'export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null HOME="$W/home" XDG_CONFIG_HOME="$W/home" LC_ALL=C LANG=C '
+          'GIT_AUTHOR_NAME=dev GIT_AUTHOR_EMAIL=dev@example.com GIT_COMMITTER_NAME=dev GIT_COMMITTER_EMAIL=dev@example.com '
+          'GIT_EDITOR=true GIT_MERGE_AUTOEDIT=no GIT_PAGER=cat PAGER=cat GIT_TERMINAL_PROMPT=0']
+    t = GIT_T0
+    for c in setup:
+        t += 60
+        c = "git -c init.defaultBranch=main init -q ." if c == "git init" else c
+        sh.append(f"export GIT_AUTHOR_DATE='{t} +0000' GIT_COMMITTER_DATE='{t} +0000'; {{ {c}; }} >/dev/null 2>&1 || echo @@setupfail")
+    for i, c in enumerate(cmds, 1):
+        t += 60
+        sh.append(f"export GIT_AUTHOR_DATE='{t} +0000' GIT_COMMITTER_DATE='{t} +0000'; {{ {c}; }} >/dev/null 2>&1 </dev/null; "
+                  f"echo \"@@rc {i} $?\"")
+    sh += ["echo @@version; git --version",
+           "echo @@status; git status --porcelain --untracked-files=all --no-renames",
+           "echo @@branch; git branch --show-current",
+           "echo @@head; git log -1 --format=%s",
+           "echo @@stash; git stash list --format=%gs",
+           "for b in $(git for-each-ref --format='%(refname:short)' refs/heads/); do echo \"@@log $b\"; git log --format=%s \"$b\"; "
+           "echo \"@@count $b\"; git rev-list --count \"$b\"; done",
+           "for f in *; do [ -f \"$f\" ] && { echo \"@@wt $f\"; cat \"$f\"; }; done",
+           "for f in $(git ls-files); do echo \"@@idx $f\"; git show \":$f\"; done",
+           "for b in $(git for-each-ref --format='%(refname:short)' refs/heads/); do for f in $(git ls-tree --name-only \"$b\"); do "
+           "echo \"@@tree $b:$f\"; git show \"$b:$f\"; done; done"]
+    return "\n".join(sh) + "\n"
+
+
+def git_parse(out, n_cmds):
+    st = {"rcs": {}, "status": [], "branch": [], "head": [], "stash": [], "version": [], "log": {}, "count": {}, "wt": {},
+          "idx": {}, "tree": {}}
+    sec = None
+    for line in out.splitlines():
+        if line.startswith("@@rc "):
+            _, i, rc = line.split()
+            st["rcs"][int(i)] = int(rc)
+        elif line.startswith("@@"):
+            k, _, arg = line[2:].partition(" ")
+            if arg:
+                st[k][arg] = []
+                sec = st[k][arg]
+            else:
+                sec = st[k]
+        elif sec is not None:
+            sec.append(line)
+    return {"rcs": [st["rcs"].get(i) for i in range(1, n_cmds + 1)], "status": st["status"],
+            "branch": (st["branch"] or [""])[0] or None, "head": (st["head"] or [None])[0], "stash": st["stash"],
+            "logs": st["log"], "counts": {b: int(v[0]) for b, v in st["count"].items()}, "wt": st["wt"], "index": st["idx"],
+            "trees": st["tree"], "version": " ".join(st["version"])}
+
+
+def git_real_answer(q, real):
+    kind, arg = q
+    if kind == "status":
+        return real["status"]
+    if kind == "log":
+        return real["logs"].get(arg)
+    if kind == "cat":
+        return real["wt"].get(arg)
+    if kind == "index":
+        return real["index"].get(arg)
+    if kind == "show":
+        return real["trees"].get(arg)
+    if kind == "failed":
+        return [i for i, rc in enumerate(real["rcs"], 1) if rc != 0]
+    if kind == "stash":
+        return real["stash"]
+    if kind == "current":
+        return real["branch"]
+    if kind == "head":
+        return real["head"]
+    if kind == "count":
+        return real["counts"].get(arg)
+    if kind == "branches":
+        return sorted(real["logs"])
+    raise ValueError(kind)
+
+
+def git(n, image=None):
+    """techhelp.git_seq: every item of levels 1-10 x n seeds replayed on real git (the local one, or with --image in a
+    Docker container, e.g. debian:bullseye for git 2.30): each command's exit status (success or failure), every
+    question's answer, and the whole final state (status, HEAD, every branch's log and files, index, working tree,
+    stash) compared with the emulator."""
+    from concurrent.futures import ThreadPoolExecutor
+    from llmbox.suite import techhelp_git as TG
+    specs = [(lv, s) for lv in range(1, 11) for s in range(1, n + 1)]
+    gens = {}
+    for lv, s in specs:
+        g = TG._generate(s, lv)
+        gens[(lv, s)] = (g, g.questions())
+    d = tempfile.mkdtemp(prefix="gitseq")
+    os.makedirs(os.path.join(d, "s"))
+    os.makedirs(os.path.join(d, "o"))
+    for k, (lv, s) in enumerate(specs):
+        g, _qs = gens[(lv, s)]
+        open(os.path.join(d, "s", f"{k}.sh"), "w").write(git_script(g.setup, g.cmds))
+    if image:
+        run = (f"cd /w && ls s | sed 's/.sh$//' | xargs -P 8 -I{{}} sh -c 'bash s/{{}}.sh /tmp/r{{}} > o/{{}}.out 2>&1; rm -rf /tmp/r{{}}'")
+        docker(["-v", f"{d}:/w", image, "sh", "-c", "(command -v git >/dev/null || (apt-get update -qq >/dev/null 2>&1 && "
+                "apt-get install -y -qq git >/dev/null 2>&1)) && " + run])
+    else:
+        def one(k):
+            w = tempfile.mkdtemp(prefix="gitrepo")
+            out = subprocess.run(["bash", os.path.join(d, "s", f"{k}.sh"), w], capture_output=True, text=True, timeout=600).stdout
+            open(os.path.join(d, "o", f"{k}.out"), "w").write(out)
+            subprocess.run(["rm", "-rf", w])
+        with ThreadPoolExecutor(10) as ex:
+            list(ex.map(one, range(len(specs))))
+    by, version, shown = {}, set(), 0
+    for k, (lv, s) in enumerate(specs):
+        g, qs = gens[(lv, s)]
+        out = open(os.path.join(d, "o", f"{k}.out")).read()
+        real = git_parse(out, len(g.cmds))
+        version.add(real["version"])
+        row = by.setdefault(f"L{lv}", {"items": 0, "commands": 0, "questions": 0, "bad_rc": 0, "bad_q": 0, "bad_state": 0})
+        row["items"] += 1
+        row["commands"] += len(g.cmds)
+        problems = ["setup failed"] if "@@setupfail" in out else []
+        for i, (a, b) in enumerate(zip(g.rcs, real["rcs"]), 1):
+            if b is None or (a == 0) != (b == 0):
+                row["bad_rc"] += 1
+                problems.append(f"exit status of {i} `{g.cmds[i - 1]}`: ours {a}, git {b}")
+        lines = lambda v: None if v is None else v.splitlines()   # noqa: E731
+        for q in qs:
+            row["questions"] += 1
+            ours, theirs = g.answer(q), git_real_answer(q, real)
+            if ours != theirs:
+                row["bad_q"] += 1
+                problems.append(f"question {q}: ours {ours!r}, git {theirs!r}")
+        R = g.repo
+        emu = {"status": R.status(), "branch": R.branch, "head": R.commits[R.head()].subject,
+               "stash": [e["msg"] for e in R.stash], "logs": {b: R.log(c) for b, c in R.branches.items()},
+               "wt": {p: lines(v) for p, v in R.wt.items()}, "index": {p: lines(v) for p, v in R.index.items()},
+               "trees": {f"{b}:{p}": lines(v) for b, c in R.branches.items() for p, v in R.commits[c].tree.items()}}
+        for key, v in emu.items():
+            if v != real[key]:
+                row["bad_state"] += 1
+                problems.append(f"state {key}: ours {v!r}, git {real[key]!r}")
+        if problems and shown < 5:
+            shown += 1
+            print(f"  git_seq L{lv} s{s}:")
+            for i, c in enumerate(g.cmds, 1):
+                print(f"    {i:3d} [{g.rcs[i - 1]}] {c}")
+            for p in problems[:8]:
+                print(f"    ! {p[:400]}")
+    subprocess.run(["rm", "-rf", d])
+    print("git_seq vs " + "; ".join(sorted(version)) + ": " + json.dumps(by))
+    bad = sum(r["bad_rc"] + r["bad_q"] + r["bad_state"] for r in by.values())
+    print(f"git_seq vs real git: {sum(r['items'] for r in by.values())} items, {sum(r['commands'] for r in by.values())} "
+          f"commands, {sum(r['questions'] for r in by.values())} questions checked; {sum(r['bad_rc'] for r in by.values())} "
+          f"exit statuses, {sum(r['bad_q'] for r in by.values())} answers, {sum(r['bad_state'] for r in by.values())} state "
+          f"parts disagree")
+    return bad
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     n = int(args[args.index("--seeds") + 1]) if "--seeds" in args else 25
-    todo = [a for a in args if a in ("nginx", "route", "shell")] or ["nginx", "route", "shell"]
-    bad = sum({"nginx": nginx, "route": route, "shell": shell}[t](n) for t in todo)
+    todo = [a for a in args if a in ("nginx", "route", "shell", "git")] or ["nginx", "route", "shell", "git"]
+    image = args[args.index("--image") + 1] if "--image" in args else None
+    bad = sum({"nginx": nginx, "route": route, "shell": shell, "git": lambda k: git(k, image)}[t](n) for t in todo)
     sys.exit(1 if bad else 0)

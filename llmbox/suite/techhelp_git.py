@@ -533,22 +533,28 @@ _STASH = [f"{a}-{n}" for a in ("wip", "try", "tmp", "half") for n in _NOUNS]
 # and the fixed mix of traps (a seed changes names, files, words, order and small variants - not which rules are tested)
 _L7 = ["detached", "amend", "cherry_pick", "revert", "checkout_refused", "stash_pop", "merge_true", "reset_hard",
        "commit_nothing"]
-_L8 = _L7 + ["rm_refused", "merge_refused", "pick_refused", "stash_untracked", "reset_soft", "mv", "branch_d", "restore_fail"]
-_ALL = _L8 + ["commit_a", "reset_mixed", "rm_cached", "switch_carry", "merge_ff", "merge_noff", "restore", "stash_empty",
-              "add_deleted", "switch_missing", "echo_back", "add_u"]
+_L8 = _L7 + ["rm_refused", "reset_soft", "mv", "branch_d", "restore_fail"]
+_L9 = _L8 + ["pick_refused", "merge_refused", "stash_untracked", "commit_a", "rm_cached", "merge_ff", "switch_missing"]
+_L10 = _L9 + ["stash_empty", "add_deleted", "echo_back", "add_u", "merge_noff", "reset_mixed"]
 _LEVEL = {
     1: ((5, 7), 3, 0, ["commit_a"]),
     2: ((6, 9), 3, 0, ["reset_mixed_full"]),
     3: ((8, 10), 3, 0, ["rm_cached", "commit_nothing"]),
-    4: ((12, 16), 4, 1, ["switch_carry", "stash_pop", "reset_soft"]),
+    4: ((12, 16), 4, 1, ["switch_carry", "stash_pop", "reset_soft", "stash_empty"]),
     5: ((16, 21), 4, 1, ["checkout_refused", "stash_untracked", "reset_hard", "merge_ff", "commit_a"]),
     6: ((20, 25), 4, 2, ["branch_d", "merge_true", "restore", "stash_empty", "reset_mixed", "add_deleted", "mv"]),
-    7: ((30, 38), 5, 2, _L7),
+    7: ((30, 40), 5, 2, _L7),
     8: ((40, 50), 5, 2, _L8),
-    9: ((60, 75), 5, 2, _ALL),
-    10: ((85, 100), 6, 3, _ALL + ["detached", "cherry_pick", "revert", "stash_pop", "merge_true", "checkout_refused",
-                                   "amend", "reset_mixed", "stash_untracked", "rm_cached", "merge_noff", "restore"]),
+    9: ((65, 80), 5, 2, _L9),
+    10: ((88, 100), 6, 3, _L10),
 }
+# commands a trap emits on average with its setup (measured): filler goes in only while the planned traps still fit
+_COSTS = {"merge_refused": 6.5, "stash_pop": 6.5, "detached": 5.1, "merge_true": 4.3, "cherry_pick": 4.0,
+          "stash_untracked": 3.8, "merge_ff": 3.8, "merge_noff": 3.4, "restore": 3.3, "reset_hard": 3.0, "add_u": 3.0,
+          "commit_a": 3.0, "rm_refused": 2.9, "checkout_refused": 2.6, "switch_carry": 2.5, "echo_back": 2.5, "amend": 2.3,
+          "stash_empty": 2.3, "commit_nothing": 2.2, "add_deleted": 2.2, "pick_refused": 2.2, "rm_cached": 2.1,
+          "reset_mixed": 2.0, "branch_d": 1.8, "revert": 1.7, "restore_fail": 1.6, "reset_soft": 1.6, "mv": 1.0,
+          "switch_missing": 1.0, "reset_mixed_full": 5.0}
 
 
 class _Gen:
@@ -568,10 +574,11 @@ class _Gen:
         (lo, hi), self.n_files, n_br, self.plan = _LEVEL[level]
         self.target = r.randint(lo, hi)
         self.hi = hi
-        self.pool = r.sample(_BRANCHES, n_br + (1 if level >= 6 else 0))
+        self.pool = r.sample(_BRANCHES, n_br + (2 if level >= 4 else 0))   # names for new branches, a spare or two
         self.owned: dict[str, set] = {"main": set()}     # files a branch mostly works on (keeps merges clean)
         self.deleted: list[str] = []
         self.done: list[str] = []                        # traps that happened, in order
+        self.costs: list[tuple] = []                     # (trap, commands it emitted): for tuning the level table
 
     # ---- primitives --------------------------------------------------------------------------------------------------
 
@@ -873,7 +880,8 @@ class _Gen:
         self.do(f'git stash push -m "{self.stash_msgs.pop()}"')
         if self.r.random() < 0.3:
             self.do("git stash drop")
-        return self.do("git stash pop")
+        self.do("git stash pop")
+        return True
 
     def m_switch_carry(self) -> bool:
         """An edit to a file the other branch has the same way comes along to the other branch."""
@@ -910,7 +918,15 @@ class _Gen:
     def m_merge_ff(self) -> bool:
         a = self.ahead()
         b = self.r.choice(a) if a else self.make_side(commits=self.r.choice([1, 2]))
-        return bool(b) and self.do(f"git merge {b}", want=True)
+        if b and self.repo.branch != b:
+            return self.do(f"git merge {b}", want=True)
+        h, cur = self.repo.head(), self.repo.branch      # or catch a branch that is behind up with this one
+        behind = [x for x in self.others() if self.repo.branches[x] != h and self.repo.branches[x] in self.repo.ancestors(h)]
+        if cur is None or not behind:
+            return False
+        self.settle()
+        x = self.r.choice(behind)
+        return self.do(f"git switch {x}", want=True) and self.do(f"git merge {cur}", want=True)
 
     def m_merge_noff(self) -> bool:
         a = self.ahead()
@@ -974,6 +990,11 @@ class _Gen:
     def m_pick_refused(self) -> bool:
         self.settle()
         c = self.pick_cands()
+        if not c and self.repo.branch is not None:
+            b = self.make_side()
+            if b and self.repo.branch != b:
+                self.work_commit(avoid=self.touched(b))
+            c = self.pick_cands()
         if not c:
             return False
         p = self.edit()
@@ -1060,8 +1081,9 @@ class _Gen:
     def m_branch_d(self) -> bool:
         """-d refuses a branch not merged into HEAD (not into main); -D deletes it anyway."""
         h = self.repo.head()
-        unmerged = [b for b in self.others() if self.repo.branches[b] not in self.repo.ancestors(h)]
-        merged = [b for b in self.others() if self.repo.branches[b] in self.repo.ancestors(h) and b != "main"]
+        o = [b for b in self.others() if b != "main"]
+        unmerged = [b for b in o if self.repo.branches[b] not in self.repo.ancestors(h)]
+        merged = [b for b in o if self.repo.branches[b] in self.repo.ancestors(h)]
         if not unmerged and not merged:
             b = self.make_side()
             if not b:
@@ -1138,20 +1160,19 @@ class _Gen:
         self.owned["main"] = set(files[: len(files) // 2])
         if self.level >= 9:                              # the branches first: 3-4 lines of work to merge and pick from
             spare = [f for f in files if f not in self.owned["main"]]
-            for i in range(len(self.pool) - 1):
+            for i in range(len(self.pool) - 2):
                 self.owned[self.pool[i]] = {spare[i % len(spare)]}
                 self.make_side(commits=r.choice([1, 2]), back=True)
         plan = list(self.plan)
         r.shuffle(plan)
-        gaps = max(0, self.target - len(self.cmds) - 3 * len(plan))
-        for m in plan:
-            for _ in range(r.randint(0, 2) if gaps > 0 else 0):
-                n0 = len(self.cmds)
+        for k, m in enumerate(plan):
+            spare = self.target - len(self.cmds) - sum(_COSTS[x] for x in plan[k:])   # filler only while the traps fit
+            if spare > 0 and r.random() < min(0.9, spare / (len(plan) - k) / 3):
                 self.filler()
-                gaps -= len(self.cmds) - n0
             n0 = len(self.cmds)
-            if getattr(self, "m_" + m)() or len(self.cmds) > n0:
+            if getattr(self, "m_" + m)():
                 self.done.append(m)
+            self.costs.append((m, len(self.cmds) - n0))
         guard = 0
         while len(self.cmds) < self.target and guard < 50:
             guard += 1
@@ -1417,6 +1438,25 @@ def _question(q: tuple) -> str:
 
 # ---- the task kind -----------------------------------------------------------------------------------------------------
 
+def _generate(seed: int, level: int, tries: int = 60) -> _Gen:
+    """The first attempt (seeded, so deterministic) whose sequence has the level's length and every planned trap - the
+    same rule mix at every seed; failing that, the attempt that came closest."""
+    (lo, hi), plan = _LEVEL[level][0], _LEVEL[level][3]
+    best, best_key = None, None
+    for t in range(tries):
+        g = _Gen(rng(BLOCK, f"git{level}" + (f"/{t}" if t else ""), seed), level)
+        g.build()
+        missing = sum(max(0, plan.count(m) - g.done.count(m)) for m in set(plan))
+        n = len(g.cmds)
+        key = (missing, max(0, lo - n, n - hi))
+        if key == (0, 0):
+            g.attempt = t
+            return g
+        if best_key is None or key < best_key:
+            best, best_key = g, key
+    best.attempt = -1
+    return best
+
 def git_seq(seed: int, level: int = 3) -> Item:
     """A git session replayed exactly: a small repository, then 5-100 numbered commands (edits, staging, commits,
     branches, switches that carry or refuse local changes, stash, resets, merges, detached HEAD, amend, cherry-pick,
@@ -1425,9 +1465,7 @@ def git_seq(seed: int, level: int = 3) -> Item:
     modes; 7-8: 30-50 with detached HEAD, amend, cherry-pick, revert and refused checkouts; 9-10: 60-100 over 3-4
     branches with 14-15 questions (the volume of exact state is the difficulty). Credit per question, per line for
     status / log / stash, per command for the failures."""
-    r = rng(BLOCK, f"git{level}", seed)
-    g = _Gen(r, level)
-    g.build()
+    g = _generate(seed, level)
     qs = g.questions()
     answers = [g.answer(q) for q in qs]
     graded = [_grader(q, a) for q, a in zip(qs, answers)]
