@@ -51,6 +51,8 @@ def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, de
         score = 0.0 if it.meta.get("deferred") else float(it.check(res["final"], res))
         err = None
     except Exception as e:  # a crash/timeout of one item scores 0 and is reported, it does not stop the run
+        if type(e).__name__ == "UsageLimit":
+            raise   # the subscription ran out: stop the run (resume it with the same --jsonl after the reset), score nothing
         res, score, err = {"timings": [], "usage": {}, "seconds": round(time.time() - t0, 1), "finish_reason": None,
                            "steps": 0, "final": ""}, 0.0, str(e)[:300]
     thinking = _thinking(res)

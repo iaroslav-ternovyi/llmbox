@@ -19,6 +19,7 @@ import json
 import os
 import pathlib
 import shutil
+import re
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,15 @@ def available() -> tuple[bool, str]:
         ok = False
     return bool(ok), ("subscription" if ok else f"no auth: put an API key into {KEY_FILE} (chmod 600) or run  "
                                                 f"CLAUDE_CONFIG_DIR={CONFIG_DIR} claude auth login")
+
+
+class UsageLimit(RuntimeError):
+    """The subscription's session or weekly limit: the reply is Claude Code's notice, not an answer. A run must stop
+    here (and be resumed after the reset), never score it: on 2026-09-29 a night of such notices recorded as answers
+    turned a Haiku calibration run into 32.8."""
+
+
+LIMIT_RE = re.compile(r"(?i)hit your (session|weekly|usage|opus) limit|usage limit reached|limit reached.{0,40}resets|rate[_ ]limit")
 
 
 def run_item(model: str, it: Item, effort: str | None = None, deadline_s: float = 1800) -> dict:
@@ -160,6 +170,9 @@ def run_item(model: str, it: Item, effort: str | None = None, deadline_s: float 
         finish = "deadline"
     err = proc.stderr.read()[-400:] if proc.stderr else ""
     shutil.rmtree(work, ignore_errors=True)
+    notices = [final, err] + [r.get("result") or "" for r in results if r.get("is_error")]
+    if any(LIMIT_RE.search(x or "") for x in notices) and len(final) < 400:
+        raise UsageLimit(f"claude-code: {next(x for x in notices if LIMIT_RE.search(x or ''))[:200]}")
     if final.startswith(("Failed to authenticate", "Invalid API key", "API Error")) or (not results and err):
         raise RuntimeError(f"claude-code: {final or err}")
     return {"final": final, "finish_reason": finish, "messages": [], "tool_calls": calls, "timings": [], "usage": usage,
