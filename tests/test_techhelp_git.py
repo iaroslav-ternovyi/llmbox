@@ -92,6 +92,15 @@ for path, want in [("build/a.txt", "NONE"), ("build/b.txt", ".gitignore:1"), ("k
     check(f"check-ignore {path}", R.check_ignore(path) == want, R.check_ignore(path))
 check("untracked", R.untracked() == {".gitignore", "keep.log", "docs/v/y.md", "src/lib/.gitignore", "src/lib/z.c", "mods/core/m.js",
                                      "c.bak", "ERR.LOG"}, sorted(R.untracked()))
+# levels 9-10 (each run on git 2.51): a trailing tab stays in the pattern, a leading space too; check-ignore on a directory
+# prints nothing when it holds a tracked file; a path not created yet is no directory, but an excluded parent decides
+R2 = G.Repo(["a.tmp", "secret.txt", "src/secret.txt", "build/keep.c", "build/x.o", "logs/a.log", "src/app.c"],
+            {"": "*.tmp\t\n secret.txt\nbuild/\nlogs/\n*.o\n"}, tracked=["build/keep.c"])
+for path, want in [("a.tmp", "NONE"), ("secret.txt", "NONE"), ("build", "NONE"), ("logs", ".gitignore:4"), ("build/x.o", ".gitignore:3"),
+                   ("logs/new.txt", ".gitignore:4"), ("src/build", "NONE"), ("src/new.o", ".gitignore:5")]:
+    check(f"check-ignore {path!r}", R2.check_ignore(path) == want, R2.check_ignore(path))
+check("untracked 2", R2.untracked() == {".gitignore", "a.tmp", "secret.txt", "src/app.c", "src/secret.txt"}, sorted(R2.untracked()))
+check("cat -nA", G._render_ignore("*.tmp\t\n x\n", 2) == "     1\t*.tmp^I$\n     2\t x$")
 for pat, text, pathname, want in [("a/**/b", "a/b", True, True), ("a/**/b", "a/x/y/b", True, True), ("*.c", "x/y.c", True, False),
                                   ("[!a-c]*", "d1", False, True), ("[^a]", "a", False, False), ("x[[:digit:]]", "x7", False, True),
                                   ("**/x", "x", True, True), ("a/**", "a", True, False), ("?", "/", True, False)]:

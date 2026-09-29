@@ -124,9 +124,30 @@ known += [   # levels 9-10 (each checked on Node 22, 24 and 25)
     ({"fns": {}, "main": [("beforeexit", [L_("x1"), ("tick", [L_("x2")]), ("micro", [L_("x3")]), ("timeout", [L_("x4")], 0)]),
                           ("onexit", [L_("e1")])] + ref}, "b1 b2 b3 b4 x1 x2 x3 x4 e1"),
 ]
+ref8 = [("chain", ("res",), [("then", [L_(f"b{i}")]) for i in range(1, 7)], None)]
+known += [   # level 10 (Node 22, 24 and 25 agree)
+    ({"fns": {}, "main": [("chain", ("resv", ("thenable", [L_("t")], ("res",))), [("then", [L_("A")])], None)] + ref8},
+     "t b1 b2 b3 A b4 b5 b6"),                                           # a thenable resolving with a promise
+    ({"fns": {}, "main": [("chain", ("resv", ("thenable", [L_("t")], ("thenable", [L_("u")]))), [("then", [L_("A")])], None)] + ref8},
+     "t b1 u b2 A b3 b4 b5 b6"),                                         # ... with another thenable
+    ({"fns": {}, "main": [("chain", ("res",), [("finally", [L_("f"), ("return", ("thenable", [L_("t")]))]), ("then", [L_("A")])], None)]
+      + ref8}, "f b1 t b2 b3 b4 A b5 b6"),                               # .finally waits for the thenable it returns
+    ({"fns": {}, "main": [("chain", ("resv", ("res",)), [("then", [L_("A")])], None)] + ref8}, "A b1 b2 b3 b4 b5 b6"),
+    # 'unhandledRejection' listeners run once per rejection after the whole drain, then the queues drain again
+    ({"fns": {}, "main": [("onunhandled", [L_("u1"), ("tick", [L_("u2")]), ("micro", [L_("u3")])]),
+                          ("chain", ("res",), [("then", [L_("p1"), ("chain", ("rejp",), [], None)])], None),
+                          ("tick", [L_("n1"), ("chain", ("rejp",), [], None)]), ("timeout", [L_("t1"), ("chain", ("rejp",), [], None)], 0)]
+      + ref8[:0] + [("chain", ("res",), [("then", [L_("b1")]), ("then", [L_("b2")])], None)]},
+     "n1 p1 b1 b2 u1 u1 u2 u2 u3 u3 t1 u1 u2 u3"),
+]
 for prog, want in known:
     got = " ".join(J.run_program(prog))
     check(f"emulator {want}", got == want, got)
+
+# answers: notes after the ANSWERS block do not replace the answers (Claude Opus wrote '- **7:** ...' notes, 2026-09-29)
+reply = "**ANSWERS**\n1. a1 b2\n2. `x`\n3. NONEXISTENT\n\nNotes:\n- **2:** because y\n- **3:** it throws\n4) c3"
+check("answers keep the first line", J.answers(reply, 4) == {1: "a1 b2", 2: "`x`", 3: "NONEXISTENT", 4: "c3"}, J.answers(reply, 4))
+check("answers: a bulleted line when there is no plain one", J.answers("ANSWERS\n- 1: z9", 1) == {1: "z9"})
 # an unhandled rejection ends the process when that drain is over: the nextTick queued before it still runs, the timer not
 lp = J.Loop({"fns": {}, "main": [("timeout", [L_("t1")], 0), ("chain", ("res",), [("then", [L_("p1"), ("tick", [L_("n1")]),
                                                                                               ("chain", ("rejp",), [], None)])], None)]},

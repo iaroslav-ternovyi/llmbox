@@ -18,6 +18,11 @@ nginx:alpine and debian:stable; the routing check runs a privileged container). 
 Run: python3 tests/real_programs.py [nginx|route|shell|gitignore|gitignore-linux|js|js-linux|js-node24 ...] [--seeds N]
 2026-09-29, --seeds 25: 668 / 495 / 1296 checked, 0 wrong - after the fix it found (a rewrite empties $1 even when its
 regex does not match); nginx 1.31.6, kernel 6.17 + iproute2 6.15, bash 5.2.37 / coreutils 9.7 / gawk 5.2.1 / jq 1.7.
+2026-09-29, gitignore --seeds 210: 2520 repositories, 19972 answers, 0 wrong on git 2.51.2 (macOS) and 2.49.1 (Alpine)
+- after fixes for what it found (check-ignore prints nothing for a directory holding a tracked file; the staged list needs
+--no-renames when files share content). js --seeds 50: 4000 questions x 5 runs on Node 22.22.3, 0 wrong, 0 varied (the
+first version had 2 programs whose output varied under load: a timer set later with a shorter delay; such orders are no
+longer generated); node:22 (22.23.3) --seeds 10: 834, Node 24.14.1 --seeds 15: 1235, 0 wrong.
 """
 import json
 import os

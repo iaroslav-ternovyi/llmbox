@@ -20,7 +20,9 @@ anchoring in one .gitignore of a fresh repository; 3 negation, a file named like
 deletion; 6 negation under an excluded directory, later lines winning, case, `dir/*` + `!dir/sub/`; 7 escapes, trailing
 spaces (shown with `cat -nE`), empty directories, a pattern matching a directory; 8 all of them in three .gitignore
 files; 9-10 four or five .gitignore files, a whitelist (`*`, `!*/`, `!*.py`), `.*`, and patterns drawn at random from the
-tree (6 / 12) on 50-90 files.
+tree (6 / 12) on 50-90 files, check-ignore on directories (level 10 also on paths not created yet), and at level 10 a
+trailing tab and a leading space in patterns, shown by `cat -nA`. Claude Opus 5.5 answered levels 8-10 of the first
+version all right; that is why the last three came in.
 """
 from __future__ import annotations
 
@@ -761,6 +763,19 @@ def _m_whitelist(S: _Scn, B: str, level: int):
     S.focus += ps[1:4]
 
 
+def _m_ws(S: _Scn, B: str, level: int):
+    """Only spaces are trimmed at the end of a line: a trailing tab stays part of the pattern; a leading space always does."""
+    r = S.r
+    e = r.choice(["tmp", "bak", "old", "swp"])
+    n = r.choice(["secret.txt", "notes.md", "local.env", "scratch.py"])
+    S.group(B, [f"*.{e}\t", f" {n}"])
+    d1 = S.sub(B, CODE_DIRS)
+    ps = [B + d1 + "/" + S.fname(e), B + n, B + d1 + "/" + n]
+    for p_ in ps:
+        S.add(p_)
+    S.focus += ps
+
+
 def _random_patterns(S: _Scn, n: int):
     """Patterns drawn from the tree itself, put into a random .gitignore above them: interactions no template plans."""
     r = S.r
@@ -785,7 +800,11 @@ def _random_patterns(S: _Scn, n: int):
 
 
 # modules (at the top and in deeper directories with their own .gitignore); questions: U untracked, u untracked under a
-# directory, A / a `git add -A` (everything / under a directory), C check-ignore
+# directory, A / a `git add -A` (everything / under a directory), C check-ignore on a file, D on a directory, N on a path
+# that does not exist yet. Claude Opus 5.5 answered levels 8, 9 and 10 of the first version all right (2026-09-29), so
+# levels 9-10 also ask check-ignore about directories (nothing is printed for one that holds a tracked file, whatever
+# matches it) and paths not created yet (a pattern for directories cannot match them), and level 10 shows the ignore
+# files with `cat -nA` and hides a trailing tab and a leading space in patterns.
 LEVELS = {
     1: dict(mods=["ext", "dironly", "name"], bases=0, commit=False, q="UCC", size=8),
     2: dict(mods=["ext", "dironly", "name", "anchor"], bases=0, commit=False, q="UCC", size=10),
@@ -801,16 +820,16 @@ LEVELS = {
                   "order", "case", "dirstar", "escape", "space", "empty", "dirmatch"], bases=2, commit=True, q="uuACCC", size=22),
     9: dict(mods=["extneg", "dironly", "anchor", "midslash", "charclass", "nested", "doublestar", "exclude", "negparent",
                   "order", "case", "dirstar", "escape", "space", "empty", "dirmatch", "selfignore", "whitelist"], bases=3,
-            commit=True, q="uuACCC", size=26, rand=6),
+            commit=True, q="uuACCCD", size=26, rand=6),
     10: dict(mods=["extneg", "dironly", "anchor", "midslash", "charclass", "nested", "doublestar", "exclude", "negparent",
                    "order", "case", "dirstar", "escape", "space", "empty", "dirmatch", "selfignore", "whitelist", "doublestar",
-                   "negparent"], bases=4, commit=True, q="UuuaCCC", size=30, rand=12),
+                   "negparent", "ws"], bases=4, commit=True, q="UuaCCCDDN", size=30, rand=12),
 }
 _MODS = {"ext": _m_ext, "extneg": _m_extneg, "dironly": _m_dironly, "name": _m_name, "anchor": _m_anchor,
          "midslash": _m_midslash, "charclass": _m_charclass, "nested": _m_nested, "doublestar": _m_doublestar,
          "exclude": _m_exclude, "negparent": _m_negparent, "order": _m_order, "case": _m_case, "dirstar": _m_dirstar,
          "escape": _m_escape, "space": _m_space, "empty": _m_empty, "dirmatch": _m_dirmatch, "selfignore": _m_selfignore,
-         "whitelist": _m_whitelist}
+         "whitelist": _m_whitelist, "ws": _m_ws}
 
 
 def _build(seed: int, level: int):
@@ -926,8 +945,51 @@ def _pick_ci(repo: Repo, S: _Scn, n: int, r, level: int) -> list[str]:
     return out
 
 
-def _render_ignore(content: str, cat_e: bool) -> str:
-    return "\n".join(f"{i:6d}\t{l}{'$' if cat_e else ''}" for i, l in enumerate(content.split("\n")[:-1], 1))
+def _pick_dirs(repo: Repo, n: int, r) -> list[str]:
+    """Directories for `git check-ignore -v <dir>`: one a pattern matches but that holds a tracked file (git prints
+    nothing) first, then ignored ones (by their own line or a parent's), then the rest."""
+    by: dict[str, list[str]] = {}
+    for d in sorted(x[:-1] for x in repo.dirs if x):
+        pat = repo.last_match(d, True)
+        k = "none" if pat is None else "trap" if repo._in_index(d) and not pat.neg else "neg" if pat.neg else \
+            "parent" if not pat.matches(d, True) else "ign"
+        by.setdefault(k, []).append(d)
+    out = []
+    for k in ["trap", "ign", "parent", "neg", "none"]:
+        rest = [d for d in by.get(k, []) if d not in out]
+        if rest and len(out) < n:
+            out.append(r.choice(rest))
+    return out
+
+
+def _pick_new(repo: Repo, S: _Scn, r) -> str | None:
+    """A path that does not exist yet, in an existing directory: inside an excluded one, named like a directory
+    pattern, or with an ignored extension."""
+    low = {x.lower() for x in repo.files} | {x[:-1].lower() for x in repo.dirs if x}
+    excl = [d[:-1] for d in sorted(repo.dirs) if d and repo.excluded(d[:-1], True)]
+    dirnames = sorted({p.pattern for pl in repo._lists.values() for p in pl if p.mustbedir and p.nodir and not p.neg
+                       and re.fullmatch(r"[\w.-]+", p.pattern)})
+    dirs = [d[:-1] for d in sorted(repo.dirs) if d]
+    cands = []
+    for d in excl:
+        cands.append(f"{d}/new-{r.choice(STEMS)}.{r.choice(CODE_EXT)}")
+    for n in dirnames:
+        for d in r.sample(dirs, min(2, len(dirs))):
+            cands.append(f"{d}/{n}")
+    for d in r.sample(dirs, min(3, len(dirs))):
+        cands.append(f"{d}/{r.choice(STEMS)}-new.{r.choice(NOISE_EXT)}")
+    cands = [c for c in cands if c.lower() not in low and not any(x.startswith(c.lower() + "/") for x in low)]
+    return r.choice(cands) if cands else None
+
+
+def _render_ignore(content: str, cat: int) -> str:
+    """cat -n (0), cat -nE (1: `$` at the end of each line), cat -nA (2: also a tab as ^I)."""
+    out = []
+    for i, l in enumerate(content.split("\n")[:-1], 1):
+        if cat == 2:
+            l = l.replace("\t", "^I")
+        out.append(f"{i:6d}\t{l}{'$' if cat else ''}")
+    return "\n".join(out)
 
 
 _NONE = re.compile(r"^\W*(none|nothing|\(none\)|no paths?|no files?|empty|n/a|prints nothing|no output)\W*$", re.I)
@@ -992,18 +1054,27 @@ def gitignore(seed: int, level: int = 3) -> Item:
     r = rng(BLOCK, f"gitignore-q{level}", seed)
     untracked, added = repo.untracked(), repo.add_all()
     subs = _subtrees(repo, cfg["q"].count("u") + cfg["q"].count("a"), r)
-    cis = _pick_ci(repo, S, cfg["q"].count("C"), r, level)
+    cis = _pick_ci(repo, S, sum(cfg["q"].count(c) for c in "CDN"), r, level)
+    dirs = _pick_dirs(repo, cfg["q"].count("D"), r)
     qs, exp, checks, qmeta = [], [], [], []
     for q in cfg["q"]:
-        if q == "C":
-            if not cis:
-                continue
-            p = cis.pop(0)
+        if q in "CDN":
+            new = _pick_new(repo, S, r) if q == "N" else None
+            if q == "D" and dirs:
+                p, what = dirs.pop(0), "dir"
+                qs.append(f"What does `git check-ignore -v {p}` print? (`{p}` is a directory.)")
+            elif new:
+                p, what = new, "new"
+                qs.append(f"What would `git check-ignore -v {p}` print? (`{p}` does not exist yet.)")
+            else:   # nothing fitting: a file
+                if not cis:
+                    continue
+                p, what = cis.pop(0), "file"
+                qs.append(f"What does `git check-ignore -v {p}` print?")
             e = repo.check_ignore(p)
-            qs.append(f"What does `git check-ignore -v {p}` print?")
             exp.append(e)
             checks.append(_ci_check(e))
-            qmeta.append({"q": "check-ignore", "path": p})
+            qmeta.append({"q": "check-ignore", "path": p, "of": what})
             continue
         d = subs.pop(0) if q in "ua" and subs else ""
         if q in "Uu":
@@ -1018,16 +1089,17 @@ def gitignore(seed: int, level: int = 3) -> Item:
             qmeta.append({"q": "add", "under": d})
         exp.append(", ".join(sorted(want)) or "NONE")
         checks.append(_paths_check(want))
-    cat_e = level >= 7
+    cat = 2 if level >= 10 else 1 if level >= 7 else 0
     parts = [f"A git repository on Linux (ext4; git 2.51 with the default configuration: core.ignoreCase is false and there "
              f"is no global excludes file). Every file in the working tree (`.git/` not shown):\n\n```\n"
              + "\n".join(sorted(repo.files)) + "\n```"]
     if S.empty:
         parts.append("Empty directories: " + ", ".join(f"`{d}`" for d in sorted(S.empty)) + ".")
-    how = "`cat -nE` prints them (line numbers; `$` marks the end of each line)" if cat_e else "`cat -n` prints them"
-    ig = [f"`{b}.gitignore`:\n```\n{_render_ignore(c, cat_e)}\n```" for b, c in sorted(ignores.items())]
+    how = ["`cat -n` prints them", "`cat -nE` prints them (line numbers; `$` marks the end of each line)",
+           "`cat -nA` prints them (line numbers; `$` marks the end of each line, `^I` a tab)"][cat]
+    ig = [f"`{b}.gitignore`:\n```\n{_render_ignore(c, cat)}\n```" for b, c in sorted(ignores.items())]
     if exclude:
-        ig.append(f"`.git/info/exclude`:\n```\n{_render_ignore(exclude, cat_e)}\n```")
+        ig.append(f"`.git/info/exclude`:\n```\n{_render_ignore(exclude, cat)}\n```")
     parts.append(f"The ignore files, as {how}:\n\n" + "\n\n".join(ig))
     if repo.tracked:
         ch = (["edited " + " and ".join(f"`{m}`" for m in sorted(repo.modified))] if repo.modified else []) + \

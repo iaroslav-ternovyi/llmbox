@@ -27,6 +27,10 @@ timer; 8 longer, awaits of saved promises, sleeps. Claude Opus 5.5 answered leve
 Promise.all / allSettled / any / race, one program that dies of an unhandled rejection part-way (the labels after that
 drain never print), and one with `process.on("exit")` / `process.once("beforeExit")` listeners (after 'exit' V8 still
 empties the microtask queue, but no nextTick and no timer runs; a beforeExit listener can start the loop again).
+Opus then answered that level 10 all right too, so level 10 has nine smaller programs and one line question instead of
+seven and three (the same amount of tracing, less of it free), one of them with a `process.on("unhandledRejection")`
+listener (it runs once per rejection after the whole drain, then the queues drain again), thenables that resolve with a
+promise or a thenable, .finally that returns a thenable or throws, and Promise.resolve(promise) (the same promise).
 Every such behaviour was checked on Node 22, 24 and 25 (the same everywhere).
 """
 from __future__ import annotations
@@ -776,8 +780,8 @@ class _P:
 
 
 class _Thenable:
-    def __init__(self, block, env):
-        self.block, self.env = block, env
+    def __init__(self, block, env, with_=None):
+        self.block, self.env, self.with_ = block, env, with_   # with_: what then() passes to resolve (None: nothing)
 
 
 class _Ret:
@@ -811,6 +815,7 @@ class Loop:
         self.main = prog["main"]
         self.allow_crash, self.crashed = allow_crash, False
         self.on_exit: list = []             # process.on("exit") listeners
+        self.on_unhandled: list = []        # process.on("unhandledRejection") listeners
         self.before_exit: list = []         # process.once("beforeExit") listeners
         self.out: list[str] = []
         self.jobs: deque = deque()          # V8's microtask queue
@@ -865,7 +870,7 @@ class Loop:
             return
         try:
             self.run_sync(x.block, x.env)
-            resolve(UNDEF)
+            resolve(UNDEF if x.with_ is None else self.value(x.with_, x.env))
         except JSThrow as e:
             rej(e.value)
 
@@ -1000,7 +1005,7 @@ class Loop:
             self.reject(p, "Error")
             return p
         if k == "thenable":
-            return _Thenable(x[1], env)
+            return _Thenable(x[1], env, x[2] if len(x) > 2 else None)
         if k == "call":
             return self.call_async(x[1])
         if k == "var":
@@ -1078,6 +1083,8 @@ class Loop:
                 env["reject"]("Error")
             elif k == "onexit":
                 self.on_exit.append((st[1], env))
+            elif k == "onunhandled":
+                self.on_unhandled.append((st[1], env))
             elif k == "beforeexit":
                 self.before_exit.append((st[1], env))
             else:
@@ -1095,7 +1102,9 @@ class Loop:
     # -- Node's queues --
     def drain(self):
         """processTicksAndRejections: every nextTick callback, then the microtask queue to empty, again while ticks
-        remain; then unhandled rejections are processed (Node 15+: the process dies)."""
+        remain; only then processPromiseRejections: each rejection still unhandled goes to the 'unhandledRejection'
+        listeners (in the order the promises were rejected), and after them the queues are drained again - without a
+        listener the process dies (Node 15+)."""
         while True:
             while self.ticks:
                 b, e = self.ticks.popleft()
@@ -1106,11 +1115,17 @@ class Loop:
                 self.steps += 1
                 if self.steps > 20000:
                     raise Invalid("runaway")
-            if not self.ticks:
+            if self.ticks:
+                continue
+            pend = [p for p in self.unhandled if not p.handled]
+            self.unhandled = []
+            if not pend:
                 break
-        if any(not p.handled for p in self.unhandled):
-            raise _Crash() if self.allow_crash else Invalid("unhandled rejection")
-        self.unhandled = []
+            if not self.on_unhandled:
+                raise _Crash() if self.allow_crash else Invalid("unhandled rejection")
+            for _p in pend:
+                for b, e in self.on_unhandled:
+                    self.run_sync(b, e)
 
     def pending_timers(self):
         return [(s + L.msecs, L) for L in self.lists.values() for s, _b, _e in L.timers]
@@ -1212,7 +1227,8 @@ def _jx(x, ind: str) -> str:
         return 'Promise.reject(new Error("x"))'
     if k == "thenable":
         body = " ".join(_js_stmt(s, "")[0] for s in x[1])
-        return "{ then(resolve) { " + (body + " " if body else "") + "resolve(); } }"
+        arg = _jx(x[2], ind) if len(x) > 2 and x[2] is not None else ""
+        return "{ then(resolve) { " + (body + " " if body else "") + f"resolve({arg}); }} }}"
     if k == "call":
         return f"{x[1]}()"
     if k == "var":
@@ -1277,6 +1293,8 @@ def _js_stmt(st, ind: str) -> list[str]:
         return [f'{ind}reject(new Error("x"));']
     if k == "onexit":
         return [f'{ind}process.on("exit", {_cb(st[1], ind)});']
+    if k == "onunhandled":
+        return [f'{ind}process.on("unhandledRejection", {_cb(st[1], ind)});']
     if k == "beforeexit":
         return [f'{ind}process.once("beforeExit", {_cb(st[1], ind)});']
     raise ValueError(st)
@@ -1303,7 +1321,7 @@ def program_js(prog: dict) -> str:
 
 _LETTERS = "abcdefghijkmnpqrstuvwxyz"   # no l / o: they read as 1 / 0
 _FN_NAMES = ["load", "save", "sync", "fetchUser", "render", "flush", "retry", "init", "worker", "task", "step", "poll", "notify"]
-SIZE = {1: (4, 6), 2: (6, 8), 3: (7, 10), 4: (8, 11), 5: (10, 13), 6: (11, 15), 7: (13, 17), 8: (15, 20), 9: (22, 30), 10: (30, 40)}
+SIZE = {1: (4, 6), 2: (6, 8), 3: (7, 10), 4: (8, 11), 5: (10, 13), 6: (11, 15), 7: (13, 17), 8: (15, 20), 9: (20, 27), 10: (22, 30)}
 
 
 def _features(level: int) -> set[str]:
@@ -1324,6 +1342,9 @@ def _features(level: int) -> set[str]:
         f |= {"sleep", "await_var", "fn_reuse", "async_throw"}
     if level >= 9:   # Claude Opus traced every level-9 program of the first version right: more of Node's own behaviour
         f |= {"async_handler", "combinator"}
+    if level >= 10:   # ... and every program of the second level 10: thenables resolving with promises and thenables,
+        # .finally returning a thenable or throwing, Promise.resolve(promise) (the same promise: no extra tick)
+        f |= {"nested_thenable", "finally_ret", "resolve_identity"}
     return f
 
 
@@ -1362,6 +1383,15 @@ class _PGen:
                 out.append(self.log())
         return out or [self.log()]
 
+    def thenable(self, p: float = 0.6, always: bool = False):
+        """{ then(resolve) { ...; resolve(); } } - from level 10 it may resolve with a promise or another thenable.
+        (p / always keep the random draws of levels 1-9 as they were when they were checked on Node.)"""
+        r = self.r
+        body = [self.log()] if always or r.random() < p else []
+        if "nested_thenable" in self.F and r.random() < 0.4:
+            return ("thenable", body, r.choice([("res",), ("num", r.randint(1, 9)), ("thenable", [self.log()])]))
+        return ("thenable", body)
+
     def ret(self):
         """What a then handler returns (None: nothing)."""
         r, F = self.r, self.F
@@ -1369,7 +1399,7 @@ class _PGen:
         if "ret_promise" in F:
             opts += [("res",), ("resv", ("num", r.randint(1, 9)))]
         if "ret_thenable" in F:
-            opts += [("thenable", [self.log()] if r.random() < 0.6 else [])]
+            opts += [self.thenable()]
         return r.choice(opts)
 
     def links(self, depth: int, rejected: bool) -> list:
@@ -1391,6 +1421,12 @@ class _PGen:
                 b = [self.log(), ("await", self.await_expr(depth + 1))] + ([self.log()] if r.random() < 0.8 else [])
                 out.append((k, b, "async"))
                 continue
+            if k == "finally" and "finally_ret" in F and r.random() < 0.35:   # its result is awaited; a throw replaces the value
+                if r.random() < 0.6:
+                    b = b + [("return", self.thenable())]
+                else:
+                    b = b + [("throw",)]
+                    pending_rej = True
             out.append((k, b))
             if k == "catch":
                 pending_rej = False
@@ -1429,7 +1465,7 @@ class _PGen:
         opts = [("num", r.randint(1, 9)), ("null",), ("undef",)] if "await_val" in F else []
         opts += [("res",)] * 2
         if "await_thenable" in F:
-            opts += [("thenable", [self.log()] if r.random() < 0.7 else [])]
+            opts += [self.thenable(0.7)]
         if "await_call" in F and depth + 1 < self.maxdepth and len(self.fns) < 4:
             opts += [("callfn",)]
         if "await_var" in F and self.saved_ok:
@@ -1502,7 +1538,9 @@ class _PGen:
             self.in_timer = was
             return ("timeout", b, self.delay(depth > 0))
         if k == "then":
-            src = ("res",) if "resthenable" not in F or r.random() < 0.7 else ("resv", ("thenable", [self.log()]))
+            src = ("res",) if "resthenable" not in F or r.random() < 0.7 else ("resv", self.thenable(always=True))
+            if "resolve_identity" in F and r.random() < 0.25:
+                src = ("resv", ("res",))
             return ("chain", src, [("then", inner())], None)
         if k == "chain":
             return ("chain", ("res",), self.links(depth, False), None)
@@ -1552,6 +1590,13 @@ class _PGen:
         main = []
         while self.nlog < target:
             main += self.top()
+        if variant == "unhandled":   # a listener; one or two rejections nobody handles, in callbacks
+            b = [self.log()] + [r.choice([("tick", [self.log()]), ("micro", [self.log()]),
+                                          ("chain", ("res",), [("then", [self.log()])], None)])]
+            main.insert(r.randint(0, len(main) // 2), ("onunhandled", b))
+            for _ in range(r.choice([1, 2])):
+                blk = r.choice(list(_blocks(main)))
+                blk.insert(r.randint(0, len(blk)), ("chain", ("rejp",), [], None))
         if variant == "exit":   # listeners for the end: 'beforeExit' may schedule more work, 'exit' runs microtasks only
             for kind in r.sample(["onexit", "beforeexit"], r.choice([1, 2])):
                 b = [self.log(), r.choice([("tick", [self.log()]), ("chain", ("res",), [("then", [self.log()])], None),
@@ -1601,6 +1646,10 @@ def gen_program(r, level: int, mode: str, variant: str = "plain") -> tuple[dict,
             continue
         if not lo - 2 <= len(out) <= hi + 8:
             continue
+        if variant == "unhandled":   # the listener must run (a rejection in a handler that never runs would not)
+            first = next(s[1][0][1] for s in prog["main"] if s[0] == "onunhandled")
+            if first not in out:
+                continue
         if variant != "crash":
             return prog, out, False
         # a rejection nobody handles, put in some callback: Node 15+ dies when that drain ends - labels still to come
@@ -1654,8 +1703,8 @@ def _fake(r, level: int, hidden: bool) -> dict:
 # ---- items ----------------------------------------------------------------------------------------------------------------------
 
 # per level: event-loop programs, one-line questions and their arguments; exactly 2 made up (levels 9-10: one inside a line)
-PLAN = {1: (3, 3, 1), 2: (3, 3, 1), 3: (3, 3, 2), 4: (3, 3, 2), 5: (4, 2, 3), 6: (4, 2, 3), 7: (5, 3, 3), 8: (5, 3, 4), 9: (6, 2, 4),
-        10: (7, 3, 5)}
+PLAN = {1: (3, 3, 1), 2: (3, 3, 1), 3: (3, 3, 2), 4: (3, 3, 2), 5: (4, 2, 3), 6: (4, 2, 3), 7: (5, 3, 3), 8: (5, 3, 4), 9: (7, 1, 5),
+        10: (9, 1, 5)}
 HEAD = ("Quick Node.js questions. Each program is saved as `main.js` in an empty directory and run with `node main.js` on "
         "Node.js 22 (Linux), as a CommonJS module. What does it print to standard output? When every `console.log` prints a "
         "label, answer with the labels in the order they are printed, separated by spaces. Otherwise answer with the line "
@@ -1670,7 +1719,7 @@ def gen(seed: int, level: int = 3) -> Item:
     modes = ["micro"] * n_prog if level < 3 else [["micro", "timer", "imm"][i % 3] for i in range(n_prog)]
     r.shuffle(modes)
     # levels 9-10: one program dies of an unhandled rejection part-way, one has exit / beforeExit listeners
-    variants = ["plain"] * n_prog if level < 9 else ["crash", "exit"] + ["plain"] * (n_prog - 2)
+    variants = ["plain"] * n_prog if level < 9 else ["crash", "exit"] + ["unhandled"] * (level >= 10) + ["plain"] * (n_prog - 2 - (level >= 10))
     if level >= 9 and modes[0] == "micro":   # the crash program needs macrotasks: a crash in the one drain cuts nothing
         modes[0] = r.choice(["timer", "imm"])
     qs = []
@@ -1687,13 +1736,34 @@ def gen(seed: int, level: int = 3) -> Item:
     prompt = f"{HEAD} {K.RULES}\n\n{body}{K.TAIL}"
 
     def check(text: str, _t=None, qs=qs) -> float:
-        got = K.answers(text, len(qs))
+        got = answers(text, len(qs))
         return sum(credit(q, got.get(i)) for i, q in enumerate(qs, 1)) / len(qs)
     return Item(f"{BLOCK}.{KIND}.L{level}.{seed}", BLOCK, KIND, [{"role": "user", "content": prompt}], check, max_tokens=32000,
                 meta={"level": level, "questions": qs, "expected": [oracle_answer(q) for q in qs]})
 
 
 # ---- grading ----------------------------------------------------------------------------------------------------------------------
+
+_ALINE = re.compile(r"^\s*([-*•]\s*)?(?:\*\*)?\s*(\d{1,2})\s*[.):]\s*(?:\*\*)?\s*(.*?)\s*$")
+
+
+def answers(text: str, n: int) -> dict[int, str]:
+    """Numbered answer lines after the last ANSWERS header; the FIRST line per number wins, and a bulleted line
+    ('- **7:** the rejection is never handled ...') only when there is no plain one. Notes after the answer block must
+    not replace the answers: Claude Opus added such notes to a level-10 answer (2026-09-29). knowledge.answers keeps
+    the last line per number; the kinds built on the bank are graded with it and stay as they are."""
+    t = strip_think(text or "")
+    heads = list(re.finditer(r"(?im)^[#*\s]*answers\W*$", t))
+    if heads:
+        t = t[heads[-1].end():]
+    plain: dict[int, str] = {}
+    bullet: dict[int, str] = {}
+    for line in t.splitlines():
+        m = _ALINE.match(line)
+        if m and 1 <= int(m.group(2)) <= n:
+            (bullet if m.group(1) else plain).setdefault(int(m.group(2)), m.group(3))
+    return {**bullet, **plain}
+
 
 _LABEL = re.compile(r"(?<![A-Za-z0-9_])([a-z][1-9])(?![A-Za-z0-9_])")
 
@@ -1767,9 +1837,8 @@ def oracle_answer(q: dict) -> str:
 
 
 def breakdown(it: Item, text: str) -> dict:
-    from . import knowledge as K
     qs = it.meta["questions"]
-    got = K.answers(text, len(qs))
+    got = answers(text, len(qs))
     out = {"right": 0, "idk": 0, "wrong": 0, "refused": 0, "invented": 0}
     for i, q in enumerate(qs, 1):
         v = verdict(q, got.get(i))
