@@ -359,7 +359,8 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
  <section class="panel chart"><div class="lbl">Smarter vs faster</div><div id="scatter">{_scatter(local)}</div>
   <p class="legend"><svg width="12" height="16" viewBox="0 0 12 16"><g stroke="#FFB000" stroke-opacity=".6" stroke-width="1.5"><line x1="6" y1="1" x2="6" y2="15"/><line x1="1" y1="1" x2="11" y2="1"/><line x1="1" y1="15" x2="11" y2="15"/></g></svg>
   <span>where the score probably really is (95%). With ~30 tasks one task moves it a few points; when two ranges overlap, the difference is not settled yet. <a href="method.html">More</a></span></p></section>
- <section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
+ <div class="side"><section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
+ {_news_panel({r["id"] for r in local})}</div>
 </div>
 <footer><span>Every number comes from a saved run. The score does not depend on the box; speed does. <a href="method.html">How scores work →</a></span><span>generated {time.strftime('%b %d, %Y %H:%M')}</span></footer>
 </div>
@@ -371,6 +372,32 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
     with open(path, "w") as f:
         f.write(page)
     return path
+
+
+_NEWS_LABEL = {"new_model": "NEW MODEL", "new_files": "NEW FILES", "repo_update": "UPDATED", "runtime": "RUNTIME", "pr": "LLAMA.CPP"}
+
+
+def _news_panel(ranked: set) -> str:
+    """What's new out there (llmbox/watch.py, a daily look): new models, new files of measured ones, runtime releases."""
+    from . import watch as W
+    evs = W.events(8)
+    try:
+        checked = json.load(open(W.STATE)).get("checked", "")
+    except (OSError, ValueError):
+        checked = ""
+    if not evs and not checked:
+        return ""
+    items = []
+    for e in evs:
+        rids = [r for r in e.get("rids") or [] if r in ranked]
+        items.append(f'<li><span class="nt {esc(e["type"])}">{_NEWS_LABEL.get(e["type"], e["type"].upper())}</span> '
+                     + (f'<a href="{esc(e["url"])}" rel="noopener">{esc(e["title"])}</a>' if e.get("url") else f"<b>{esc(e['title'])}</b>")
+                     + (f'<span class="nd">{esc(e["detail"])}</span>' if e.get("detail") else "")
+                     + "".join(f'<a class="nr" href="recipe-{esc(r)}.html">our results →</a>' for r in rids[:1])
+                     + f'<span class="when">{_ago(e["at"])}</span></li>')
+    foot = f'<p class="q nf">Checked daily for new models, new files of the models above and runtime releases{f" · last look {_ago(checked)}" if checked else ""}.</p>'
+    return (f'<section class="panel feed news"><div class="lbl">What\'s new</div>'
+            + (f"<ul>{''.join(items)}</ul>" if items else '<p class="q nf">Nothing new since the first look.</p>') + foot + "</section>")
 
 
 # for visitors new to local models: how to read the page and the words it uses; closed by default
@@ -410,6 +437,11 @@ _HOME_CSS = """
 .boxbar .bl{font-size:12px;color:var(--muted);margin-left:6px}
 .picks .pk{overflow-wrap:anywhere}
 .optl{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 22px;padding:12px 18px;border:1px solid var(--line);border-top:0;font-size:13px}
+.side{display:flex;flex-direction:column;gap:22px;min-width:0}
+.news .nt{display:inline-block;font-size:10px;letter-spacing:.08em;padding:1px 5px;margin-right:4px;border:1px solid var(--amber-dim);color:var(--amber)}
+.news .nt.repo_update,.news .nt.runtime,.news .nt.pr{border-color:var(--line);color:var(--muted)}
+.news .nd{display:block;font-size:12px;color:var(--faint);margin-top:3px;overflow-wrap:anywhere}.news .nr{font-size:12px;margin-left:8px}
+.news .nf{font-size:11.5px;padding:0 18px 14px;margin:0}
 .optl .q{font-size:12px}.optl a{color:var(--soft)}.optl a b{color:var(--ink);font-weight:500}.optl em{font-style:normal;color:var(--amber)}.optl .more{margin-left:auto;color:var(--muted)}
 .boxbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;border:1px solid var(--line);background:var(--panel)}
 .boxbar .sc{margin-right:4px}
@@ -1249,6 +1281,9 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
     when the 4-bit file does not fit), its predicted speed, and its score - measured here when it was, otherwise the
     range expected from public benchmarks. Measured models are listed with their result, not hidden."""
     import datetime as _dt
+    from . import watch as W
+    first_seen = W.first_seen()
+    week_ago = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
     from . import candidates as C, estimate as E, fit as F, recipe as rc
     cs = C.load()
     if not cs:
@@ -1309,7 +1344,9 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
         seen |= {m["id"] for m in ms}
         # measured fine-tunes of this model (declared on Hugging Face): context, not a prediction - they are other models
         rel = [(rid, (r.get("vs_ref") or 0)) for r in rs for rid in [r["id"]] if rid in chains and roots & set(chains[rid][1:]) and rid not in {m["id"] for m in ms}]
+        seen_on = first_seen.get(key)
         rows.append({"repo": c["repo"], "rid": C.recipe_id(c["repo"]), "released": c.get("released") or c.get("created"),
+                     "fresh": bool(seen_on and seen_on >= week_ago),
                      "dl": c["downloads"], "total": round(sh.total_params / 1e9, 1), "active": round(sh.active_params / 1e9, 1),
                      "kind": lin["kind"], "of": lin.get("of"), "rel": rel, "guess": expected(c["repo"]),
                      "measured": [mrow(m) for m in ms], "bytes0": c["bytes"], "sh": shp(sh),
@@ -1362,7 +1399,7 @@ _NEW_CSS = """
 .cand .go{font-size:11px;padding:5px 10px;white-space:nowrap}
 th[data-sort]{cursor:pointer;user-select:none}th[data-sort]:hover,th[data-sort].on{color:var(--amber)}
 .cand .guess{color:var(--soft)}.cand .kind{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:1px 5px;margin-left:6px;border:1px solid var(--line);color:var(--muted);vertical-align:2px}
-.cand .kind.release{color:var(--amber);border-color:var(--amber-dim)}.cand .kind.uncensored{color:#c46a5a;border-color:#5a2e26}
+.cand .kind.release{color:var(--amber);border-color:var(--amber-dim)}.cand .kind.fresh{color:var(--bg);background:var(--amber);border-color:var(--amber)}.cand .kind.uncensored{color:#c46a5a;border-color:#5a2e26}
 .cand .when{white-space:nowrap}.cand .low{color:#c49a5a}
 .nf{display:flex;flex-wrap:wrap;gap:18px;padding:10px 16px 0;font-size:12.5px;color:var(--muted)}.nf input{accent-color:#FFB000;vertical-align:-2px;margin-right:6px}
 .cmds{background:#0b0c09;border:1px solid var(--line);padding:12px 14px;margin:4px 0 8px;text-align:left;font-size:12.5px;line-height:1.8;color:var(--soft)}
@@ -1405,7 +1442,7 @@ function render() {
   const k = keys[sortKey], fitOnly = $("#fitonly").checked, noU = $("#nouncens").checked;
   const list = rows.filter(r => (!fitOnly || r.fits) && (!noU || r.kind !== "uncensored")).sort((a, b) => sortDir * (k(a) - k(b)) || ((b.dl || 0) - (a.dl || 0)));
   $("#count").textContent = list.length;
-  $("#rows").innerHTML = list.map((r, i) => `<tr class="${r.fits ? "" : "nofit"}"><td class="l"><span class="m">${r.repo.split("/")[1].replace(/-GGUF(-MTP)?$/i, "")}<span class="kind ${r.kind}">${r.kind}</span></span>` +
+  $("#rows").innerHTML = list.map((r, i) => `<tr class="${r.fits ? "" : "nofit"}"><td class="l"><span class="m">${r.repo.split("/")[1].replace(/-GGUF(-MTP)?$/i, "")}<span class="kind ${r.kind}">${r.kind}</span>${r.fresh ? '<span class="kind fresh" title="first listed here in the last 7 days">new this week</span>' : ""}</span>` +
     (r.of ? `<span class="rel">trained from ${r.of}</span>` : "") + `<a class="repo" href="https://huggingface.co/${r.repo}" rel="noopener">${r.repo}</a></td>` +
     `<td class="when" title="${r.released}">${ago(r.released)}</td><td>${r.total}B · ${r.active}B</td><td>${scoreCell(r)}</td>` +
     `<td>${r.fits ? (r.onRef ? `<span class="tile ${r.t2 >= 50 ? "hi" : r.t2 >= 25 ? "mid" : "lo"}">${Math.round(r.t2)}</span><span class="rel">${r.td ? Math.round(r.td) + " at 32k · " : ""}measured</span>` : tile(r.t2) + `<span class="rel">${cap(r.td)} at 32k · ${Math.round(r.c.p.ctx / 1024)}k ctx</span>`) : `<span class="red">✗ too big</span>`}</td>` +

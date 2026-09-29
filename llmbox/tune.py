@@ -41,6 +41,10 @@ def variants(r: dict, shape) -> list[tuple[str, list[str], bool]]:
         for m in (128, 512):
             if m != pl["fit_target_mib"]:
                 out.append((f"VRAM margin {m} MiB", [f"placement.fit_target_mib={m}"], True))
+    if not pl["fit"] and pl.get("n_cpu_moe"):   # explicit placement: one or two more expert layers on the card, or one fewer
+        for d in (-2, -1, 1):
+            if 0 < pl["n_cpu_moe"] + d <= shape.n_layers:
+                out.append((f"experts of {pl['n_cpu_moe'] + d} layers in RAM", [f"placement.n_cpu_moe={pl['n_cpu_moe'] + d}"], True))
     if pl["ubatch"] != 1024:
         out.append(("prompt batch 1024", ["placement.ubatch=1024", "placement.batch=2048"], True))
     ctx = pl["ctx"] or shape.context_length

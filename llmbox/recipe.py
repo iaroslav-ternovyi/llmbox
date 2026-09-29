@@ -17,10 +17,10 @@ LLAMA_SWAP_CONFIG = "~/llama-swap/config.yaml"
 _ARGV_OF = os.path.join(os.path.dirname(__file__), "hostside", "argv_of.sh")
 
 DEFAULTS = {
-    "runtime": {"server": "llama-server", "cpu_affinity": "", "threads": 0},
+    "runtime": {"server": "llama-server", "cpu_affinity": "", "threads": 0, "engine": "llama.cpp"},
     "placement": {"ctx": 0, "kv_type": "q8_0", "fit": True, "fit_target_mib": 256, "flash_attn": True, "load_mode": "none",
                   "batch": 2048, "ubatch": 2048, "slots": 1, "kv_unified": False, "cache_ram": "auto",
-                  "cache_ram_headroom_mib": 4096, "cache_reuse": 256, "kv_offload": True},
+                  "cache_ram_headroom_mib": 4096, "cache_reuse": 256, "kv_offload": True, "n_cpu_moe": 0},
     "speculative": {"type": "", "draft_max": 0},
     "sampling": {},
     "chat": {"template_kwargs": {}, "jinja": True},
@@ -68,6 +68,8 @@ def server_args(r: dict, port: str = "$PORT") -> list[str]:
     a = ["--port", port, "-m", r["model"]["path"]]
     if p["fit"]:
         a += ["--fit", "on", "--fit-target", str(p["fit_target_mib"])]
+    else:   # explicit placement (ik_llama.cpp's --fit crashes on K2 Horizon): every layer on the card, the experts of the first N in RAM
+        a += ["-ngl", "999"] + (["--n-cpu-moe", str(p["n_cpu_moe"])] if p.get("n_cpu_moe") else [])
     a += ["--flash-attn", "on" if p["flash_attn"] else "off", "--cache-type-k", p["kv_type"], "--cache-type-v", p["kv_type"]]
     if p["load_mode"]:   # "" = do not pass (builds without the flag, e.g. the PrismML fork)
         a += ["--load-mode", p["load_mode"]]
@@ -100,7 +102,36 @@ def server_args(r: dict, port: str = "$PORT") -> list[str]:
     if al.get("reasoning_loop"):   # content-based loop detector (local llama.cpp patch 0002)
         a += ["--reasoning-loop", str(al["reasoning_loop"])]
     a += [str(x) for x in r["extra"]["args"]]
-    return a
+    return _ik(a) if r["runtime"].get("engine") == "ik_llama.cpp" else a
+
+
+# ik_llama.cpp (github.com/ikawrakow/ik_llama.cpp) spells some flags its own way and lacks others: --fit is a switch
+# with --fit-margin, speculative stages are "--spec-type mtp:n_max=N", and it has no --load-mode, --kv-unified or
+# --cache-reuse (its own prompt cache is --cache-ram). Checked on its llama-server --help, 2026-09-29.
+_IK_DROP = {"--load-mode": 1, "--kv-unified": 0, "--no-kv-unified": 0, "--cache-reuse": 1}
+_IK_SPEC = {"draft-mtp": "mtp"}
+
+
+def _ik(a: list[str]) -> list[str]:
+    out, i = [], 0
+    while i < len(a):
+        x = a[i]
+        if x == "--fit" and i + 1 < len(a) and a[i + 1] in ("on", "off"):
+            out += ["--fit"] if a[i + 1] == "on" else []
+            i += 2
+        elif x == "--fit-target":
+            out += ["--fit-margin", a[i + 1]]
+            i += 2
+        elif x in _IK_DROP:
+            i += 1 + _IK_DROP[x]
+        elif x == "--spec-type":
+            n = a[i + 3] if i + 3 < len(a) and a[i + 2] == "--spec-draft-n-max" else None
+            out += ["--spec-type", _IK_SPEC.get(a[i + 1], a[i + 1]) + (f":n_max={n}" if n else "")]
+            i += 4 if n else 2
+        else:
+            out.append(x)
+            i += 1
+    return out
 
 
 def _num(v) -> str:
