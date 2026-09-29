@@ -129,6 +129,15 @@ def cmd_tune(a: argparse.Namespace) -> None:
         tune.run(a.host, rid)
 
 
+def cmd_watch(a: argparse.Namespace) -> None:
+    from . import watch
+    if a.list:
+        for e in watch.events(a.list):
+            print(f"{e['at'][:16]}  {e['type']:12s} {e['title']} - {e['detail'][:100]}")
+        return
+    watch.run()
+
+
 def cmd_grade_pending(a: argparse.Namespace) -> None:
     from . import pending
     todo = a.results or pending.records()
@@ -609,6 +618,9 @@ def main(argv: list[str] | None = None) -> None:
     tp.add_argument("--host", default="box")
     tp.add_argument("--plan", action="store_true", help="list the variants only, measure nothing")
     tp.set_defaults(fn=cmd_tune)
+    wp = sub.add_parser("watch", help="look for new models, new files of measured models, runtime releases and watched PRs (daily job)")
+    wp.add_argument("--list", type=int, metavar="N", help="print the newest N events instead of looking")
+    wp.set_defaults(fn=cmd_watch)
     gp = sub.add_parser("grade-pending", help="grade explanations that cloud runs left pending (reader on the box; box must be free)")
     gp.add_argument("results", nargs="*", help="result files (default: every one with pending rows)")
     gp.set_defaults(fn=cmd_grade_pending)
