@@ -289,7 +289,7 @@ def git(n, image=None):
     question's answer, and the whole final state (status, HEAD, every branch's log and files, index, working tree,
     stash) compared with the emulator."""
     from concurrent.futures import ThreadPoolExecutor
-    from llmbox.suite import techhelp_git as TG
+    from llmbox.suite import techhelp_gitseq as TG
     specs = [(lv, s) for lv in range(1, 11) for s in range(1, n + 1)]
     gens = {}
     for lv, s in specs:

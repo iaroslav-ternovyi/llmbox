@@ -1,4 +1,4 @@
-"""techhelp.git_seq (llmbox/suite/techhelp_git.py): deterministic items (also across hash seeds) with the level's length
+"""techhelp.git_seq (llmbox/suite/techhelp_gitseq.py): deterministic items (also across hash seeds) with the level's length
 and trap mix, full credit for the key in any common shape, partial credit per line / per command, none for nothing;
 the emulator on hand-checked git behaviours; and a few items replayed on the local git when there is one (the full
 check is tests/real_programs.py git). Run: python3 tests/test_git_seq.py"""
@@ -12,7 +12,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from llmbox import suite  # noqa: E402
-from llmbox.suite import techhelp as T, techhelp_git as G  # noqa: E402
+from llmbox.suite import techhelp as T, techhelp_gitseq as G  # noqa: E402
 
 failed = 0
 
@@ -66,7 +66,7 @@ for lv in range(1, 11):
 check("generation time", slowest < 1.0, f"{slowest:.2f}s")
 
 # the same items in another interpreter with other hash seeds (set iteration order must not leak into an item)
-code = ("import hashlib,json,sys; sys.path.insert(0, %r); from llmbox.suite import techhelp_git as G; "
+code = ("import hashlib,json,sys; sys.path.insert(0, %r); from llmbox.suite import techhelp_gitseq as G; "
         "print(hashlib.sha256(json.dumps([[G.git_seq(s, lv).messages, G.git_seq(s, lv).meta] for lv in range(1, 11) "
         "for s in (1, 2, 3)]).encode()).hexdigest())") % os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 prints = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
