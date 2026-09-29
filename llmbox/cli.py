@@ -307,6 +307,9 @@ def cmd_bench(a: argparse.Namespace) -> None:
     else:
         res = bench.run(a.endpoint, a.model, tier=a.tier, seed0=a.seed, blocks=a.block, jsonl_path=jl,
                         progress=lambda m: print(m, flush=True), resume=a.resume, rerun=a.rerun, parallel=a.parallel)
+    if not res.get("rows"):   # stopped before the first answer (usage limit): nothing to save
+        print(f"  no answers - {res['summary'].get('stopped', 'nothing ran')}", flush=True)
+        return
     info = None
     if cap is not None:
         from . import recipe as rc
