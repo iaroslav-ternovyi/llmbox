@@ -22,6 +22,7 @@ real_home = results.HOME
 
 home = tempfile.mkdtemp()
 os.environ["LLMBOX_NO_DB"] = "1"
+os.environ["LLMBOX_UNSANDBOXED_OK"] = "1"   # no bubblewrap on this machine: the server would hold quality runs
 from llmbox import account, hosts, irt, recipe as rc, server, submit  # noqa: E402
 hosts.HOME = submit.HOME = server.HOME = results.HOME = rc.HOME = irt.HOME = account.HOME = home
 submit.LEDGER = os.path.join(home, "submitted.json")

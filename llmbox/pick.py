@@ -74,7 +74,7 @@ def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = 
                    needs=eng if eng not in (engines or {"llama.cpp"}) else None)
         m = (e.get("measured") or {}).get(cls) if cls else None
         if m and m[0]:
-            row.update(fits=True, why="", t2=m[0], td=m[1] or row["td"], measured=m[3])
+            row.update(t2=m[0], td=m[1] or row["td"], measured=m[3])   # the class ignores RAM size: fitting stays this machine's
         rows.append(row)
     fit_ = sorted((x for x in rows if x["fits"] and x.get("use_score") is not None), key=lambda x: -x["use_score"])
     if fit_ and fit_[0].get("range") and USES[use] is None:   # ranges are measured for the whole score, not per use

@@ -76,7 +76,7 @@ def pages(names: dict, cs: dict, us: dict) -> dict[str, str]:
                 q_rows.append(f"<tr><td class='l'>{link}</td><td>{sc['capability']:.1f}</td>" if sc else f"<tr><td class='l'>{link}</td><td>—</td>")
                 q_rows[-1] += (f"<td>{ver.get('graded', 0)}</td><td class='l'>{'<b>counts</b> toward the score' if not flags else 'kept aside: ' + esc(why)}</td>"
                                f"<td class='q'>{esc(r.get('created', '')[:10])}</td></tr>")
-        mach = "".join(f"<li>{esc(lab)} <span class='q'>· {esc(cpu)} · {ram or '?'} GB RAM</span></li>" for lab, cpu, ram in machines.values())
+        mach = "".join(f"<li>{esc(lab)} <span class='q'>· {esc(cpu)} · {esc(str(ram or '?'))} GB RAM</span></li>" for lab, cpu, ram in machines.values())
         body = f'''
 <section class="panel hd"><div><div class="crumb"><a href="people.html">People</a> / {esc(nm)}</div>
  <h1>{esc(nm)}</h1><p class="q" style="margin-top:6px">{len(machines)} machine{"s" if len(machines) != 1 else ""} · {len(sp_rows)} speed measurements · {len(q_rows)} quality runs, {counted} counted</p></div></section>

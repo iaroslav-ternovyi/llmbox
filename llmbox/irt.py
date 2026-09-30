@@ -136,13 +136,14 @@ def pool(hosts_: tuple = ("box", "cloud", "community")) -> dict:
             su = r.get("suite") or {}
             if r.get("kind") != "suite" or su.get("tier") not in ("quick", "adaptive", "medium", "deep") or not su.get("content_hash"):
                 continue
+            where = h   # (never reassign h: it names the folder for every file after this one)
             if h == "community":
                 if not r.get("verified") or set((r.get("submission") or {}).get("flags") or []) & HELD:
                     continue   # only runs the server re-graded, from a seed it gave
                 home = community_home(r, homes)
                 if home:
-                    r, h = dict(r, recipe=dict(r.get("recipe") or {}, id=home)), "box"
-            recs.append((h, r))
+                    r, where = dict(r, recipe=dict(r.get("recipe") or {}, id=home)), "box"
+            recs.append((where, r))
     fams_by_hash: dict = {}
     for h, r in recs:
         fams_by_hash.setdefault(r["suite"]["content_hash"], set()).update(family_of(x["id"]) for x in r.get("rows", []))

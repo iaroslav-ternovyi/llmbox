@@ -22,7 +22,8 @@ from . import fit as F
 from . import hosts, recipe as rc
 
 REGISTRY = "registry"
-DEFAULT_URL = os.environ.get("LLMBOX_SITE", "http://127.0.0.1:8766")   # the site; the public address once it is hosted
+from . import public
+DEFAULT_URL = public.site()   # the site (llmbox/public.py: a public default, $LLMBOX_SITE or ~/.llmbox/config.json)
 SCHEMA = 1
 
 
@@ -117,7 +118,9 @@ def export(host: str, rids: list[str], out_dir: str, meta: dict | None = None) -
         written.append(os.path.join(d, f"bank-{ch}.json"))
         bank = {"version": suite.VERSION, "hash": ch, "file": f"bank-{ch}.json"}
     ip = os.path.join(d, "index.json")
-    json.dump({"schema": SCHEMA, "built": time.strftime("%Y-%m-%dT%H:%M:%S"), "recipes": index, "suite": bank}, open(ip, "w"), indent=1)
+    intake = os.environ.get("LLMBOX_SERVER") or public._config().get("server") or ""   # clients find the intake here
+    json.dump({"schema": SCHEMA, "built": time.strftime("%Y-%m-%dT%H:%M:%S"), "recipes": index, "suite": bank,
+               "intake": intake if intake.startswith("https://") else ""}, open(ip, "w"), indent=1)
     keep = {os.path.basename(x) for x in written} | {"index.json"}   # (an old bank-*.json goes too)
     for sub in (d, os.path.join(d, "shapes")):   # recipes the ranking no longer has
         for f in os.listdir(sub) if os.path.isdir(sub) else []:
@@ -140,7 +143,12 @@ def pull(url: str = DEFAULT_URL, only: list[str] | None = None, out=print) -> li
     d = rc.recipes_dir(REGISTRY)
     os.makedirs(d, exist_ok=True)
     got = []
+    import re
+    safe = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$")
     for e in idx["recipes"]:
+        if not safe.match(str(e.get("id"))) or (e.get("file") and not safe.match(str(e["file"]))) or ".." in str(e.get("id")) + str(e.get("file")):
+            out(f"skipped a recipe with an unusable name: {str(e.get('id'))[:40]!r}")
+            continue
         if only and e["id"] not in only:
             continue
         text = _get(f"{base}/recipes/{e['id']}.toml").decode()
@@ -156,7 +164,7 @@ def pull(url: str = DEFAULT_URL, only: list[str] | None = None, out=print) -> li
                 pass
     json.dump(idx, open(os.path.join(d, "index.json"), "w"), indent=1)   # scores for llmbox pick
     b = idx.get("suite") or {}
-    if b.get("file"):   # the task bank, for `llmbox test`
+    if b.get("file") and re.match(r"^[0-9a-f]{12}$", str(b.get("hash"))) and b["file"] == f"bank-{b['hash']}.json":   # the task bank, for `llmbox test`
         from . import irt
         os.makedirs(os.path.dirname(irt.bank_path(b["hash"])), exist_ok=True)
         open(irt.bank_path(b["hash"]), "wb").write(_get(f"{base}/recipes/{b['file']}"))

@@ -39,10 +39,13 @@ def new(kind: str, prof: dict, recipe: dict | None = None, model: dict | None = 
             "runtime": runtime or {}, "model": model or {}, "recipe": recipe or {}}
 
 
-def save(host: str, rec: dict) -> str:
+def save(host: str, rec: dict, name: str | None = None) -> str:
+    """name: the file name (the intake names people's records by their submission; none of it comes from the record)."""
     d = os.path.join(HOME, "results", host)
     os.makedirs(d, exist_ok=True)
-    name = f"{rec['created'][:19].replace(':', '')}-{rec['kind']}-{(rec.get('recipe') or {}).get('id', 'x')}.json"
+    name = name or f"{rec['created'][:19].replace(':', '')}-{rec['kind']}-{(rec.get('recipe') or {}).get('id', 'x')}.json"
+    if os.path.basename(name) != name or name.startswith("."):
+        raise ValueError(f"not a file name: {name!r}")
     path = os.path.join(d, name)
     if os.path.exists(path):   # another record of the same second and recipe (two people's submissions): keep both
         try:

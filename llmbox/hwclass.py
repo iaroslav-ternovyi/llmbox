@@ -20,9 +20,9 @@ _DROP = re.compile(r"\b(nvidia|geforce|amd|ati|radeon(?= (rx|pro|vii|r9|hd))|int
 
 def gpu_chip(name: str) -> str:
     """'NVIDIA GeForce RTX 4090 Laptop GPU' -> 'rtx-4090-laptop'; 'AMD Radeon RX 7900 XTX' -> 'rx-7900-xtx'."""
-    s = (name or "").replace("™", "").replace("®", "")
-    b = re.search(r"\[([^\]]*(geforce|radeon|rtx|gtx|rx |arc|quadro|tesla)[^\]]*)\]", s, re.I)
-    s = b.group(1) if b else s                           # lspci: "GB205 [GeForce RTX 5070]" names the card in brackets
+    s = (name or "")[:160].replace("™", "").replace("®", "")
+    b = next((g for g in re.findall(r"\[([^\]]{1,80})\]", s) if re.search(r"geforce|radeon|rtx|gtx|rx |arc|quadro|tesla", g, re.I)), None)
+    s = b or s                                           # lspci: "GB205 [GeForce RTX 5070]" names the card in brackets
     s = re.sub(r"\[.*?\]|\(.*?\)", " ", s)
     s = _DROP.sub(" ", s)
     s = re.sub(r"\b(\d+)\s*gb\b", " ", s, flags=re.I)   # the memory size is its own part of the key

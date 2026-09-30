@@ -13,5 +13,8 @@ while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
   esac
 done
 shift
-exec prlimit --cpu=900 --nproc=256 -- bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --tmpfs /home --tmpfs /root \
-  "${binds[@]}" --unshare-all --die-with-parent --new-session --setenv HOME /tmp --chdir "$PWD" "$@"
+# a clean environment: the service's secrets (Cloudflare token, GitHub secret) must never reach a stranger's code
+exec prlimit --cpu=900 --nproc=256 -- bwrap --clearenv --setenv PATH /usr/local/bin:/usr/bin:/bin --setenv HOME /tmp --setenv LANG C.UTF-8 \
+  --setenv PYTHONDONTWRITEBYTECODE 1 ${PYTHONPATH:+--setenv PYTHONPATH "$PYTHONPATH"} \
+  --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --tmpfs /home --tmpfs /root \
+  "${binds[@]}" --unshare-all --die-with-parent --new-session --chdir "$PWD" "$@"

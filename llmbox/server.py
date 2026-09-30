@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import re
+import subprocess
 import hashlib
 import json
 import os
@@ -107,6 +109,8 @@ class Intake:
         gh = self.github_user(tok) if tok else None
         if not gh or not gh.get("id"):
             return 401, {"error": "GitHub did not accept that token"}
+        if not app_token(tok):   # with the app's secret here: a token of this app only, not any GitHub token
+            return 401, {"error": "that token was not issued to llmbox's GitHub app: sign in with llmbox login"}
         return 200, self._issue(gh)
 
     def _issue(self, gh: dict) -> dict:
@@ -144,10 +148,12 @@ class Intake:
         cid, secret = os.environ.get("LLMBOX_GITHUB_CLIENT_ID"), os.environ.get("LLMBOX_GITHUB_SECRET")
         if not cid or not secret:
             return 503, {"error": "sign-in on the site is not set up on this server yet; `llmbox login` works from a terminal"}, None
+        if any(ord(c) < 32 or c in "\\ " for c in ret) or len(ret) > 400:
+            return 400, {"error": "not a page of the llmbox site"}, None
         o = urlsplit(ret)
         if f"{o.scheme}://{o.netloc}" not in SITE_ORIGINS:
             return 400, {"error": "not a page of the llmbox site"}, None
-        state = self._stash("state", ret)
+        state = self._stash("state", o.geturl())
         q = urlencode({"client_id": cid, "redirect_uri": f"{api}/api/v1/login/web/callback", "state": state, "scope": "", "allow_signup": "true"})
         return 302, {}, f"{GH_AUTHORIZE}?{q}"
 
@@ -226,19 +232,28 @@ class Intake:
             c.execute("DELETE FROM submissions WHERE user_id = ?", (user["id"],))
             c.execute("DELETE FROM keys WHERE user_id = ?", (user["id"],))
             c.execute("DELETE FROM users WHERE id = ?", (user["id"],))
+        with open(os.path.join(self.data, "erased.txt"), "a") as f:   # a run still being checked, or a stale copy, stays out
+            f.write(user["handle"] + "\n")
         with contextlib.suppress(Exception):
             from . import db
             db.sync()
         self.export_users()
+        open(os.path.join(self.data, "rebuild"), "w").close()   # the site without it at the next loop of the intake
         return 200, {"deleted_results": gone, "account": "deleted"}
+
+    def erased(self, handle: str) -> bool:
+        p = os.path.join(self.data, "erased.txt")
+        return os.path.exists(p) and handle in open(p).read().split()
 
     def export_users(self) -> None:
         """users.json for the site's profile pages: handle -> the GitHub name only when the person made it public."""
         with self._db() as c:
             us = {r["handle"]: {"login": r["login"] if r["public"] else None, "public": bool(r["public"])}
                   for r in c.execute("SELECT handle, login, public FROM users")}
-        tmp = os.path.join(self.data, "users.json.tmp")
-        json.dump(us, open(tmp, "w"))
+        import tempfile
+        fd, tmp = tempfile.mkstemp(dir=self.data, prefix=".users-", suffix=".json")   # two sign-ins at once each write their own
+        with os.fdopen(fd, "w") as f:
+            json.dump(us, f)
         os.replace(tmp, os.path.join(self.data, "users.json"))
 
     def receive(self, raw: bytes, addr: str, user: dict | None = None) -> tuple[int, dict]:
@@ -268,7 +283,7 @@ class Intake:
                                                            len(b["records"]), "received", "", "[]", (user or {}).get("id")))
         return 202, {"id": sid, "status": "received", "url": f"/api/v1/runs/{sid}"}
 
-    def seed(self, raw: bytes) -> tuple[int, dict]:
+    def seed(self, raw: bytes, addr: str = "") -> tuple[int, dict]:
         """A fresh seed for this install's next quality test (the tasks cannot be prepared in advance)."""
         import secrets
         try:
@@ -279,15 +294,22 @@ class Intake:
             return 400, {"error": "no install id"}
         since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 86400))
         with self.lock, self._db() as c:
-            if c.execute("SELECT count(*) FROM seeds WHERE client = ? AND issued > ?", (client, since)).fetchone()[0] >= SEEDS_PER_DAY:
+            a = hashlib.sha256(addr.encode()).hexdigest()[:16]
+            if c.execute("SELECT count(*) FROM seeds WHERE (client = ? OR client = ?) AND issued > ?", (client, "addr:" + a, since)).fetchone()[0] >= SEEDS_PER_DAY:
                 return 429, {"error": f"more than {SEEDS_PER_DAY} tests a day from this install"}
             s = 10**6 + secrets.randbelow(10**9)
-            c.execute("INSERT OR IGNORE INTO seeds VALUES (?,?,?,0)", (s, client, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())))
+            now = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+            c.execute("INSERT OR IGNORE INTO seeds VALUES (?,?,?,0)", (s, client, now))
+            c.execute("INSERT OR IGNORE INTO seeds VALUES (?,?,?,1)", (-s, "addr:" + a, now))   # the address's count (no seed)
         return 200, {"seed": s}
 
     def seeded(self, client: str, seed) -> bool:
-        with self._db() as c:
-            return c.execute("SELECT 1 FROM seeds WHERE seed = ? AND client = ?", (seed, client)).fetchone() is not None
+        """A seed this server gave this install and no run used yet (it is used now)."""
+        with self.lock, self._db() as c:
+            ok = c.execute("SELECT 1 FROM seeds WHERE seed = ? AND client = ? AND used = 0", (seed, client)).fetchone() is not None
+            if ok:
+                c.execute("UPDATE seeds SET used = 1 WHERE seed = ?", (seed,))
+            return ok
 
     def status(self, sid: str) -> dict | None:
         with self._db() as c:
@@ -301,35 +323,50 @@ class Intake:
             handles = {r[0]: r[1] for r in c.execute("SELECT s.id, u.handle FROM submissions s JOIN users u ON u.id = s.user_id "
                                                      "WHERE s.status = 'received'")}
         done = []
-        for sid in todo:
-            b = json.loads(gzip.decompress(open(os.path.join(self.data, "inbox", f"{sid}.json.gz"), "rb").read()))
-            detail, ok = [], 0
-            for rec in b["records"]:
-                why = check(rec)
+        for sid in todo:   # one submission at a time, each on its own: a bad one is rejected, never stuck in front of the others
+            try:
+                status, reason, detail = self._ingest_one(sid, handles.get(sid), save_host, predict)
+            except Exception as e:
+                status, reason, detail = "rejected", f"could not be processed: {type(e).__name__}", []
+                print(f"ingest {sid}: {type(e).__name__}: {str(e)[:200]}", flush=True)
+            if status is None:   # held (no sandbox here for a quality run): stays received for an intake that has one
+                continue
+            with self._db() as c:
+                c.execute("UPDATE submissions SET status = ?, reason = ?, detail = ? WHERE id = ?", (status, reason, json.dumps(detail), sid))
+            done.append(sid)
+        return done
+
+    def _ingest_one(self, sid: str, handle: str | None, save_host: str, predict) -> tuple:
+        """(status, reason, detail) of one submission; status None = hold it (a quality run and no sandbox)."""
+        b = json.loads(gzip.decompress(open(os.path.join(self.data, "inbox", f"{sid}.json.gz"), "rb").read()))
+        if any(isinstance(r, dict) and r.get("kind") == "suite" for r in b["records"]) and not sandboxed():
+            print(f"ingest {sid}: a quality run and no sandbox (LLMBOX_SANDBOX): held", flush=True)
+            return None, "", []
+        detail, ok = [], 0
+        for n, rec in enumerate(b["records"]):
+            why = check(rec)
+            if why:
+                detail.append({"record": str(rec.get("id"))[:36] if isinstance(rec, dict) else "?", "status": "rejected", "reason": why})
+                continue
+            flags = outlier_flags(rec, predict)
+            if rec.get("kind") == "suite":
+                rec, why, qflags = self.regrade(rec, b["client"])
                 if why:
                     detail.append({"record": str(rec.get("id"))[:36], "status": "rejected", "reason": why})
                     continue
-                flags = outlier_flags(rec, predict)
-                if rec.get("kind") == "suite":
-                    rec, why, qflags = self.regrade(rec, b["client"])
-                    if why:
-                        detail.append({"record": str(rec.get("id"))[:36], "status": "rejected", "reason": why})
-                        continue
-                    flags += qflags
-                    if sid not in handles:   # a quality run counts toward a score only from someone signed in
-                        flags.append("anonymous")
-                rec = dict(rec, submission={"id": sid, "client": hashlib.sha256(b["client"].encode()).hexdigest()[:12],
-                                            "user": handles.get(sid), "received": time.strftime("%Y-%m-%dT%H:%M:%S"), "flags": flags})
-                rec["host"] = dict(rec["host"], **{"class": hwclass.of_host(rec["host"])})
-                results.save(save_host, rec)
-                ok += 1
-                detail.append({"record": rec["id"][:36], "status": "accepted", "flags": flags})
-            status = "accepted" if ok else "rejected"
-            with self._db() as c:
-                c.execute("UPDATE submissions SET status = ?, reason = ?, detail = ? WHERE id = ?",
-                          (status, f"{ok} of {len(b['records'])} records accepted", json.dumps(detail), sid))
-            done.append(sid)
-        return done
+                flags += qflags
+                if not handle:   # a quality run counts toward a score only from someone signed in
+                    flags.append("anonymous")
+            if handle and self.erased(handle):   # the account was deleted while this run was being checked
+                return "rejected", "the account was deleted", []
+            rec = dict(rec, submission={"id": sid, "client": hashlib.sha256(b["client"].encode()).hexdigest()[:12],
+                                        "user": handle, "received": time.strftime("%Y-%m-%dT%H:%M:%S"), "flags": flags})
+            rec["host"] = dict(rec["host"], **{"class": hwclass.of_host(rec["host"])})
+            # named by the submission, never by what it says (its time or recipe id cannot choose a path or overwrite a record)
+            results.save(save_host, rec, name=f"{sid}-{n:02d}-{rec['kind']}.json")
+            ok += 1
+            detail.append({"record": rec["id"][:36], "status": "accepted", "flags": flags})
+        return ("accepted" if ok else "rejected"), f"{ok} of {len(b['records'])} records accepted", detail
 
 
     def regrade(self, rec: dict, client: str) -> tuple[dict, str | None, list[str]]:
@@ -340,7 +377,9 @@ class Intake:
         p = os.path.join(work, f"{uuid.uuid4().hex}.json")
         json.dump(rec, open(p, "w"))
         try:
-            res = verify.run_one(p, rec)
+            res = verify.run_one(p, rec, timeout=1200)
+        except subprocess.TimeoutExpired:
+            return rec, "re-grading took over 20 minutes", []
         finally:
             os.remove(p)
         if res.get("error"):
@@ -367,6 +406,31 @@ class Intake:
             rec["verified"]["off"] = far
             flags.append("outlier")
         return rec, None, flags
+
+
+def sandboxed() -> bool:
+    """A stranger's quality run is re-graded only inside the sandbox (LLMBOX_SANDBOX); LLMBOX_UNSANDBOXED_OK=1 is for
+    tests on a machine without bubblewrap."""
+    return bool(os.environ.get("LLMBOX_SANDBOX") or os.environ.get("LLMBOX_UNSANDBOXED_OK"))
+
+
+def app_token(token: str) -> bool:
+    """Whether GitHub issued this token to llmbox's own app (POST /applications/{client_id}/token, basic auth with the
+    app's secret). Without the secret configured here the check cannot run: any token that names a user is taken."""
+    import base64
+    import urllib.error
+    import urllib.request
+    cid, secret = os.environ.get("LLMBOX_GITHUB_CLIENT_ID"), os.environ.get("LLMBOX_GITHUB_SECRET")
+    if not cid or not secret:
+        return True
+    req = urllib.request.Request(f"https://api.github.com/applications/{cid}/token", data=json.dumps({"access_token": token}).encode(),
+                                 method="POST", headers={"Authorization": "Basic " + base64.b64encode(f"{cid}:{secret}".encode()).decode(),
+                                                         "Accept": "application/vnd.github+json", "User-Agent": "llmbox"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status == 200
+    except (urllib.error.URLError, OSError):
+        return False
 
 
 def github_user(token: str) -> dict | None:
@@ -403,35 +467,70 @@ def off_score(rec: dict) -> dict | None:
     return None
 
 
+ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$")
+WHEN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{4}|Z)?$")
+REC_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{2,63}$")
+ROW_ID = re.compile(r"^[a-z]+\.[a-z0-9_]+\.L\d{1,2}\.\d{1,15}$")
+
+
+def _num(x, lo: float, hi: float) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and lo <= x <= hi
+
+
+def _text(x, n: int = 200, need: bool = True) -> bool:
+    return (x is None and not need) or (isinstance(x, str) and 0 < len(x) <= n)
+
+
 def check(rec: dict) -> str | None:
-    """Why a submitted record cannot be used, or None."""
+    """Why a submitted record cannot be used, or None. Strict about types and sizes: a record is filed and later read
+    by every site build and every erasure, so one malformed field would break them for everyone."""
+    if not isinstance(rec, dict):
+        return "a record must be an object"
     if rec.get("schema") != results.SCHEMA:
         return "unknown record schema"
     if rec.get("kind") not in ("speed", "optimize", "suite"):
-        return f"kind {rec.get('kind')!r} is not taken (speed, optimize and suite are)"
-    h = rec.get("host") or {}
-    if not h.get("cpu") or not h.get("ram_gib") or h.get("gpu") is None and h.get("vram_gib"):
-        return "the record does not say what machine it ran on"
-    if h.get("id") == "cloud":
-        return "cloud records are the site's own"
-    m = rec.get("model") or {}
-    if not (m.get("file") or m.get("path")):
+        return f"kind {str(rec.get('kind'))[:20]!r} is not taken (speed, optimize and suite are)"
+    if not isinstance(rec.get("id"), str) or not REC_ID.match(rec["id"]):
+        return "the record id is missing or malformed"
+    if not isinstance(rec.get("created"), str) or not WHEN.match(rec["created"]):
+        return "the record's time is missing or malformed"
+    h = rec.get("host")
+    if not isinstance(h, dict) or h.get("id") == "cloud":
+        return "the record does not say what machine it ran on" if not isinstance(h, dict) else "cloud records are the site's own"
+    if not (_text(h.get("cpu")) and _num(h.get("ram_gib"), 0.5, 65536) and _text(h.get("gpu"), 120, need=False)
+            and (h.get("vram_gib") is None or _num(h.get("vram_gib"), 0, 4096)) and (h.get("threads") is None or _num(h.get("threads"), 1, 4096))
+            and (h.get("ram_read_gbs") is None or _num(h.get("ram_read_gbs"), 0.1, 20000)) and _text(h.get("os"), 200, need=False)
+            and (h.get("gpu_count") is None or _num(h.get("gpu_count"), 0, 64))):
+        return "the machine's description has a missing or malformed field"
+    m, rc_ = rec.get("model"), rec.get("recipe")
+    if not isinstance(m, dict) or not (_text(m.get("file"), 200) or _text(m.get("path"), 400)):
         return "no model file named"
+    if not isinstance(rc_, dict) or not isinstance(rc_.get("id"), str) or not ID.match(rc_["id"]):
+        return "the recipe id is missing or malformed"
+    if len(json.dumps(rec)) > (15 if rec.get("kind") == "suite" else 5) * 2**20:
+        return "record too large"
     if rec.get("kind") == "suite":
         from . import irt
-        su = rec.get("suite") or {}
-        if irt.canonical(su.get("content_hash")) not in irt.RELEASES:
-            return f"suite {su.get('version')} ({su.get('content_hash')}) is not a released version: update llmbox"
-        if su.get("tier") != "adaptive" or not rec.get("rows"):
-            return "a quality run must be an adaptive test with its answers"
-        return None if len(json.dumps(rec)) <= 15 * 2**20 else "record too large"
+        su = rec.get("suite")
+        if not isinstance(su, dict) or irt.canonical(su.get("content_hash")) not in irt.RELEASES:
+            return "the suite is not a released version: update llmbox"
+        if su.get("tier") != "adaptive" or not _num(su.get("seed0"), 0, 10**13):
+            return "a quality run must be an adaptive test with its seed"
+        rows = rec.get("rows")
+        if not isinstance(rows, list) or not 0 < len(rows) <= 400 or not all(isinstance(r, dict) and isinstance(r.get("id"), str)
+                                                                            and ROW_ID.match(r["id"]) for r in rows):
+            return "a quality run must carry its answers, each with a task id"
+        return None
     sp = (rec.get("speed") if rec.get("kind") == "speed" else ((rec.get("runs") or {}).get("llmbox") or {})) or {}
+    if not isinstance(sp, dict):
+        return "speed figures missing"
     dec = sp.get("decode_tps") if rec.get("kind") == "speed" else sp.get("decode")
     pre = sp.get("prefill_tps") if rec.get("kind") == "speed" else sp.get("prefill")
-    if not dec or not (0 < dec < 2000) or (pre is not None and not (0 < pre < 100_000)):
+    if not _num(dec, 0.01, 2000) or (pre is not None and not _num(pre, 0.01, 100_000)):
         return "speed figures missing or out of range"
-    if len(json.dumps(rec)) > 5 * 2**20:
-        return "record too large"
+    for d in sp.get("depth") or []:
+        if not isinstance(d, dict) or not all(d.get(k) is None or _num(d.get(k), 0, 10**7) for k in ("depth", "decode_tps", "prefill_tps")):
+            return "a depth measurement is malformed"
     return None
 
 
@@ -497,7 +596,7 @@ def handler(intake: Intake):
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
             if self.path == "/api/v1/seed" and n <= 4096:
-                return self._json(*intake.seed(self.rfile.read(n)))
+                return self._json(*intake.seed(self.rfile.read(n), self.headers.get("X-Forwarded-For", "").split(",")[-1].strip() or self.client_address[0]))
             if self.path == "/api/v1/login/github" and n <= 4096:
                 return self._json(*intake.login(self.rfile.read(n)))
             if self.path == "/api/v1/login/web/redeem" and n <= 4096:
@@ -529,18 +628,33 @@ def handler(intake: Intake):
     return H
 
 
+def _code_version() -> str:
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    r = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True)
+    return r.stdout.strip()
+
+
 def serve(data: str, port: int = 8767, bind: str = "127.0.0.1", every_s: int = 30, on_accept=None) -> None:
-    """Run the intake; a thread ingests new submissions every every_s seconds and calls on_accept(ids) after any."""
+    """Run the intake; a thread ingests new submissions every every_s seconds and calls on_accept(ids) after any, or
+    when <data>/rebuild asks (deploy/sync.sh, an erasure). When the code under it changes (git pull), it exits after the
+    loop so its service manager starts the new code."""
     intake = Intake(data)
+    started = _code_version()
 
     def loop():
         while True:
             try:
                 ids = intake.ingest()
-                if ids and on_accept:
+                req = os.path.join(intake.data, "rebuild")
+                if (ids or os.path.exists(req)) and on_accept:
+                    with contextlib.suppress(OSError):
+                        os.remove(req)
                     on_accept(ids)
             except Exception as e:   # one bad bundle must not stop the intake
-                print(f"ingest error: {e}")
+                print(f"ingest error: {e}", flush=True)
+            if started and _code_version() != started:
+                print("new code: restarting", flush=True)
+                os._exit(0)
             time.sleep(every_s)
     threading.Thread(target=loop, daemon=True).start()
     print(f"llmbox intake on http://{bind}:{port}/api/v1/ (data {intake.data})")

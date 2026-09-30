@@ -58,13 +58,19 @@ def start_background(host_name: str, rid: str, port: int | None = None) -> dict:
 
 
 def running() -> list[dict]:
+    """The servers llmbox left running that still are (a reboot or a crash ends them: their notes are removed)."""
     d = os.path.join(hosts.HOME, "serving")
     out = []
     for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
         try:
-            out.append(json.load(open(os.path.join(d, f))))
-        except (OSError, ValueError):
-            continue
+            s = json.load(open(os.path.join(d, f)))
+            alive = hosts.host_of(hosts.load(s["host"])).agent("serve-alive", str(s["pid"]), timeout=60).get("alive")
+        except (OSError, ValueError, KeyError, RuntimeError):
+            alive = False
+        if alive:
+            out.append(s)
+        else:
+            os.remove(os.path.join(d, f))
     return out
 
 

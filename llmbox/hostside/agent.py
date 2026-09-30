@@ -201,7 +201,8 @@ def _bandwidth_py(seconds: float) -> dict:
     """RAM speed without a compiler: half the cores copying 512 MiB buffers (memcpy through memoryviews), the bytes
     read and written per second, scaled to the C probe's read figure. Rougher: reported as an estimate."""
     import multiprocessing as mp
-    n = max(1, (os.cpu_count() or 2) // 2)
+    avail = next((int(l.split()[1]) // 1024 for l in open("/proc/meminfo") if l.startswith("MemAvailable")), 8192) if os.path.exists("/proc/meminfo") else 8192
+    n = max(1, min((os.cpu_count() or 2) // 2, avail // 3072))   # 1 GiB a worker, and a third of what is free at most
     with mp.get_context("spawn").Pool(n) as pool:
         rates = pool.map(_copy_worker, [(512, seconds)] * n)
     return {"ram_read_gbs": round(sum(rates) / 1e9 * PY_BW_SCALE, 1), "threads": n, "method": "python memcpy (estimate)"}
@@ -351,11 +352,23 @@ def serve_start(spec: dict) -> dict:
         time.sleep(2)
 
 
+def serve_alive(pid: int) -> bool:
+    """Still the llama-server serve-start began (after a reboot the pid may be another program's)."""
+    try:
+        if os.path.exists(f"/proc/{pid}/cmdline"):
+            return "llama-server" in open(f"/proc/{pid}/cmdline", "rb").read().decode(errors="replace")
+        return "llama-server" in sh(f"ps -p {int(pid)} -o command=")
+    except OSError:
+        return False
+
+
 def serve_stop(pid: int) -> dict:
     import signal
+    if not serve_alive(pid):
+        return {"stopped": pid, "was": "gone"}
     try:
         os.killpg(pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return {"stopped": pid, "was": "gone"}
     for _ in range(30):
         try:
@@ -363,7 +376,8 @@ def serve_stop(pid: int) -> dict:
         except ProcessLookupError:
             return {"stopped": pid}
         time.sleep(1)
-    os.killpg(pid, signal.SIGKILL)
+    with __import__("contextlib").suppress(ProcessLookupError, PermissionError):
+        os.killpg(pid, signal.SIGKILL)
     return {"stopped": pid, "killed": True}
 
 
@@ -517,6 +531,8 @@ def main(argv: list[str]) -> None:
         out = serve_start(json.loads(args[0]))
     elif cmd == "serve-stop":
         out = serve_stop(int(args[0]))
+    elif cmd == "serve-alive":
+        out = {"alive": serve_alive(int(args[0]))}
     elif cmd == "server-settings":
         out = server_settings(args[0])
     elif cmd == "sha256":

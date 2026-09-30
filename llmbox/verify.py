@@ -97,7 +97,10 @@ def run_one(path: str, rec: dict | None = None, timeout: int = 3600) -> dict:
     code = None if same else famfp.snapshot_for(ch)
     if not same and not code:
         return {"path": path, "error": f"no code of suite {su.get('version')} ({ch}): its snapshot is gone"}
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    if os.environ.get("LLMBOX_SANDBOX"):   # a stranger's answers: nothing of this process's environment (its secrets) goes in
+        env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp", "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"}
+    else:
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     if code:
         env["PYTHONPATH"] = code
     cwd = code or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

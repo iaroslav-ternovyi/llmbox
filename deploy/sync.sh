@@ -9,8 +9,9 @@ L="$HOME/.llmbox"
 mkdir -p "$L/results/community"
 # people's measurements: new ones come home; explanations the reader graded here (the queue worker's grade-pending, on
 # the box) go back - both ways only newer files win (-u)
-rsync -au "$VPS:.llmbox/results/community/" "$L/results/community/"
-rsync -au "$L/results/community/" "$VPS:.llmbox/results/community/"
+# explanations graded here go back only to files the server still has (--existing): an erased account stays erased
+rsync -au --existing "$L/results/community/" "$VPS:.llmbox/results/community/" 2>/dev/null || true
+rsync -a --delete "$VPS:.llmbox/results/community/" "$L/results/community/"
 mkdir -p "$L/intake" && rsync -a "$VPS:.llmbox/intake/users.json" "$L/intake/users.json" 2>/dev/null || true   # names on profile pages
 # a consistent copy of the accounts database (sqlite's own backup, safe while the intake writes), kept here as the backup
 ssh "$VPS" 'python3 -c "import sqlite3,os; d=os.path.expanduser(\"~/.llmbox/intake\"); sqlite3.connect(d+\"/intake.db\").backup(sqlite3.connect(d+\"/backup.db\"))"' \
@@ -26,4 +27,6 @@ for f in candidates.json queue.db; do [ -f "$L/$f" ] && rsync -a "$L/$f" "$VPS:.
 # the reference box's profile without its ssh address and endpoints (the server never reaches the box)
 python3 -c "import json,sys; d=json.load(open(sys.argv[1])); [d.pop(k, None) for k in ('ssh','endpoint','agent_endpoint')]; d.get('hw',{}).pop('hostname',None); print(json.dumps(d))" \
   "$L/hosts/box.json" | ssh "$VPS" 'cat > ~/.llmbox/hosts/box.json'
-ssh "$VPS" 'cd ~/llmbox && git pull -q --ff-only && ~/venv/bin/llmbox serve --ingest-once --rebuild ~/site --deploy "npx --yes wrangler pages deploy {site} --project-name llmbox --branch main --commit-dirty=true" --force-rebuild'
+# the running intake (it has the sandbox and the Cloudflare token) takes the new code and rebuilds: a new commit makes it
+# restart itself (systemd starts it again), the rebuild file asks for a rebuild and deploy at its next loop
+ssh "$VPS" 'cd ~/llmbox && git pull -q --ff-only && touch ~/.llmbox/intake/rebuild'

@@ -66,6 +66,17 @@ assert filed[0]["host"]["class"].startswith("rtx-5070-12g|"), filed[0]["host"]["
 import gzip  # noqa: E402
 bomb = gzip.compress(b"[" + b"0," * (110 * 2**20) + b"0]")   # ~0.3 MB that unpacks to 220 MB
 assert intake.receive(bomb, "9.9.9.9")[0] == 413, "a gzip bomb was unpacked"
+# hostile or broken records: rejected one by one, none blocks the submissions behind it, none reaches a path or a page
+evil = [1, dict(rec, id="abs-path", created="/private/tmp/x"), dict(rec, id="xss-ram", host=dict(rec["host"], ram_gib="<img src=x onerror=alert(1)>")),
+        dict(rec, id="bad-speed", speed=dict(rec["speed"], decode_tps="fast")), dict(rec, id="bad-recipe", recipe=dict(rec["recipe"], id="../../etc"))]
+r_bad = submit.send(submit.bundle([x for x in evil if x != 1]), url)
+raw_bad = intake.receive(gzip.compress(json.dumps({"schema": "llmbox.submission/1", "client": "x" * 32, "records": [1]}).encode()), "8.8.8.8")
+r_ok = submit.send(submit.bundle([dict(rec, id="after-the-bad-ones")]), url)
+done = intake.ingest()
+assert r_ok["id"] in done and raw_bad[1]["id"] in done and r_bad["id"] in done, (done, raw_bad)
+assert intake.status(raw_bad[1]["id"])["status"] == "rejected" and intake.status(r_ok["id"])["status"] == "accepted"
+assert all(d["status"] == "rejected" for d in intake.status(r_bad["id"])["detail"]), intake.status(r_bad["id"])
+assert not os.path.exists("/private/tmp/x-speed-" + str(rec["recipe"]["id"]) + ".json")
 server.PER_HOUR = 2
 try:
     submit.send(b, url)

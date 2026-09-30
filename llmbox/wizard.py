@@ -19,9 +19,10 @@ import time
 from . import hosts, hwclass, pick, recipe as rc, registry, results
 
 
-def _ask(prompt: str, default: str, yes: bool, choices: str = "yn") -> str:
+def _ask(prompt: str, default: str, yes: bool, choices: str = "yn", off_tty: str | None = None) -> str:
+    """off_tty: the answer when no person is at the terminal (a send: "n" - it needs a person's yes)."""
     if yes or not sys.stdin.isatty():
-        return default
+        return off_tty or default
     opts = "/".join(c.upper() if c == default else c for c in choices)
     while True:
         a = input(f"{prompt} [{opts}] ").strip().lower()[:1] or default
@@ -151,12 +152,15 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
             path = next((p for p, r in results.files(host) if r.get("id") == m.get("id")), None)
             a = "n" if yes else None   # --yes takes the defaults, never a send: that needs its own yes
             while a is None:
-                a = _ask("  Send it so the site shows this hardware? (anonymous: no names, no paths; s = show exactly what is sent)", "y", False, "yns")
+                a = _ask("  Send it so the site shows this hardware? (anonymous: no names, no paths; s = show exactly what is sent)", "y", False, "yns", off_tty="n")
                 if a == "s":
                     submit.run([path], host, submit.DEFAULT_SERVER, dry_run=True)
                     a = None
             if a == "y" and path:
-                submit.run([path], host, submit.DEFAULT_SERVER, dry_run=False)
+                try:
+                    submit.run([path], host, submit.DEFAULT_SERVER, dry_run=False)
+                except SystemExit as e:   # the server down: the model still starts; `llmbox submit` sends it later
+                    out(f"  not sent ({e}); `llmbox submit` sends it later")
     return _start(host, best, out)
 
 

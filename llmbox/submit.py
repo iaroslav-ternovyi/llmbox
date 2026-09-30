@@ -29,7 +29,8 @@ from .hosts import HOME
 
 SCHEMA = "llmbox.submission/1"
 KINDS = ("speed", "optimize", "suite")   # a suite run is re-graded by the server (llmbox/server.py)
-DEFAULT_SERVER = os.environ.get("LLMBOX_SERVER", "http://127.0.0.1:8767")
+from . import public
+DEFAULT_SERVER = public.server()   # the intake (llmbox/public.py)
 LEDGER = os.path.join(HOME, "submitted.json")
 
 
