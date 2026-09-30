@@ -81,9 +81,21 @@ def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, de
 
 
 def reader_now(base_url: str) -> bool:
-    """Grade explanations at the end of the run, or leave them pending for the queue (llmbox/pending.py): a cloud run's
-    reader is on the box, which may be busy with speed work, so it waits for a free moment. LLMBOX_READER_NOW=1 forces now."""
-    return not str(base_url).startswith("claude-code") or os.environ.get("LLMBOX_READER_NOW") == "1"
+    """Grade explanations at the end of the run, or leave them pending (llmbox/pending.py, or the server for a person's
+    run): only where the reader model is served next to the tested one (the reference box's llama-swap lists it). A
+    cloud run's reader is on the box, which may be busy; a server llmbox started itself serves the tested model only,
+    which would grade its own explanations. LLMBOX_READER_NOW=1 forces now."""
+    if os.environ.get("LLMBOX_READER_NOW") == "1":
+        return True
+    if str(base_url).startswith("claude-code"):
+        return False
+    from . import reader
+    try:
+        import urllib.request
+        with urllib.request.urlopen(str(base_url).rstrip("/") + "/v1/models", timeout=10) as r:
+            return reader.MODEL in {m.get("id") for m in json.loads(r.read()).get("data", [])}
+    except (OSError, ValueError):
+        return False
 
 
 def grade_deferred(base_url: str, items: list, rows: list[dict], out=None, progress=print) -> None:

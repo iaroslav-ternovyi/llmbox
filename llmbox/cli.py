@@ -429,6 +429,8 @@ def _standing(host: str, rid: str, recs: list[dict]) -> None:
         print(f"  speed: {sp['decode_tps']:.0f} tokens/s" + (f"; machines like it ({hwclass.label(cls)}): median {same[0]:.0f} of {same[3]}"
                                                             if same else "; the first of its kind here - nobody has sent this hardware yet"))
     q = next((r for r in recs if r.get("kind") == "suite"), None)
+    if q and any(x.get("pending") for x in q.get("rows") or []):
+        print("  (its explanations are graded by the server's reader model once sent: the score here leaves them out)")
     if q and e.get("range"):
         s = q["summary"]
         lo, hi = s.get("capability_ci95") or [None, None]
