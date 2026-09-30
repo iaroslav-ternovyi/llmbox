@@ -334,6 +334,8 @@ def cmd_test(a: argparse.Namespace) -> None:
     if seed is None and not a.no_submit:
         print(f"{server} did not answer: the test runs on a seed of its own, and its answers are filed but not pooled")
     seed = seed if seed is not None else random.randrange(10**6, 10**9)
+    import time as _t
+    t0 = _t.time()
     print(f"1/3 speed of {a.recipe} on {host}", flush=True)
     main(["speed", a.recipe, "--host", host, "--depth", "32000", "--depth", "80000", "--unload"])
     print(f"\n2/3 quality: adaptive test, {a.budget:g} minutes", flush=True)
@@ -343,7 +345,10 @@ def cmd_test(a: argparse.Namespace) -> None:
         print("\n3/3 not sent (--no-submit): `llmbox submit` sends it later")
         return
     print("\n3/3 upload", flush=True)
-    submit.run([], host, server, dry_run=False)
+    from . import results
+    mine = [p for p, r in results.files(host) if os.path.getmtime(p) >= t0 and r.get("kind") in submit.KINDS
+            and (r.get("recipe") or {}).get("id") == a.recipe]   # this test's records only, not the machine's history
+    submit.run(mine, host, server, dry_run=False)
 
 
 def _only_host() -> str:

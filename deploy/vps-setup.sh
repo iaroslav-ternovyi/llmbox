@@ -41,6 +41,10 @@ sudo -u llmbox bash -c "
   [ -d ~/venv ] || python3 -m venv ~/venv
   ~/venv/bin/pip install -q -e ~/llmbox
   mkdir -p ~/.llmbox ~/site
+  # the code of every released suite version: a person's run is re-graded with the tasks it ran
+  for v in \$(~/venv/bin/python -c 'from llmbox import irt; print(\" \".join(sorted(set(irt.RELEASES.values()))))'); do
+    [ -d ~/.llmbox/snapshots/suite-v\$v ] || ~/venv/bin/llmbox snapshot suite-v\$v --no-validate >/dev/null
+  done
 "
 touch /etc/llmbox.env && chmod 600 /etc/llmbox.env   # CLOUDFLARE_API_TOKEN=..., CLOUDFLARE_ACCOUNT_ID=... (by hand)
 
