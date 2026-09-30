@@ -385,6 +385,18 @@ def cmd_run(a: argparse.Namespace) -> None:
         print("stopped")
 
 
+def cmd_update(a: argparse.Namespace) -> None:
+    """The newest llmbox, the way it was installed (the installer's venv, or pip), and the newest list of models."""
+    venv = os.path.expanduser("~/.llmbox/venv/bin/pip")
+    pip = [venv] if os.path.exists(venv) else [sys.executable, "-m", "pip"]
+    r = subprocess.run(pip + ["install", "-q", "--upgrade", "git+https://github.com/iaroslav-ternovyi/llmbox"])
+    if r.returncode:
+        raise SystemExit("the update failed (see above)")
+    from . import registry
+    registry.pull(registry.DEFAULT_URL, out=lambda m: None)
+    print("llmbox is up to date, and so is its list of models: `llmbox` shows if something better fits this computer now")
+
+
 def cmd_doctor(a: argparse.Namespace) -> None:
     from . import doctor
     raise SystemExit(doctor.run(a.host))
@@ -834,7 +846,7 @@ def cmd_site(a) -> None:
 
 # `llmbox --help` lists the commands by what you want to do, most used first
 COMMAND_GROUPS = [
-    ("Pick and run a model on your box", ["start", "doctor", "host", "pick", "scout", "fit", "recipe", "install", "run", "stop", "tune", "optimize"]),
+    ("Pick and run a model on your box", ["start", "doctor", "update", "host", "pick", "scout", "fit", "recipe", "install", "run", "stop", "tune", "optimize"]),
     ("Measure it", ["test", "bench", "queue", "speed", "probe", "loops", "traces"]),
     ("Share and compare", ["login", "whoami", "profile", "submit", "logout", "forget", "serve"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
@@ -1040,6 +1052,8 @@ def main(argv: list[str] | None = None) -> None:
     st_.add_argument("--host", help="a registered machine (default: this computer)")
     st_.add_argument("--plan", action="store_true", help="only show the plan")
     st_.set_defaults(fn=cmd_start)
+    up_ = command("update", "the newest llmbox and list of models")
+    up_.set_defaults(fn=cmd_update)
     dr = command("doctor", "is this computer ready? each problem with the command that fixes it")
     dr.add_argument("--host", help="a registered machine (default: this computer)")
     dr.set_defaults(fn=cmd_doctor)

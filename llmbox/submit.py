@@ -166,6 +166,10 @@ def run(paths: list[str], host: str | None, server: str, dry_run: bool, out=prin
     for (_p, r) in todo:
         led[r["id"]] = res.get("id")
     json.dump(led, open(LEDGER, "w"), indent=1)
-    out(f"sent {len(todo)} record(s): submission {res.get('id')} {res.get('status')}"
-        + (f" - {res['url']}" if res.get("url") else ""))
+    out(f"sent {len(todo)} record(s): the server checks them within a minute - {server.rstrip('/')}{res['url']}" if res.get("url")
+        else f"sent {len(todo)} record(s): submission {res.get('id')} {res.get('status')}")
+    from . import registry
+    rids = sorted({(r.get("recipe") or {}).get("id") for _p, r in todo} - {None})
+    if rids:   # where it shows up (the site rebuilds after the check)
+        out("on the site: " + ", ".join(f"{registry.DEFAULT_URL.rstrip('/')}/hardware-{rid}.html" for rid in rids[:3]))
     return 0

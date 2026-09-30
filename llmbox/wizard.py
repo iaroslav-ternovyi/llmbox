@@ -94,6 +94,26 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
             + f" · ~{x['t2']:.0f} tokens/s, ~{x['td'] or x['t2']:.0f} with 32k of context ({how}) · up to {x['ctx'] // 1024}k context")
         out(f"  why: {why if x is best else 'your choice'}")
         out(f"  download: {x.get('size_gb') or '?'} GB into {prof['hw'].get('models_dir_guess') or '~/models'}" + (" · Mac: speeds are rough" if mac else ""))
+    # a second visit: what is here already, and whether something better came out for this computer
+    from . import serving
+    mine = [x for x in ok if x["id"] in set(rc.ids(host))]
+    up = {s["rid"]: s for s in serving.running() if s.get("host") == host}
+    if mine and not model:
+        shown = sorted(mine, key=lambda x: (x["id"] not in up, -x["score"]))[:3]
+        out("\nOn this computer: " + ", ".join(f"{x['name']} ({x['score']:.0f}%" + (f", running at {up[x['id']]['url']}/v1)" if x["id"] in up else ")")
+                                                 for x in shown) + (f" and {len(mine) - len(shown)} more" if len(mine) > len(shown) else ""))
+        if best["id"] in {x["id"] for x in mine}:
+            out(f"{best['name']} is still the best for it.")
+            if plan_only:
+                return 0
+            if best["id"] in up:
+                return 0
+            if _ask(f"Start {best['name']}?", "y", yes) == "y":
+                return _start(host, best, out)
+            return 0
+        have = max(mine, key=lambda x: x["score"])
+        out(f"Better for it now: {best['name']} - {best['score'] - have['score']:+.0f} points against {have['name']}"
+            + (f", {min(best['t2'], best['td'] or best['t2']) / max(1, min(have['t2'], have['td'] or have['t2'])):.1f}x the speed" if best['t2'] else ""))
     plan(best)
     if plan_only or not engine:
         return 0 if plan_only else 1
@@ -130,10 +150,22 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
                     a = None
             if a == "y" and path:
                 submit.run([path], host, submit.DEFAULT_SERVER, dry_run=False)
+    return _start(host, best, out)
+
+
+def _start(host: str, best: dict, out) -> int:
+    """Serve it in the background and say how to use it."""
+    from . import serving
+    rid = best["id"]
+    for s in serving.running():   # one model at a time on the card
+        if s.get("host") == host and s["rid"] != rid:
+            serving.stop_background(host, s["rid"])
+            out(f"(stopped {s['rid']} to make room)")
+    out(f"\nstarting {best['name']} ...")
     s = serving.start_background(host, rid)
     base = s["url"] + "/v1"
-    out(f"\n{best['name']} is running: {base}  (model name: {rid})")
+    out(f"{best['name']} is running: {base}  (model name: {rid})")
     out("  apps: any OpenAI-compatible client - base URL above, any API key (Open WebUI, Continue, Cline, LibreChat ...)")
     out(f"  try:  curl {base}/chat/completions -H 'Content-Type: application/json' -d '{{\"model\":\"{rid}\",\"messages\":[{{\"role\":\"user\",\"content\":\"Hello\"}}]}}'")
-    out(f"  stop: llmbox stop {rid}    ·  measure its quality too (40 min): llmbox test {rid}    ·  sign in for a profile: llmbox login")
+    out(f"  stop: llmbox stop {rid}  ·  measure it against machines like this one: llmbox test {rid}  ·  a profile: llmbox login")
     return 0

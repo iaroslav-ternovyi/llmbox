@@ -10,7 +10,17 @@ from llmbox import pick, wizard  # noqa: E402
 lines = []
 assert wizard.main(host="box", plan_only=True, out=lines.append) == 0
 text = "\n".join(lines)
-assert text.startswith("This computer: RTX 5070 12 GB") and "Best for it:" in text and "why:" in text and "tokens/s" in text, text
+assert text.startswith("This computer: RTX 5070 12 GB"), text
+# the box has every model installed: a second visit - what is here, and whether something better came out
+assert "On this computer:" in text and "more" in text and ("is still the best for it" in text or "Better for it now:" in text), text
+from llmbox import recipe as rc  # noqa: E402
+ids = rc.ids
+rc.ids = lambda host: []   # a first visit: the plan with its numbers and the why
+lines = []
+assert wizard.main(host="box", plan_only=True, out=lines.append) == 0
+rc.ids = ids
+text = "\n".join(lines)
+assert "Best for it:" in text and "why:" in text and "tokens/s" in text and "On this computer" not in text, text
 
 x = lambda i, s, t2, td, tied=True: {"id": i, "use_score": s, "t2": t2, "td": td, "tied": tied}
 best, why = pick.choose([x("a", 88, 55, 52), x("b", 87, 60, 58), x("c", 84, 90, 80)])
