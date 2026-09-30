@@ -18,16 +18,28 @@ ik_llama.cpp behind [llama-swap](https://github.com/mostlygeek/llama-swap).
 
 ## Quick start
 
+On the machine that runs models (or anywhere, with `--ssh` to it):
+
 ```bash
 pip install -e .
-llmbox host add box --ssh me@gpu-box     # register the machine that runs models: GPU, RAM, measured RAM speed
-llmbox scout unsloth/Qwen3.6-35B-A3B-GGUF --host box   # which quants fit and how fast, no download
+llmbox host add me                       # this machine: GPU, RAM, measured RAM speed, llama-server builds found
+llmbox pick                              # every measured model fitted to it: fits?, how fast, how good; the pick
+llmbox install qwen36-al --from registry --host me --apply   # download, fit, launcher, llama-swap entry
+llmbox tune qwen36-al --host me          # optional: measure the speed knobs on this machine, keep what wins
+llmbox speed qwen36-al --host me         # time it at 0 / 32k / 80k tokens of context
+llmbox submit                            # add the measurement to the site (anonymous; --dry-run shows what is sent)
+```
+
+`llmbox pick --gpu "RTX 4090" --ram-gb 64 --ram-bw 60` answers for a machine you do not have yet.
+
+Running the benchmark and the site (the reference box):
+
+```bash
 llmbox recipe new unsloth/Qwen3.6-35B-A3B-GGUF --file Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --write
-llmbox install qwen36-al --apply         # download, fit to the box, write the launcher and the llama-swap entry
-llmbox optimize qwen36-al                # tune speed knobs, compare against stock llama.cpp, re-measure
 llmbox queue add qwen36-al --suite suite-v0.11 --bench-args "--recipe qwen36-al --adaptive --budget 40"
 llmbox queue run                         # the worker: runs queued jobs one at a time, resumes after a crash
-llmbox site --out ~/.llmbox/site         # the static site from every saved result
+llmbox site --out ~/.llmbox/site         # the static site from every saved result, with the recipe registry
+llmbox serve --rebuild ~/.llmbox/site    # the intake for `llmbox submit`; accepted measurements rebuild the site
 ```
 
 `llmbox --help` lists the commands grouped by what you want to do. `llmbox <command> --help` shows a command's
@@ -38,7 +50,7 @@ options.
 | Path | What |
 |---|---|
 | `~/.llmbox/hosts/` | Registered machines: hardware, memory speeds, SSH access |
-| `~/.llmbox/recipes/<host>/<id>.toml` | A model file plus the settings it is measured with, one recipe per model and quant |
+| `~/.llmbox/recipes/<host>/<id>.toml` | A model file plus the settings it is measured with, one recipe per model and quant; `registry/` holds the site's published ones (`llmbox recipe pull`) |
 | `~/.llmbox/results/<host>/*.json` | Every run: answers, scores, speed, the exact server command line, telemetry |
 | `~/.llmbox/llmbox.db`, `bundles/` | The results database built from those files; readers go through it (`LLMBOX_NO_DB=1` bypasses it) |
 | `~/.llmbox/irt/bank-<hash>.json` | The calibrated task bank of a suite version (`llmbox irt calibrate`) |
@@ -46,7 +58,9 @@ options.
 | `~/.llmbox/snapshots/<tag>/` | Frozen code of a suite tag: a whole campaign runs one version of the tasks |
 | `~/.llmbox/traces/` | Saved thinking of every task, used for the loop and budget audits |
 | `~/.llmbox/cache/` | Slow, pure results kept between builds (loop scans, bootstrap intervals) |
-| `~/.llmbox/site/` | The built site |
+| `~/.llmbox/site/` | The built site; `recipes/` in it is the registry that `llmbox recipe pull` and `llmbox pick` read |
+| `~/.llmbox/intake/`, `results/community/` | `llmbox serve`: submitted bundles and their checks; accepted measurements from people's machines |
+| `~/.llmbox/install-id`, `submitted.json` | `llmbox submit`: this machine's random id, what was sent |
 
 ## The code
 
@@ -59,6 +73,8 @@ options.
 | `queue.py`, `runinfo.py`, `pending.py` | The job queue, what a run records, explanations graded after cloud runs |
 | `results.py`, `db.py`, `verify.py` | Result files, the results database, re-grading a run from its answers |
 | `candidates.py`, `watch.py`, `eci.py` | New models on Hugging Face, daily watch, expected scores from public benchmarks |
+| `registry.py`, `pick.py` | The published recipes (export with the site, pull anywhere), the ranking fitted to a machine |
+| `hwclass.py`, `submit.py`, `server.py` | Hardware classes, sending measurements, the intake that takes them in |
 | `site/` | The static site. `words`: names and texts. `stats`: ties and places. `components`: shared pieces. `data`: records and pools. `layout`: the page frame. One module per page, plus `build`. Styles and scripts are in `site/assets/`. |
 
 Tests: `python3 tests/run_all.py` runs every test in parallel (~1.5 min), `--quick` skips the two slow ones. Each is also a
@@ -69,6 +85,7 @@ plain script (`python3 tests/test_site.py`).
 - [docs/fast-test.md](docs/fast-test.md): how the test works and why. Covers adaptive runs, calibration, every suite
   version's changes and the ranking at each release. In Russian.
 - [docs/results-db.md](docs/results-db.md): the results database and the plan for results from other people's hardware.
+- [docs/roadmap.md](docs/roadmap.md): what is left before launch, competitors, how comparison across people works.
 - [docs/product.md](docs/product.md): who it is for and how they use it.
 - [docs/usage-research.md](docs/usage-research.md): what predicts everyday usefulness (sources).
 - The site's own [method page](http://127.0.0.1:8766/method.html) explains the numbers for visitors. It is served
