@@ -49,9 +49,14 @@ def begin(host_name: str, base_url: str, served: str, api_key: str | None = None
     except Exception as e:   # the run itself will surface a dead endpoint; here it only means no settings snapshot
         ctx["errors"].append(f"warm-up: {e}"[:200])
     try:
-        h = hosts.host_of(hosts.load(host_name))
+        prof = hosts.load(host_name)
+        h = hosts.host_of(prof)
         ctx["h"] = h
-        ctx["start"] = _settings(h, served)
+        # a server llmbox started itself (llmbox test / run) is found by its port; llama-swap's by the model id
+        port = base_url.rstrip("/").rsplit(":", 1)[-1].split("/")[0]
+        swap = (((prof.get("hw") or {}).get("llama_swap") or {}).get("url") or "http://x:8080").rsplit(":", 1)[-1]
+        ctx["target"] = port if port.isdigit() and port != swap and not base_url.rstrip("/").endswith(swap) else served
+        ctx["start"] = _settings(h, ctx["target"])
         f = f"/tmp/llmbox-telemetry-{os.getpid()}-{int(time.time())}.csv"
         ctx["telemetry"] = h.agent("telemetry-start", f, "5", timeout=60)
     except Exception as e:
@@ -86,7 +91,7 @@ def end(ctx: dict, recipe: dict | None) -> dict:
     if not h:
         return out
     try:
-        fin = _settings(h, ctx["served"])
+        fin = _settings(h, ctx.get("target") or ctx["served"])
         st = ctx.get("start") or {}
         argv = st.get("argv") or fin.get("argv")
         props = st.get("props") or fin.get("props") or {}

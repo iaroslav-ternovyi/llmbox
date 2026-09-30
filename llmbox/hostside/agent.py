@@ -7,6 +7,8 @@ Commands:
   bandwidth [seconds]         sustained RAM read bandwidth (compiles a tiny C probe with gcc -O3 -fopenmp)
   gguf-header <path>          header of a local GGUF (kv, big-array summaries, tensor directory)
   probe-server <json>         start llama-server with the given argv on a free port, measure speed, stop it
+  serve-start <json>          start llama-server detached (a free port unless given), wait until healthy; prints port + pid
+  serve-stop <pid>            stop a server serve-start started (its process group)
   unload                      ask llama-swap to unload its models (frees the GPU for a probe)
   server-settings <port|model> what a running llama-server really uses: its argv (/proc) and /props (sampling, ctx, build)
   sha256 <path>               sha256 of a model file (all parts of a split model), cached by path + size + mtime
@@ -266,6 +268,50 @@ def probe_server(spec: dict) -> dict:
     return out
 
 
+def serve_start(spec: dict) -> dict:
+    """spec = {server, args (without --port/--host), affinity, model_files, headroom_mib, bind, port}: a llama-server
+    that outlives this call (its own session), for a run that needs one for a while (llmbox test / run)."""
+    total_mib = next((int(l.split()[1]) // 1024 for l in open("/proc/meminfo") if l.startswith("MemTotal")), 0)
+    files_mib = sum(os.path.getsize(f) for f in spec.get("model_files", [])) // 2**20
+    cram = max(2048, min(48000, total_mib - files_mib - int(spec.get("headroom_mib", 4096))))
+    port = int(spec.get("port") or _free_port())
+    args = [a.replace("$CRAM", str(cram)) for a in spec["args"]]
+    cmd = (["taskset", "-c", spec["affinity"]] if spec.get("affinity") else []) + [spec["server"], "--port", str(port),
+                                                                                    "--host", spec.get("bind") or "127.0.0.1"] + args
+    log_path = os.path.join(tempfile.gettempdir(), f"llmbox-serve-{port}.log")
+    proc = subprocess.Popen(cmd, stdout=open(log_path, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    t0 = time.time()
+    while True:
+        if proc.poll() is not None:
+            return {"error": f"server exited with code {proc.returncode}", "log": log_path, "cmd": cmd}
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as r:
+                if r.status == 200:
+                    return {"port": port, "pid": proc.pid, "log": log_path, "cmd": cmd, "load_seconds": round(time.time() - t0, 1)}
+        except Exception:
+            pass
+        if time.time() - t0 > spec.get("load_timeout", 900):
+            os.killpg(proc.pid, 15)
+            return {"error": "server did not become healthy", "log": log_path, "cmd": cmd}
+        time.sleep(2)
+
+
+def serve_stop(pid: int) -> dict:
+    import signal
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return {"stopped": pid, "was": "gone"}
+    for _ in range(30):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return {"stopped": pid}
+        time.sleep(1)
+    os.killpg(pid, signal.SIGKILL)
+    return {"stopped": pid, "killed": True}
+
+
 def _get(url: str, timeout: int = 10):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
@@ -412,6 +458,10 @@ def main(argv: list[str]) -> None:
             out = {"error": str(e)}
     elif cmd == "probe-server":
         out = probe_server(json.loads(args[0]))
+    elif cmd == "serve-start":
+        out = serve_start(json.loads(args[0]))
+    elif cmd == "serve-stop":
+        out = serve_stop(int(args[0]))
     elif cmd == "server-settings":
         out = server_settings(args[0])
     elif cmd == "sha256":

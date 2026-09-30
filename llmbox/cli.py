@@ -339,8 +339,11 @@ def cmd_test(a: argparse.Namespace) -> None:
     print(f"1/3 speed of {a.recipe} on {host}", flush=True)
     main(["speed", a.recipe, "--host", host, "--depth", "32000", "--depth", "80000", "--unload"])
     print(f"\n2/3 quality: adaptive test, {a.budget:g} minutes", flush=True)
-    main(["bench", a.recipe, "--host", host, "--recipe", a.recipe, "--adaptive", "--budget", str(a.budget), "--target", "2.5",
-          "--seed", str(seed), "--speed-probe"])
+    from . import serving
+    with serving.served(host, a.recipe) as url:   # llmbox serves the recipe itself: no llama-swap needed
+        print(f"  serving {a.recipe} at {url}", flush=True)
+        main(["bench", a.recipe, "--host", host, "--recipe", a.recipe, "--endpoint", url, "--adaptive", "--budget", str(a.budget),
+              "--target", "2.5", "--seed", str(seed), "--speed-probe"])
     if a.no_submit:
         print("\n3/3 not sent (--no-submit): `llmbox submit` sends it later")
         return
@@ -349,6 +352,24 @@ def cmd_test(a: argparse.Namespace) -> None:
     mine = [p for p, r in results.files(host) if os.path.getmtime(p) >= t0 and r.get("kind") in submit.KINDS
             and (r.get("recipe") or {}).get("id") == a.recipe]   # this test's records only, not the machine's history
     submit.run(mine, host, server, dry_run=False)
+
+
+def cmd_run(a: argparse.Namespace) -> None:
+    """Serve an installed recipe (OpenAI-compatible) until Ctrl-C: no llama-swap needed."""
+    import time as _t
+    from . import serving
+    host = a.host or _only_host()
+    s = serving.start(host, a.recipe, port=a.port)
+    print(f"{a.recipe} on {host}: {s['url']}/v1  (OpenAI-compatible; model name: {a.recipe})\n"
+          f"  loaded in {s.get('load_seconds')} s, log {s['log']} on {host}; Ctrl-C stops it", flush=True)
+    try:
+        while True:
+            _t.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        serving.stop(host, s["pid"])
+        print("stopped")
 
 
 def _only_host() -> str:
@@ -710,7 +731,7 @@ def cmd_site(a) -> None:
 
 # `llmbox --help` lists the commands by what you want to do, most used first
 COMMAND_GROUPS = [
-    ("Pick and run a model on your box", ["host", "pick", "scout", "fit", "recipe", "install", "tune", "optimize"]),
+    ("Pick and run a model on your box", ["host", "pick", "scout", "fit", "recipe", "install", "run", "tune", "optimize"]),
     ("Measure it", ["test", "bench", "queue", "speed", "probe", "loops", "traces"]),
     ("Share and compare", ["submit", "serve"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
@@ -896,6 +917,12 @@ def main(argv: list[str] | None = None) -> None:
     pk.add_argument("--pull", action="store_true", help="fetch the site's recipes first (done once automatically)")
     pk.add_argument("--url", help="the site to pull from")
     pk.set_defaults(fn=cmd_pick)
+
+    ru = command("run", "serve an installed model (OpenAI-compatible) until Ctrl-C, without llama-swap")
+    ru.add_argument("recipe")
+    ru.add_argument("--host", help="the machine (default: the only one registered)")
+    ru.add_argument("--port", type=int, help="port (default: a free one)")
+    ru.set_defaults(fn=cmd_run)
 
     te = command("test", "measure a model on this machine and send it: speed, the 40-minute quality test, the upload")
     te.add_argument("recipe", help="an installed recipe (llmbox install <id> --from registry ...)")

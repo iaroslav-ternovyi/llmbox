@@ -24,7 +24,8 @@ On the machine that runs models (or anywhere, with `--ssh` to it):
 pip install git+https://github.com/iaroslav-ternovyi/llmbox     # Python 3.12+, no other dependencies
 llmbox host add me                       # this machine: GPU, RAM, measured RAM speed, llama-server builds found
 llmbox pick                              # every measured model fitted to it: fits?, how fast, how good; the pick
-llmbox install qwen36-al --from registry --host me --apply   # download, fit, launcher, llama-swap entry
+llmbox install qwen36-al --from registry --host me --apply   # download, fit, launcher (and a llama-swap entry if you use it)
+llmbox run qwen36-al --host me           # serve it (OpenAI-compatible) until Ctrl-C; no llama-swap needed
 llmbox tune qwen36-al --host me          # optional: measure the speed knobs on this machine, keep what wins
 llmbox test qwen36-al --host me          # speed, the 40-minute quality test, and the upload (anonymous; the server
                                          # re-grades every answer; `llmbox submit --dry-run` shows what is sent)
@@ -73,6 +74,7 @@ options.
 | `queue.py`, `runinfo.py`, `pending.py` | The job queue, what a run records, explanations graded after cloud runs |
 | `results.py`, `db.py`, `verify.py` | Result files, the results database, re-grading a run from its answers |
 | `candidates.py`, `watch.py`, `eci.py` | New models on Hugging Face, daily watch, expected scores from public benchmarks |
+| `serving.py` | A model served by llmbox itself (`run`, and `test` for its run): no llama-swap needed |
 | `registry.py`, `pick.py` | The published recipes (export with the site, pull anywhere), the ranking fitted to a machine |
 | `hwclass.py`, `submit.py`, `server.py` | Hardware classes, sending measurements, the intake that takes them in |
 | `site/` | The static site. `words`: names and texts. `stats`: ties and places. `components`: shared pieces. `data`: records and pools. `layout`: the page frame. One module per page, plus `build`. Styles and scripts are in `site/assets/`. |
