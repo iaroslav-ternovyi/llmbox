@@ -65,9 +65,16 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
     cls = hwclass.of_host(results.host_fingerprint(prof))
     mac = cls.startswith("apple-")
     engine = prof["hw"].get("runtimes") or []
-    if not engine:
-        out("llama.cpp: not found here. llmbox runs models with it: install a build (https://llama.app, one line), "
-            "then run `llmbox host add " + host + "` and `llmbox` again.")
+    if not engine and not plan_only:
+        from . import engine as eng
+        pat, what = eng.asset_pattern(prof)
+        out(f"llama.cpp (what runs the models) is not installed here: llmbox can get the official build for this computer - {what}.")
+        if _ask("Install it into ~/.llmbox/engines?", "y", yes) == "y":
+            eng.install(hosts.host_of(prof), prof, out=out, stream=sys.stdout.isatty())
+            prof = hosts.detect(host, prof.get("ssh"), measure=False)   # it finds the new llama-server
+            engine = prof["hw"].get("runtimes") or []
+        if not engine:
+            out("Without llama.cpp nothing can run; `llmbox` again when it is installed.")
     _fresh_registry(out)
     cpu = prof["hw"].get("cpu") or {}
     rows = pick.rank(spec, cpu.get("cores") or cpu.get("threads"), "all", cls, mac)

@@ -83,7 +83,7 @@ def hwinfo() -> dict:
                 "cpu": {"model": chip, "threads": os.cpu_count(), "cores": int(sh("sysctl -n hw.physicalcpu") or 0) or None},
                 "ram_mib": mem_mib, "ram_available_mib": None, "gpus": gpus, "llama_swap": {},
                 "runtimes": [{"path": p, "version": sh(f"'{p}' --version 2>&1 | head -2", timeout=20).replace(chr(10), " | ")}
-                             for p in sorted({shutil.which("llama-server") or ""} - {""})],
+                             for p in sorted(({shutil.which("llama-server") or ""} | set(glob.glob(os.path.expanduser("~/.llmbox/engines/*/llama-server")))) - {""})],
                 "disk_free_gib": round(du.free / 2**30, 1), "models_dir_guess": os.path.expanduser("~/models")}
     mem = {}
     if os.path.exists("/proc/meminfo"):
@@ -97,7 +97,8 @@ def hwinfo() -> dict:
                 cpu_model = line.split(":", 1)[1].strip()
                 break
     runtimes = []
-    for path in sorted(set(glob.glob(os.path.expanduser("~/*/build/bin/llama-server")) + [shutil.which("llama-server") or ""])):
+    for path in sorted(set(glob.glob(os.path.expanduser("~/*/build/bin/llama-server")) + glob.glob(os.path.expanduser("~/.llmbox/engines/*/llama-server"))
+                           + [shutil.which("llama-server") or ""])):
         if path and os.path.exists(path):
             ver = sh(f"'{path}' --version 2>&1 | head -2", timeout=20)
             runtimes.append({"path": path, "version": ver.replace("\n", " | ")})
@@ -111,8 +112,11 @@ def hwinfo() -> dict:
     except Exception:
         pass
     du = shutil.disk_usage(os.path.expanduser("~"))
+    import re as _re   # the driver's highest CUDA: "CUDA Version: 13.1" (older drivers) or "CUDA UMD Version: 13.3" (610+)
+    m = _re.search(r"CUDA(?: UMD)? Version:\s*([\d.]+)", sh("nvidia-smi 2>/dev/null | head -5")) if gpus else None
+    cuda = m.group(1) if m else None
     return {
-        "hostname": platform.node(), "os": platform.platform(), "python": sys.version.split()[0],
+        "hostname": platform.node(), "os": platform.platform(), "python": sys.version.split()[0], "cuda_driver": cuda,
         "cpu": {"model": cpu_model, "threads": os.cpu_count(), "cores": _physical_cores()},
         "ram_mib": mem.get("MemTotal", 0), "ram_available_mib": mem.get("MemAvailable", 0),
         "gpus": gpus, "runtimes": runtimes, "llama_swap": swap,
