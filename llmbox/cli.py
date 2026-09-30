@@ -161,7 +161,11 @@ def cmd_db(a: argparse.Namespace) -> None:
         db.sync()
         import sqlite3
         c = sqlite3.connect(f"file:{db.DB}?mode=ro", uri=True)
-        cur = c.execute(a.query)
+        try:
+            cur = c.execute(a.query)
+        except sqlite3.Error as e:   # a typo in a column name: say what there is instead of a traceback
+            tables = {t: [r[1] for r in c.execute(f"PRAGMA table_info({t})")] for (t,) in c.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view') ORDER BY name")}
+            raise SystemExit(f"sql error: {e}\n\n" + "\n".join(f"  {t}: {', '.join(cs)}" for t, cs in tables.items()))
         cols = [d[0] for d in cur.description or []]
         print("\t".join(cols))
         for r in cur.fetchmany(a.limit):
