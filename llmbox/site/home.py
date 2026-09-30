@@ -19,45 +19,33 @@ def _scatter(local: list[dict]) -> str:
     return f'<noscript>{len(pts)} models; enable JavaScript for the chart</noscript>'
 
 
-def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick", rs: list[dict] | None = None,
-         sd: dict | None = None) -> str:
-    from ..import suite as _s
-    suite_version = suite_version or _s.VERSION
-    rs = rs if rs is not None else report.rows(host, suite_version=suite_version, tier=tier)
-    ref = next((r for r in rs if r["host"].get("id") == "cloud"), None)
-    local = [r for r in rs if r["host"].get("id") != "cloud" and not r.get("partial")]
-    clouds = [r for r in rs if r["host"].get("id") == "cloud" and not r.get("partial")]
-    hw = next((r["host"] for r in local), {})
-    ref_box = f'{hw.get("gpu", "").replace("NVIDIA GeForce ", "")} + {hw.get("ram_gib", "?")} GB RAM'
-    ranks = rank_ranges(local)
-    q = [j for j in queue_state() if j["model"] not in {r["id"] for r in local}]
-    sd = sd or shape_data(local, host)
-    names0 = {r["id"]: model_name(r) for r in local}
-    # one model in two quants (Tiel Q4 and Q6): the chart legend and the picks say which is which
-    dup = {n for n in names0.values() if list(names0.values()).count(n) > 1}
-    labels = {rid: n + (f" · {_quant(next(r['file'] for r in local if r['id'] == rid)).split(' ')[0]}" if n in dup else "") for rid, n in names0.items()}
+def _pop(label: str, title: str, text: str) -> str:
+    return f'<span class="tip">{label}<span class="pop"><b>{esc(title)}</b>{esc(text)}</span></span>'
 
-    def pop(label: str, title: str, text: str) -> str:
-        return f'<span class="tip">{label}<span class="pop"><b>{esc(title)}</b>{esc(text)}</span></span>'
-    # what llmbox's settings are worth: the biggest measured gains over stock llama.cpp, same model, same box
+
+def _settings_worth(host: str, local: list[dict], names0: dict) -> str:
+    """What llmbox's settings are worth: the biggest measured gains over stock llama.cpp, same model, same box."""
     opts = {k: v for k, v in optimize_records(host).items() if k in {r["id"] for r in local}}
     gain = lambda o: o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1
     top = sorted(opts.items(), key=lambda kv: -gain(kv[1]))[:4]
-    optpanel = ("" if not top or gain(top[0][1]) < 0.15 else
-                '<section class="panel feed optp"><div class="lbl">What the settings are worth</div><p class="q nf0">Same model, same PC: stock llama.cpp → llmbox settings.</p><ul>'
-                + "".join(f'<li><a href="recipe-{esc(rid)}.html">{esc(names0[rid])}</a> <span class="fv">{o["summary"]["stock"]["decode"]:.0f} → {o["summary"]["llmbox"]["decode"]:.0f} tok/s</span>'
-                          f'<em>{gain(o) * 100:+.0f}%</em></li>' for rid, o in top)
-                + '</ul><p class="q nf"><a href="method.html#settings">all models →</a></p></section>')
-    # the ranking: one line per model (place, name, score with its range, speed, fit, what stands out); the nine block
-    # scores open under the line. Colour and marker as on the chart.
+    return ("" if not top or gain(top[0][1]) < 0.15 else
+            '<section class="panel feed optp"><div class="lbl">What the settings are worth</div><p class="q nf0">Same model, same PC: stock llama.cpp → llmbox settings.</p><ul>'
+            + "".join(f'<li><a href="recipe-{esc(rid)}.html">{esc(names0[rid])}</a> <span class="fv">{o["summary"]["stock"]["decode"]:.0f} → {o["summary"]["llmbox"]["decode"]:.0f} tok/s</span>'
+                      f'<em>{gain(o) * 100:+.0f}%</em></li>' for rid, o in top)
+            + '</ul><p class="q nf"><a href="method.html#settings">all models →</a></p></section>')
+
+
+def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dict, sd: dict) -> tuple[str, list[str]]:
+    """The ranking's header and rows: one line per model (place, name, score with its range, speed, fit, what stands
+    out), its uses and blocks opening under the line; Claude as reference rows. Colour and marker as on the chart."""
     med = {b: statistics.median(v) for b in BLOCKS if (v := [r["blocks"][b] for r in local if r["blocks"].get(b) is not None])}
     head = ("<tr><th class='rk'>#</th><th class='l'>MODEL</th><th class='sch' data-sort='score'><div class='fp'><div class='trk axis'></div><span class='num'>"
-            + pop("SCORE ↕", "Score · % of Claude Opus 5.5", "How close the model gets to Claude Opus 5.5 on the same tasks (Opus = 100%). "
-                  "The dot is the score, the line its 95% range: models whose lines overlap are not measurably apart yet. Click to sort.")
-            + "</span></div></th><th class='r' data-sort='speed'>" + pop("TOK/S ↕", "Speed on your box", "Tokens per second while writing the answer, "
+            + _pop("SCORE ↕", "Score · % of Claude Opus 5.5", "How close the model gets to Claude Opus 5.5 on the same tasks (Opus = 100%). "
+                   "The dot is the score, the line its 95% range: models whose lines overlap are not measurably apart yet. Click to sort.")
+            + "</span></div></th><th class='r' data-sort='speed'>" + _pop("TOK/S ↕", "Speed on your box", "Tokens per second while writing the answer, "
             "in a short chat (big number) and with a long document in context (small). Measured on the reference PC, predicted for the box you pick. Click to sort.")
-            + "</th><th class='r'>" + pop("FITS", "Does it fit?", "Whether the model and its context fit in the graphics card plus RAM of the box you pick, "
-            "and the largest context that does.") + "</th><th class='l'>" + pop("STANDS OUT", "Stands out", "Blocks where the model scores at least "
+            + "</th><th class='r'>" + _pop("FITS", "Does it fit?", "Whether the model and its context fit in the graphics card plus RAM of the box you pick, "
+            "and the largest context that does.") + "</th><th class='l'>" + _pop("STANDS OUT", "Stands out", "Blocks where the model scores at least "
             "6 points above (▲) or below (▼) the typical (median) local model here. Click a row for all nine.") + "</th><th></th></tr>")
     body = []
     for r in local:
@@ -78,6 +66,11 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
         note = "cloud · the 100% mark" if ref and r["id"] == ref["id"] else "cloud · for comparison"
         body.append(f"<tr class='cloud' data-rid='{esc(r['id'])}'><td class='rk'>☁</td><td class='l mod'><div class='mw'><span></span><span class='m'>{esc(model_name(r))}</span><span class='qt'>{note}</span></div></td>"
                     f"<td class='sco'>{_pct(r.get('vs_ref'))}</td><td class='spd r'></td><td class='fit'></td><td class='so'></td><td class='act'></td></tr>")
+    return head, body
+
+
+def _queue_line(q: list[dict]) -> str:
+    """What is being measured now and what is next."""
     qline = ""
     run = next((j for j in q if j["status"] == "running"), None)
     nxt = [j["model"] for j in q if j is not run]
@@ -87,6 +80,11 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
                                           + (f"<span class='q'>{run['done']} of {run['total']} tasks</span>" if run["total"] else "<span class='q'>starting</span>") if run else "")
                  + (f"<span class='q nx'>Next: {esc(', '.join(nxt))}</span>" if nxt else "") + "</div>")
 
+    return qline
+
+
+def _feed(host: str, q: list[dict], local: list[dict], clouds: list[dict], suite_version: str, tier: str) -> list[str]:
+    """The latest results comparable with the ranking, newest first (the model being measured on top)."""
     feed, names = [], {r["id"]: model_name(r) for r in local + clouds}
     for j in q:
         if j["status"] == "running":
@@ -106,14 +104,44 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
                     f"<span class='when'>{'cloud' if cloud else esc((rec.get('host') or {}).get('gpu', '?').replace('NVIDIA GeForce ', ''))} · {_ago(rec.get('created', ''))}</span></li>")
         if len(feed) >= 6:
             break
+    return feed
 
-    presets = "".join(f'<button class="{"on" if i == 0 else ""}" data-p="{i}" title="{esc(" · ".join(f"{LABEL[b].lower()} {v}" for b, v in w.items()))}">{esc(n)}</button>' for i, (n, w) in enumerate(PRESETS))
+
+def _chart_data(sd: dict, local: list[dict], clouds: list[dict], ref: dict | None, ranks: dict, names0: dict) -> dict:
+    """What the page script draws the chart and the ranking from."""
+    # one model in two quants (Tiel Q4 and Q6): the chart says which is which
+    dup = {n for n in names0.values() if list(names0.values()).count(n) > 1}
+    labels = {rid: n + (f" · {_quant(next(r['file'] for r in local if r['id'] == rid)).split(' ')[0]}" if n in dup else "") for rid, n in names0.items()}
     data = dict(sd, families=[[n, c] for _k, n, c in FAMILIES], presets=[w for _, w in PRESETS], refBlocks=(ref or {}).get("blocks") or {},
                 points=[{"id": r["id"], "name": labels[r["id"]], "model": names0[r["id"]], "quant": _quant(r["file"]).split(" ")[0],
                          "fam": family((sd["recipes"].get(r["id"]) or {}).get("arch"))[0], "kind": _kind(r.get("hf_repo")), "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": r["speed"].get("decode_tps"),
                          "td": float(report._deep(r["speed"])) if report._deep(r["speed"]) != "-" else None, "rank": list(ranks[r["id"]])} for r in local]
                 + [{"id": r["id"], "name": model_name(r), "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": None, "td": None,
                     "rank": None, "cloud": True} for r in clouds])
+    return data
+
+
+def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick", rs: list[dict] | None = None,
+         sd: dict | None = None) -> str:
+    """The home page: the chart, the ranking by use, the settings' worth, the latest results, what's new."""
+    from .. import suite as _s
+    suite_version = suite_version or _s.VERSION
+    rs = rs if rs is not None else report.rows(host, suite_version=suite_version, tier=tier)
+    ref = next((r for r in rs if r["host"].get("id") == "cloud"), None)
+    local = [r for r in rs if r["host"].get("id") != "cloud" and not r.get("partial")]
+    clouds = [r for r in rs if r["host"].get("id") == "cloud" and not r.get("partial")]
+    hw = next((r["host"] for r in local), {})
+    ref_box = f'{hw.get("gpu", "").replace("NVIDIA GeForce ", "")} + {hw.get("ram_gib", "?")} GB RAM'
+    ranks = rank_ranges(local)
+    q = [j for j in queue_state() if j["model"] not in {r["id"] for r in local}]
+    sd = sd or shape_data(local, host)
+    names0 = {r["id"]: model_name(r) for r in local}
+    optpanel = _settings_worth(host, local, names0)
+    head, body = _ranking(local, clouds, ref, ranks, sd)
+    qline = _queue_line(q)
+    feed = _feed(host, q, local, clouds, suite_version, tier)
+    presets = "".join(f'<button class="{"on" if i == 0 else ""}" data-p="{i}" title="{esc(" · ".join(f"{LABEL[b].lower()} {v}" for b, v in w.items()))}">{esc(n)}</button>' for i, (n, w) in enumerate(PRESETS))
+    data = _chart_data(sd, local, clouds, ref, ranks, names0)
     body = f"""
 <h1 class="q1">What should I run on my box?</h1>
 <p class="lede">AI models you can run on your own computer, graded on real work (coding, tools, documents, writing) and timed on a real PC.
