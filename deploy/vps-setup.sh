@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time setup of the llmbox server on a fresh Ubuntu 24.04 VPS (Hetzner CX23 or alike), as root:
 #   curl -fsSL https://raw.githubusercontent.com/iaroslav-ternovyi/llmbox/main/deploy/vps-setup.sh | bash -s -- https://github.com/iaroslav-ternovyi/llmbox [<ssh-pubkey>]
-# It creates the user llmbox, installs Python 3.12, Caddy (HTTPS) and Node (for wrangler), clones llmbox, and starts
+# It creates the user llmbox, installs Python 3.12, Caddy (HTTPS), bubblewrap (the sandbox) and Node 22 (wrangler), clones llmbox, and starts
 #   llmbox-intake.service   the intake (llmbox serve) on 127.0.0.1:8767; accepted submissions rebuild and publish the site
 #   caddy                   https://<this ip, dashed>.sslip.io -> /api/* of the intake (a certificate without a domain)
 # Secrets (Cloudflare token) go in /etc/llmbox.env by hand afterwards; nothing secret is in this script or the repo.
@@ -11,13 +11,17 @@ REPO="${1:?usage: vps-setup.sh <repo-url> [<ssh public key for the llmbox user>]
 PUBKEY="${2:-}"
 
 apt-get update -q
-apt-get install -y -q python3 python3-venv git rsync ufw bubblewrap nodejs apparmor debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+apt-get install -y -q python3 python3-venv git rsync ufw bubblewrap apparmor debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+# Node 22+ for wrangler (the site upload); Ubuntu 24.04 ships 18
+if ! node -e 'process.exit(parseInt(process.versions.node) >= 22 ? 0 : 1)' 2>/dev/null; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
+  apt-get install -y -q nodejs
+fi
 if ! command -v caddy >/dev/null; then
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
   apt-get update -q && apt-get install -y -q caddy
 fi
-command -v npx >/dev/null || apt-get install -y -q npm
 # Ubuntu 24.04 lets only profiled programs make user namespaces: allow bubblewrap (the re-grading sandbox)
 if [ -d /etc/apparmor.d ] && [ ! -f /etc/apparmor.d/bwrap-llmbox ]; then
   printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile bwrap-llmbox /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' > /etc/apparmor.d/bwrap-llmbox
