@@ -99,4 +99,4 @@
 .pk h2{margin:4px 0 6px;font-size:22px}.pk h2 small{color:var(--muted);font-size:13px;font-weight:400}.pk p{margin:0}
 .pkc{position:relative}.pkc pre.cmd{margin:0;padding-right:88px;background:#0b0c09;border:1px solid var(--line);padding:12px 14px;font-size:12px;overflow-x:auto;white-space:pre}
 .pkc .cpy{position:absolute;top:7px;right:8px}.pkc .q{margin-top:6px;font-size:12px}
-@media (max-width:760px){.pk{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:760px){.pk{grid-template-columns:minmax(0,1fr)}.pkc pre.cmd{padding-right:14px}.pkc .cpy{position:static;margin-top:8px}}
