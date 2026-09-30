@@ -611,11 +611,27 @@ def cmd_site(a) -> None:
         print(p)
 
 
-def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(prog="llmbox", description="Get the most quality x speed out of local LLMs on your hardware.")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+# `llmbox --help` lists the commands by what you want to do, most used first
+COMMAND_GROUPS = [
+    ("Pick and run a model on your box", ["host", "scout", "fit", "recipe", "install", "tune", "optimize"]),
+    ("Measure it", ["bench", "queue", "speed", "probe", "loops", "traces"]),
+    ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
+    ("Develop the test", ["validate", "snapshot"]),
+]
 
-    h = sub.add_parser("host", help="register / inspect machines that run models")
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(prog="llmbox", description="Get the most quality x speed out of local LLMs on your hardware.",
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<command>")
+    helps: dict = {}
+
+    def command(name: str, help: str) -> argparse.ArgumentParser:
+        """A command: listed by purpose in `llmbox --help` (COMMAND_GROUPS), its line as the description of `llmbox <name> --help`."""
+        helps[name] = help
+        return sub.add_parser(name, description=help)   # no help=: the flat list stays out of the way
+
+    h = command("host", "register / inspect machines that run models")
     h.add_argument("action", choices=["add", "info", "list"])
     h.add_argument("name", nargs="?")
     h.add_argument("--ssh", help="user@host or ~/.ssh/config alias (omit for this machine)")
@@ -623,7 +639,7 @@ def main(argv: list[str] | None = None) -> None:
     h.add_argument("--no-measure", action="store_true", help="skip the bandwidth probe")
     h.set_defaults(fn=cmd_host)
 
-    s = sub.add_parser("scout", help="which quants of a Hugging Face GGUF repo fit a host, and how fast (no download)")
+    s = command("scout", "which quants of a Hugging Face GGUF repo fit a host, and how fast (no download)")
     s.add_argument("repo", help="e.g. unsloth/Qwen3.6-35B-A3B-GGUF")
     s.add_argument("--host", required=True)
     s.add_argument("--kv", default="q8_0", help="KV cache type (default q8_0)")
@@ -633,7 +649,7 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_scout)
 
-    fp = sub.add_parser("fit", help="fit a recipe's hardware layer (context, batch, threads...) to a host; no download")
+    fp = command("fit", "fit a recipe's hardware layer (context, batch, threads...) to a host; no download")
     fp.add_argument("recipe")
     fp.add_argument("--from", dest="src", default="box", help="host whose recipe and measurements to start from (default box)")
     fp.add_argument("--host", help="registered target host (default: the --from host)")
@@ -647,7 +663,7 @@ def main(argv: list[str] | None = None) -> None:
     fp.add_argument("--force", action="store_true", help="with --write: replace an existing recipe file")
     fp.add_argument("--json", action="store_true")
     fp.set_defaults(fn=cmd_fit)
-    ip = sub.add_parser("install", help="put a recipe on a host: fit, download, verify, launcher, llama-swap entry (dry run unless --apply)")
+    ip = command("install", "put a recipe on a host: fit, download, verify, launcher, llama-swap entry (dry run unless --apply)")
     ip.add_argument("recipe")
     ip.add_argument("--host", help="target host (default: the --from host)")
     ip.add_argument("--from", dest="src", default="box", help="host whose recipe to install (default box)")
@@ -655,46 +671,46 @@ def main(argv: list[str] | None = None) -> None:
     ip.add_argument("--force", action="store_true", help="replace a different existing launcher (kept as .bak); act while the host is busy")
     ip.add_argument("--unload", action="store_true", help="with --apply: unload llama-swap's idle model and wait for the host to go idle first")
     ip.set_defaults(fn=cmd_install)
-    tp = sub.add_parser("tune", help="measure speed knobs (speculative decoding, VRAM margin, prompt batch) on the idle box; keep what wins")
+    tp = command("tune", "measure speed knobs (speculative decoding, VRAM margin, prompt batch) on the idle box; keep what wins")
     tp.add_argument("recipes", nargs="+")
     tp.add_argument("--host", default="box")
     tp.add_argument("--plan", action="store_true", help="list the variants only, measure nothing")
     tp.set_defaults(fn=cmd_tune)
-    vp = sub.add_parser("verify", help="re-grade saved runs from their answers (the server-side check of a submitted run)")
+    vp = command("verify", "re-grade saved runs from their answers (the server-side check of a submitted run)")
     vp.add_argument("results", nargs="*", help="result files (default: every suite run)")
     vp.add_argument("-v", "--verbose", action="store_true", help="also list the answers that cannot be re-graded")
     vp.set_defaults(fn=cmd_verify)
-    dp = sub.add_parser("db", help="the results database (~/.llmbox/llmbox.db): sync the result files in, stats, read-only SQL")
+    dp = command("db", "the results database (~/.llmbox/llmbox.db): sync the result files in, stats, read-only SQL")
     dp.add_argument("action", choices=["sync", "stats", "sql"])
     dp.add_argument("query", nargs="?", default="SELECT recipe_id, suite_version, tier, capability FROM runs WHERE kind='suite' ORDER BY created DESC")
     dp.add_argument("--limit", type=int, default=50)
     dp.set_defaults(fn=cmd_db)
-    wp = sub.add_parser("watch", help="look for new models, new files of measured models, runtime releases and watched PRs (daily job)")
+    wp = command("watch", "look for new models, new files of measured models, runtime releases and watched PRs (daily job)")
     wp.add_argument("--list", type=int, metavar="N", help="print the newest N events instead of looking")
     wp.set_defaults(fn=cmd_watch)
-    gp = sub.add_parser("grade-pending", help="grade explanations that cloud runs left pending (reader on the box; box must be free)")
+    gp = command("grade-pending", "grade explanations that cloud runs left pending (reader on the box; box must be free)")
     gp.add_argument("results", nargs="*", help="result files (default: every one with pending rows)")
     gp.set_defaults(fn=cmd_grade_pending)
-    op = sub.add_parser("optimize", help="tune (if not yet), apply, then stock llama.cpp vs llmbox back to back, then re-probe; box must be idle")
+    op = command("optimize", "tune (if not yet), apply, then stock llama.cpp vs llmbox back to back, then re-probe; box must be idle")
     op.add_argument("recipes", nargs="+")
     op.add_argument("--host", default="box")
     op.add_argument("--retune", action="store_true", help="tune again even if the recipe was tuned before")
     op.add_argument("--endpoint", default="http://192.0.2.10:8080")
     op.set_defaults(fn=cmd_optimize)
-    pp = sub.add_parser("probe", help="re-measure only the 1-stream speed of a served recipe (e.g. after tune)")
+    pp = command("probe", "re-measure only the 1-stream speed of a served recipe (e.g. after tune)")
     pp.add_argument("model", help="llama-swap id")
     pp.add_argument("--host", default="box")
     pp.add_argument("--recipe", help="recipe id (default: the model id)")
     pp.add_argument("--endpoint", default="http://192.0.2.10:8080")
     pp.set_defaults(fn=cmd_probe)
-    ir = sub.add_parser("irt", help="task-family calibration (IRT) for adaptive runs: calibrate / report / simulate")
+    ir = command("irt", "task-family calibration (IRT) for adaptive runs: calibrate / report / simulate")
     ir.add_argument("action", choices=["calibrate", "report", "simulate", "rescore"])
     ir.add_argument("paths", nargs="*", help="rescore: result files (default: every run of this suite content)")
     ir.add_argument("--write", action="store_true", help="rescore: store the new estimate in adaptive results")
     ir.add_argument("--content-hash", help="suite content hash (default: this suite)")
     ir.add_argument("--budget", type=float, default=45, help="simulate: minutes")
     ir.set_defaults(fn=cmd_irt)
-    lp = sub.add_parser("loops", help="fast reasoning-loop test: replay contexts where models looped before")
+    lp = command("loops", "fast reasoning-loop test: replay contexts where models looped before")
     lp.add_argument("action", choices=["extract", "replay"])
     lp.add_argument("--transcripts", default="~/agent-bench-runs/claude-config/projects")
     lp.add_argument("--min-tokens", type=int, default=15000)
@@ -709,7 +725,7 @@ def main(argv: list[str] | None = None) -> None:
     lp.add_argument("--out", help="append per-sample results (JSONL)")
     lp.set_defaults(fn=cmd_loops)
 
-    sp = sub.add_parser("speed", help="measure a recipe (or a variant) on its host; the box must be idle")
+    sp = command("speed", "measure a recipe (or a variant) on its host; the box must be idle")
     sp.add_argument("recipe")
     sp.add_argument("--host", required=True)
     sp.add_argument("--set", action="append", help="override, e.g. --set speculative.draft_max=3 (repeatable)")
@@ -717,7 +733,7 @@ def main(argv: list[str] | None = None) -> None:
     sp.add_argument("--unload", action="store_true", help="unload llama-swap models first (only when nothing is using them!)")
     sp.set_defaults(fn=cmd_speed)
 
-    b = sub.add_parser("bench", help="run the standard suite against a served model (OpenAI-compatible endpoint)")
+    b = command("bench", "run the standard suite against a served model (OpenAI-compatible endpoint)")
     b.add_argument("model", help="model id at the endpoint (e.g. a llama-swap id)")
     b.add_argument("--endpoint", default="http://192.0.2.10:8080",
                    help="OpenAI-compatible base URL, or claude-code[:effort] for a frontier reference via the Claude subscription")
@@ -741,7 +757,7 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--bank", help="adaptive: content hash of the calibrated bank to use (default: this suite's)")
     b.set_defaults(fn=cmd_bench)
 
-    qp = sub.add_parser("queue", help="persistent benchmark job queue with GPU health gating and auto-resume")
+    qp = command("queue", "persistent benchmark job queue with GPU health gating and auto-resume")
     qp.add_argument("action", choices=["add", "list", "status", "run", "cancel", "retry", "pause", "resume"])
     qp.add_argument("models", nargs="*", help="add: model ids at the endpoint")
     qp.add_argument("--suite", default="suite-v0.8", help="git tag of the suite to run (frozen via llmbox snapshot)")
@@ -754,25 +770,25 @@ def main(argv: list[str] | None = None) -> None:
     qp.add_argument("--ids", nargs="*", default=[], help="cancel / retry: job ids")
     qp.add_argument("--bench-args", default="", help='add: extra bench args, e.g. --bench-args "--recipe x --parallel 3"')
     qp.set_defaults(fn=cmd_queue)
-    va = sub.add_parser("validate", help="check every task kind: determinism, oracle = 1, empty = 0, answer-format tolerance")
+    va = command("validate", "check every task kind: determinism, oracle = 1, empty = 0, answer-format tolerance")
     va.add_argument("--all", action="store_true", help="every kind of every block (default: the quick tier's kinds)")
     va.add_argument("--kind", action="append", help="only these kinds (e.g. tools.outreach or outreach), repeatable")
     va.add_argument("--seeds", type=int, default=3)
     va.add_argument("--frontier", action="store_true", help="also run the frontier reference (Claude subscription) and flag its failures")
     va.set_defaults(fn=cmd_validate)
-    sn = sub.add_parser("snapshot", help="freeze a git tag of llmbox into ~/.llmbox/snapshots/<tag>")
+    sn = command("snapshot", "freeze a git tag of llmbox into ~/.llmbox/snapshots/<tag>")
     sn.add_argument("tag")
     sn.add_argument("--no-validate", action="store_true", help="skip the validate gate (not recommended)")
     sn.set_defaults(fn=cmd_snapshot)
 
-    rg = sub.add_parser("regrade", help="re-score text-graded items of saved results with the current graders")
+    rg = command("regrade", "re-score text-graded items of saved results with the current graders")
     rg.add_argument("results", nargs="+", help="result json files (~/.llmbox/results/<host>/*.json)")
     rg.add_argument("--dry-run", action="store_true")
     rg.add_argument("--reader", nargs="?", const="http://gpu-box:8080", default=None,
                     help="also grade the explanations again with the reader model at this endpoint (default: the box)")
     rg.set_defaults(fn=cmd_regrade)
 
-    rc_ = sub.add_parser("recipe", help="recipes: list / show / render a launcher / check the host runs what the recipe says")
+    rc_ = command("recipe", "recipes: list / show / render a launcher / check the host runs what the recipe says")
     rc_.add_argument("action", choices=["list", "show", "render", "check", "new"])
     rc_.add_argument("ids", nargs="*", help="recipe ids; for `new`: the Hugging Face repo")
     rc_.add_argument("--host", default="box")
@@ -781,27 +797,31 @@ def main(argv: list[str] | None = None) -> None:
     rc_.add_argument("--write", action="store_true", help="new: save the draft under the host's recipes")
     rc_.set_defaults(fn=cmd_recipe)
 
-    tr = sub.add_parser("traces", help="budget / loop audit of a run's saved thinking (~/.llmbox/traces/<run>)")
+    tr = command("traces", "budget / loop audit of a run's saved thinking (~/.llmbox/traces/<run>)")
     tr.add_argument("run", help="run name (e.g. job-8) or a traces directory")
     tr.add_argument("--near", type=int, default=20000, help="flag replies at least this long (tokens)")
     tr.add_argument("--all", action="store_true", help="list every item")
     tr.add_argument("--excerpts", action="store_true", help="print the text before each detected loop")
     tr.set_defaults(fn=cmd_traces)
 
-    st = sub.add_parser("site", help="build the static site (home, recipe, run, hardware, compare pages) from saved results into a folder")
+    st = command("site", "build the static site (ranking, model pages, runs, other computers, compare, new models, method) from saved results")
     st.add_argument("--out", default="~/.llmbox/site")
     st.add_argument("--host", default="box")
     st.add_argument("--suite-version", help="default: the current suite version")
     st.add_argument("--tier", default="quick")
     st.set_defaults(fn=cmd_site)
 
-    rp = sub.add_parser("report", help="leaderboard of saved suite results (terminal + optional static HTML)")
+    rp = command("report", "leaderboard of saved suite results (terminal + optional static HTML)")
     rp.add_argument("--host")
     rp.add_argument("--suite-version")
     rp.add_argument("--tier")
     rp.add_argument("--html", help="write a self-contained HTML page here")
     rp.set_defaults(fn=cmd_report)
 
+    missing = set(helps) - {c for _g, cs in COMMAND_GROUPS for c in cs}
+    assert not missing, f"commands without a group in COMMAND_GROUPS: {missing}"
+    ap.epilog = "\n\n".join(f"{g}:\n" + "\n".join(f"  {c:14s} {helps[c]}" for c in cs if c in helps) for g, cs in COMMAND_GROUPS) + \
+        "\n\nllmbox <command> --help for its options. Data lives in ~/.llmbox (results, recipes, queue, site)."
     a = ap.parse_args(argv)
     a.fn(a)
 
