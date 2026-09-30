@@ -695,13 +695,14 @@ def block_estimate(bank: Bank, obs: list[tuple[str, float]], prior: tuple | None
             "lo": cs[max(0, int(0.025 * len(cs)))], "hi": cs[min(len(cs) - 1, int(0.975 * len(cs)))]}
 
 
-def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0, max_per_family: int = 2, cost=None) -> str | None:
-    """The family whose answer would shrink the capability's variance the most per expected second."""
+def next_family_blocks(bank: Bank, est: dict, used: dict, slowness: float = 1.0, max_per_family: int = 2, cost=None,
+                       allowed: set | None = None) -> str | None:
+    """The family whose answer would shrink the capability's variance the most per expected second (among `allowed`)."""
     cost = cost or (lambda f: bank.seconds[f] * slowness)
     best, best_v = None, -1.0
     wsum = sum(bank.weights.values())
     for f in bank.a:
-        if used.get(f, 0) >= max_per_family:
+        if used.get(f, 0) >= max_per_family or (allowed is not None and f not in allowed):
             continue
         fresh = 1.5 if not used.get(f) else 1.0   # coverage: a family not yet tried beats a repeat of the same value
         blk = bank.block[f]

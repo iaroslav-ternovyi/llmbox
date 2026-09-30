@@ -481,7 +481,9 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
             fam = None
         if fam:
             pass
-        elif short:   # every block gets its minimum first, cheapest informative family of that block
+        elif short:   # every block gets its minimum first, cheapest informative family of that block. Simulated
+            # (tests/sim_adaptive.py, 2026-10-01) against choosing by value per second, against no coverage and against
+            # skipping answers over a fifth of the budget: this rule gives the narrowest range and the smallest error
             full = {f for f in bank.a if bank.block[f] not in short or per_fam.get(f, 0) >= max_per_family}
             fam = irt.next_family(bank, sel["theta"], full, slowness, cost=cost)
         else:
