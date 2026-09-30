@@ -166,18 +166,45 @@ int main(int argc, char **argv) {
 def bandwidth(seconds: float = 3.0) -> dict:
     if busy()["busy"]:
         return {"error": "host is busy (model serving or high load) - not measuring"}
-    cc = shutil.which("gcc") or shutil.which("cc")
-    if not cc:
-        return {"error": "no C compiler on host; pass --ram-bw manually"}
+    cc = None if os.environ.get("LLMBOX_NO_CC") else (shutil.which("gcc") or shutil.which("cc"))
+    if not cc:   # a fresh install often has no compiler: the Python probe below, rougher
+        return _bandwidth_py(seconds)
     d = tempfile.mkdtemp(prefix="llmbox-bw-")
     src, exe = os.path.join(d, "bw.c"), os.path.join(d, "bw")
     open(src, "w").write(_BW_C)
     r = subprocess.run([cc, "-O3", "-march=native", "-fopenmp", src, "-o", exe], capture_output=True, text=True)
     if r.returncode:
-        return {"error": "compile failed", "stderr": r.stderr[-500:]}
+        shutil.rmtree(d, ignore_errors=True)
+        return _bandwidth_py(seconds)
     out = subprocess.run([exe, str(seconds)], capture_output=True, text=True, timeout=120).stdout
     shutil.rmtree(d, ignore_errors=True)
     return json.loads(out)
+
+
+PY_BW_SCALE = 1.0   # C probe / Python probe on the same machine (set from the reference box)
+
+
+def _copy_worker(args):
+    mib, seconds = args
+    import time as _t
+    src, dst = bytearray(mib << 20), bytearray(mib << 20)
+    mv_s, mv_d = memoryview(src), memoryview(dst)
+    mv_d[:] = mv_s   # touch the pages first
+    n, t0 = 0, _t.time()
+    while _t.time() - t0 < seconds:
+        mv_d[:] = mv_s   # a memcpy in C: reads and writes the buffer once
+        n += 1
+    return 2 * n * (mib << 20) / (_t.time() - t0)   # bytes moved (read + write) per second
+
+
+def _bandwidth_py(seconds: float) -> dict:
+    """RAM speed without a compiler: half the cores copying 512 MiB buffers (memcpy through memoryviews), the bytes
+    read and written per second, scaled to the C probe's read figure. Rougher: reported as an estimate."""
+    import multiprocessing as mp
+    n = max(1, (os.cpu_count() or 2) // 2)
+    with mp.get_context("spawn").Pool(n) as pool:
+        rates = pool.map(_copy_worker, [(512, seconds)] * n)
+    return {"ram_read_gbs": round(sum(rates) / 1e9 * PY_BW_SCALE, 1), "threads": n, "method": "python memcpy (estimate)"}
 
 
 def gguf_header(path: str) -> dict:

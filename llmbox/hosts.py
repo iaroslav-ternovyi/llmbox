@@ -129,7 +129,7 @@ def detect(name: str, ssh: str | None, ram_bw: float | None = None, measure: boo
     if not bw and measure and not apple:   # a Mac's memory speed is the chip's own figure (below)
         m = h.agent("bandwidth", "3", timeout=600)
         if "ram_read_gbs" in m:
-            bw = {"ram_read_gbs": m["ram_read_gbs"], "source": "measured", "threads": m.get("threads")}
+            bw = {"ram_read_gbs": m["ram_read_gbs"], "source": "estimated (no C compiler)" if m.get("method") else "measured", "threads": m.get("threads")}
         else:
             bw = {"ram_read_gbs": None, "source": m.get("error", "not measured")}
     old = load(name) if os.path.exists(path(name)) else {}
