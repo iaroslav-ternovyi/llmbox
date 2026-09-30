@@ -242,6 +242,15 @@ def _runs_panel(runs: list[dict], ref: dict | None, counted: dict) -> str:
             'Answers to tasks that changed since a run are left out.</p></section>')
 
 
+def _range_note(pool: list, runs: list) -> str:
+    """Why the range is as wide as it is: how many answers make it, and what narrows it."""
+    n = len(pool)
+    if not n:
+        return ""
+    return (f"This one is from {n} answer{'s' if n != 1 else ''} in {len(runs)} run{'s' if len(runs) != 1 else ''}; it narrows with every run "
+            f"(about half as wide at four times the answers), and <a href=\"method.html#people\">runs from people's computers</a> count too.")
+
+
 def _people_line(cls: list | None) -> str:
     """How many people's machines measured the model (llmbox submit), besides the reference PC."""
     others = [c for c in cls or [] if not c.get("ref")] + [dict(c, machines=c["machines"] - 1) for c in cls or [] if c.get("ref") and c["machines"] > 1]
@@ -303,7 +312,8 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
  <div class="acts"><a class="btn solid" href="#run">RUN IT</a><a class="btn" href="{esc(ctx['cmp'])}">COMPARE</a></div></section>
 <section class="panel verdict"><div class="tiles">{tiles}</div><p class="say">{_stands_sentence(s["blocks"], med)}</p></section>
 <section class="panel pad"><div class="lbl">Where it ranks</div>{_near_html(rid, rs, ctx["clouds"], ranks, look)}
- <p class="q" style="margin-top:12px">% of Claude Opus 5.5's score on the same tasks. The line is the 95% range: models whose lines overlap are not measurably apart yet. <a href="index.html">Full ranking →</a></p></section>
+ <p class="q" style="margin-top:12px">% of Claude Opus 5.5's score on the same tasks. The line is the 95% range: models whose lines overlap are not measurably apart yet.
+ {_range_note(pool, ctx.get("runs") or [])} <a href="index.html">Full ranking →</a></p></section>
 <section class="panel pad"><div class="lbl">What it is good at</div>{_groups_html(s["blocks"], med, col, (ref or {}).get("summary", {}).get("blocks"), lost)}
  {_groups_legend(ref=bool(ref))}<p class="q">Click a line to see the tasks it lost and why.</p></section>
 <section class="panel pad"><div class="lbl">Speed as the context grows</div>
