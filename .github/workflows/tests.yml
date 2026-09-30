@@ -1,0 +1,21 @@
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  portable:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: tests that need no saved results (python3 tests/run_all.py --portable)
+        env:
+          LLMBOX_HOME: ${{ runner.temp }}/llmbox
+          LLMBOX_NO_DB: "1"
+        run: python3 tests/run_all.py --portable

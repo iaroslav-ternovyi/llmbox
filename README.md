@@ -1,5 +1,7 @@
 # llmbox
 
+[![tests](https://github.com/iaroslav-ternovyi/llmbox/actions/workflows/tests.yml/badge.svg)](https://github.com/iaroslav-ternovyi/llmbox/actions/workflows/tests.yml)
+
 Get the most quality × speed out of local LLMs on your own hardware: pick a model and quantization that fits, tune
 llama.cpp for your box, measure it on real work, and publish the results as a static site.
 
@@ -79,7 +81,8 @@ options.
 | `hwclass.py`, `submit.py`, `server.py` | Hardware classes, sending measurements, the intake that takes them in |
 | `site/` | The static site. `words`: names and texts. `stats`: ties and places. `components`: shared pieces. `data`: records and pools. `layout`: the page frame. One module per page, plus `build`. Styles and scripts are in `site/assets/`. |
 
-Tests: `python3 tests/run_all.py` runs every test in parallel (~1.5 min), `--quick` skips the two slow ones. Each is also a
+Tests: `python3 tests/run_all.py` runs every test in parallel (~1.5 min), `--quick` skips the two slow ones, `--portable`
+runs only those that need no saved results of the reference box (what CI runs). Each is also a
 plain script (`python3 tests/test_site.py`).
 
 ## Docs

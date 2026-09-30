@@ -1,6 +1,7 @@
 """Every test script in tests/, in parallel, with one line each and a total. A test passes when it exits 0.
 Run: python3 tests/run_all.py            (all: ~1.5 min on 4 cores)
      python3 tests/run_all.py --quick    (without the two slow ones: the level fingerprints and techhelp's real-program checks)
+     python3 tests/run_all.py --portable (only what runs without the reference box's saved results: CI on GitHub)
 Not here: tests/real_programs.py (needs Docker) and validate_estimate.py / dry_compare.py (tools, not tests)."""
 import concurrent.futures as cf
 import os
@@ -10,6 +11,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SLOW = {"test_levels_stable.py", "test_techhelp.py"}
+# these read ~/.llmbox (the reference box's results, recipes, calibrated bank) or reach the box over ssh
+NEEDS_DATA = {"test_adaptive_blocks.py", "test_community.py", "test_fit.py", "test_pick.py", "test_real_engines.py",
+              "test_registry.py", "test_site.py", "test_submit.py", "test_submit_quality.py"}
 
 
 def run(name: str) -> tuple[str, int, float, str]:
@@ -21,8 +25,10 @@ def run(name: str) -> tuple[str, int, float, str]:
 
 def main() -> int:
     names = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".py"))
-    if "--quick" in sys.argv:
+    if "--quick" in sys.argv or "--portable" in sys.argv:
         names = [n for n in names if n not in SLOW]
+    if "--portable" in sys.argv:
+        names = [n for n in names if n not in NEEDS_DATA]
     t0, failed = time.time(), []
     with cf.ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as ex:
         for name, rc, sec, last in sorted(ex.map(run, names)):
