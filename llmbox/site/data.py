@@ -188,3 +188,70 @@ def task_flags(rec: dict) -> dict:
 
 def _vs(rec: dict, ref: dict | None) -> float | None:
     return round(100 * rec["summary"]["capability"] / ref["summary"]["capability"], 1) if ref else None
+
+
+# ---- speeds from other people's machines (llmbox submit -> llmbox serve -> the "community" host) ----------------------
+
+def _pct(v: list[float], q: float) -> float:
+    s = sorted(v)
+    i = (len(s) - 1) * q
+    lo = int(i)
+    return s[lo] + (s[min(lo + 1, len(s) - 1)] - s[lo]) * (i - lo)
+
+
+def _at(sp: dict, lo: int, hi: int) -> float | None:
+    """decode tok/s at the measured depth in [lo, hi) tokens (speed records list depths; suite records map them)."""
+    pts = [(d.get("depth") or 0, d.get("decode_tps")) for d in sp.get("depth") or []]
+    pts += [(report._depth_k(k) * 1000, d.get("decode_tps")) for k, d in (sp.get("by_depth") or {}).items()]
+    v = [t for dep, t in pts if lo <= dep < hi and t]
+    return v[0] if v else None
+
+
+def community_speeds(recipes: dict, ref_host: str = "box") -> dict:
+    """Per recipe id: its speed on every hardware class measured, the reference box included, as
+    [{class, label, machines, people, runs, t2, t32, t80, pp, p5, p95, outliers, ctx, ref}], most machines first.
+    recipes: {rid: model file name}. A machine counts once (the median of its runs), a class is the median of its
+    machines; a figure the intake flagged as an outlier is left out and counted. p5/p95 only from 5 machines on."""
+    import os as _os
+    import statistics as st
+    from .. import hwclass
+    per: dict = {}   # (rid, class) -> machine id -> list of (t2, t32, t80, pp, client, flags)
+    for h in (ref_host, "community"):
+        for _p, rec in report.results.files(h):
+            rid = (rec.get("recipe") or {}).get("id")
+            if rec.get("kind") != "speed" or rid not in recipes or rec.get("overrides"):   # a variant is not the recipe
+                continue
+            f = _os.path.basename((rec.get("model") or {}).get("file") or (rec.get("model") or {}).get("path") or "")
+            if f and recipes[rid] and f != recipes[rid]:
+                continue
+            sp = rec.get("speed") or {}
+            if not sp.get("decode_tps"):
+                continue
+            hostfp = rec.get("host") or {}
+            k = hostfp.get("class") or hwclass.of_host(hostfp)
+            sub = rec.get("submission") or {}
+            row = (sp["decode_tps"], _at(sp, 24000, 48000), _at(sp, 64000, 10**7), sp.get("prefill_tps"),
+                   sub.get("client") or "reference", "outlier" in (sub.get("flags") or []), h == ref_host,
+                   ((rec.get("recipe") or {}).get("placement") or {}).get("ctx") or 0)
+            per.setdefault((rid, k), {}).setdefault(hostfp.get("id") or "?", []).append(row)
+    out: dict = {}
+    for (rid, k), machines in per.items():
+        good = {m: [r for r in rows if not r[5]] for m, rows in machines.items()}
+        good = {m: rows for m, rows in good.items() if rows}
+        med = lambda i, rows: st.median([r[i] for r in rows if r[i]]) if any(r[i] for r in rows) else None
+        mach = [{"t2": med(0, rows), "t32": med(1, rows), "t80": med(2, rows), "pp": med(3, rows)} for rows in good.values()]
+        if not mach:
+            continue
+        cls = lambda f: round(st.median([m[f] for m in mach if m[f]]), 1) if any(m[f] for m in mach) else None
+        t2s = [m["t2"] for m in mach]
+        out.setdefault(rid, []).append({
+            "class": k, "label": hwclass.label(k), "machines": len(mach),
+            "people": len({r[4] for rows in good.values() for r in rows}), "runs": sum(len(r) for r in good.values()),
+            "t2": cls("t2"), "t32": cls("t32"), "t80": cls("t80"), "pp": cls("pp"),
+            "p5": round(_pct(t2s, 0.05), 1) if len(t2s) >= 5 else None, "p95": round(_pct(t2s, 0.95), 1) if len(t2s) >= 5 else None,
+            "outliers": sum(1 for rows in machines.values() for r in rows if r[5]),
+            "ctx": int(st.median([r[7] for rows in good.values() for r in rows if r[7]] or [0])),
+            "ref": any(r[6] for rows in machines.values() for r in rows)})
+    for v in out.values():
+        v.sort(key=lambda c: (-c["machines"], -(c["t2"] or 0)))
+    return out

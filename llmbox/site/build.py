@@ -54,6 +54,8 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     ref_box = f'{ref_hw["gpu"]} + {round(ref_hw["ram"] / 1024)} GB RAM'
     from .. import bench
     suite_files = [(pth, x) for pth, x in report.results.files(host) if x.get("kind") == "suite"]
+    from .data import community_speeds
+    cs = community_speeds({rid: os.path.basename((local[rid].get("model") or {}).get("file") or "") for rid in order}, host)
     rel = {}
     for rid in order:
         rec = local[rid]
@@ -74,7 +76,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
         for x in runs:
             w(f"run-{x['id'][:8]}.html", run_page(rid, x, ref, fl[x.get("created")]))
         if rid in data["recipes"]:
-            w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
+            w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data, cs.get(rid)))
     w("compare.html", compare_app(compare_data(rs, clouds, ranks, local, look, data, rel)))
     from .. import registry
     from .words import model_name, variant

@@ -96,6 +96,9 @@ def set_variants(host: str, rs: list[dict]) -> None:
                             "thinking " + ("on" if kw["enable_thinking"] else "off") if "enable_thinking" in kw else rid)
 
 
+INSTALL = "# llmbox goes public with this site; until then it runs from its repository"   # then: pip install llmbox
+
+
 def model_name(r: dict) -> str:
     """The model's own name, from its Hugging Face repo: a recipe id (tiel-al) is llmbox's handle for a model plus its
     settings and means nothing to a visitor."""

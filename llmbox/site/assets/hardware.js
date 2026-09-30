@@ -25,7 +25,16 @@ $("#why").textContent = DATA.sh.moe ? `A mixture-of-experts model: what does not
 // every box: NVIDIA cards with the visitor's RAM (or 64 GB at the reference PC's RAM speed), then Macs
 const ram = saved && !saved.mac ? saved.ram : 65536, rambw = saved && !saved.mac ? saved.rambw : DATA.ref.rambw;
 const m = DATA.measured, rows = [];
-rows.push({ k: "nv", name: `${m.gpu}`, sub: `${Math.round(m.ram / 1024)} GB RAM · ${m.rambw} GB/s`, measured: true, t2: m.t2, td: m.td, f: forBox(DATA.sh, refBox) });
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+// computers people measured (llmbox submit), a row per hardware class: the median machine, the spread from 5 machines on
+for (const c of DATA.community) {
+  const [card, ...rest] = c.label.split(" · ");
+  rows.push({ k: c.class.endsWith("|metal") ? "mac" : "nv", name: card, measured: true, t2: c.t2, td: c.t80 || c.t32,
+              sub: [rest.join(" · "), `${plural(c.machines, "machine")}${c.people > 1 ? ` of ${c.people} people` : ""}${c.ref ? (c.machines > 1 ? ", the reference PC among them" : " (the reference PC)") : ""}`,
+                    c.p5 ? `90% between ${Math.round(c.p5)} and ${Math.round(c.p95)} tok/s` : ""].filter(Boolean).join(" · "),
+              f: c.ref ? forBox(DATA.sh, refBox) : { fits: true, gf: 0, ctx: c.ctx || DATA.sh.ctx } });
+}
+if (!DATA.community.length) rows.push({ k: "nv", name: `${m.gpu}`, sub: `${Math.round(m.ram / 1024)} GB RAM · ${m.rambw} GB/s`, measured: true, t2: m.t2, td: m.td, f: forBox(DATA.sh, refBox) });
 for (const g of DATA.gpus) {
   const mac = g[3] === "mac", hw = boxFrom(g, mac ? g[4] : ram / 1024, rambw), f = forBox(DATA.sh, hw);
   rows.push({ k: mac ? "mac" : "nv", name: g[0], sub: mac ? `${g[4]} GB unified · ${g[2]} GB/s` : `${Math.round(ram / 1024)} GB RAM · ${rambw} GB/s`, measured: false,
@@ -35,7 +44,7 @@ const vmax = Math.max(...rows.map(r => r.t2 || 0)) * 1.05;
 let kind = "all";
 function draw() {
   const only = $("#fitonly").checked;
-  const show = rows.filter(r => (kind === "all" || r.k === kind) && (!only || r.f.fits || r.measured)).sort((a, b) => (b.mine - a.mine) || ((b.t2 || 0) - (a.t2 || 0)));
+  const show = rows.filter(r => (kind === "all" || r.k === kind) && (!only || r.f.fits || r.measured)).sort((a, b) => (b.mine - a.mine) || (b.measured - a.measured) || ((b.t2 || 0) - (a.t2 || 0)));
   const nfit = rows.filter(r => r.f.fits || r.measured).length;
   $("#hwnote").textContent = `fits on ${nfit} of ${rows.length}`;
   $("#boxlbl").textContent = `Computers · NVIDIA cards with ${Math.round(ram / 1024)} GB RAM at ${rambw} GB/s${saved && !saved.mac ? " (your RAM)" : ""}`;

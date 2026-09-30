@@ -19,3 +19,4 @@
 .hwl{padding:12px 16px 16px;margin:0;line-height:1.7}
 @media (max-width:900px){.adv{grid-template-columns:1fr}.adv>div{border-right:0;border-bottom:1px solid var(--line2)}
  .hr{grid-template-columns:minmax(0,1fr) auto;row-gap:6px}.hr .hb{grid-column:1/-1;grid-row:2}.hr .nv{grid-column:2;grid-row:1;text-align:right}.hr .ft{grid-row:3}.hr .src{grid-row:3;grid-column:2}}
+pre.cmd{background:#0b0c09;border:1px solid var(--line);padding:12px 14px;font-size:12px;line-height:1.6;color:var(--soft);overflow-x:auto;white-space:pre;margin:10px 0 0}
