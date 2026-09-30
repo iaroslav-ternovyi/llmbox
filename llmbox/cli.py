@@ -123,8 +123,8 @@ def cmd_tune(a: argparse.Namespace) -> None:
         if a.plan:
             r = rc.load(a.host, rid)
             print(f"{rid}:")
-            for n, ov, ok in tune.variants(r, F.shape_for(r, host=hosts.host_of(hosts.load(a.host)))):
-                print(f"  {n:32s} {' '.join(ov):50s} {'' if ok else '(reported, not chosen: limits the longest document)'}")
+            for n, ov, ok in tune.variants(r, F.shape_for(r, host=hosts.host_of(hosts.load(a.host))), cores=tune.cores_of(a.host)):
+                print(f"  {n:32s} {' '.join(ov):50s} {'' if ok else '(reported, not chosen: it trades long documents for speed)'}")
             continue
         tune.run(a.host, rid)
 

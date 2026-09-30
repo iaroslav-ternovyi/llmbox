@@ -26,8 +26,9 @@ DEPTH = 32000
 MIN_GAIN = 0.03
 
 
-def variants(r: dict, shape) -> list[tuple[str, list[str], bool]]:
-    """(name, overrides, speed-only) for this recipe. Speed-only variants may be chosen; the others are reported."""
+def variants(r: dict, shape, cores: int = 0) -> list[tuple[str, list[str], bool]]:
+    """(name, overrides, speed-only) for this recipe. Speed-only variants may be chosen; the others are reported.
+    cores: the host's CPU cores, for the thread count of a MoE whose experts compute on the CPU."""
     out = [("baseline", [], True)]
     sp, pl = r["speculative"], r["placement"]
     if sp["type"]:
@@ -45,6 +46,12 @@ def variants(r: dict, shape) -> list[tuple[str, list[str], bool]]:
         for d in (-2, -1, 1):
             if 0 < pl["n_cpu_moe"] + d <= shape.n_layers:
                 out.append((f"experts of {pl['n_cpu_moe'] + d} layers in RAM", [f"placement.n_cpu_moe={pl['n_cpu_moe'] + d}"], True))
+    if cores > 2 and shape.is_moe and (pl["fit"] or pl.get("n_cpu_moe")):
+        # experts in RAM: decode is bound by RAM speed, which a few cores already saturate; one thread per core also
+        # competes with the thread that drives the card (K2-Horizon on 8 cores, 2026-09-30: 4-7 threads 28.9 tok/s, 8 26.1)
+        now = r["runtime"].get("threads") or cores
+        for t in sorted({cores // 2, cores - 1, cores} - {now}):
+            out.append((f"{t} CPU threads", [f"runtime.threads={t}"], True))
     if pl["ubatch"] != 1024:
         out.append(("prompt batch 1024", ["placement.ubatch=1024", "placement.batch=2048"], True))
     ctx = pl["ctx"] or shape.context_length
@@ -55,6 +62,11 @@ def variants(r: dict, shape) -> list[tuple[str, list[str], bool]]:
         # long prompts get slower; measured at the usual depth only, so reported for a decision, never chosen
         out.append(("KV cache in RAM (--no-kv-offload)", ["placement.kv_offload=false"], False))
     return out
+
+
+def cores_of(host: str) -> int:
+    from . import hosts
+    return int(((hosts.load(host).get("hw") or {}).get("cpu") or {}).get("threads") or 0)
 
 
 def _step_s(m: dict) -> float | None:
@@ -81,7 +93,7 @@ def run(host: str, rid: str, out=print, measure=None) -> dict:
     shape = F.shape_for(r, host=hosts.host_of(hosts.load(host)))
     sampling = {k: v for k, v in {"temperature": r["sampling"].get("temp"), "top_p": r["sampling"].get("top_p"),
                                    "top_k": r["sampling"].get("top_k"), "min_p": r["sampling"].get("min_p")}.items() if v is not None}
-    todo = variants(r, shape)
+    todo = variants(r, shape, cores=cores_of(host))
     rows = []
 
     def one(name: str, ov: list[str]) -> dict:
@@ -148,7 +160,7 @@ def run(host: str, rid: str, out=print, measure=None) -> dict:
 # ---- apply: put the measured winners into the recipe and the llama-swap entry ---------------------------------------
 
 FLAG = {"speculative.type": "--spec-type", "speculative.draft_max": "--spec-draft-n-max", "placement.fit_target_mib": "--fit-target",
-        "placement.ubatch": "-ub", "placement.batch": "-b", "placement.ctx": "-c"}
+        "placement.ubatch": "-ub", "placement.batch": "-b", "placement.ctx": "-c", "runtime.threads": "--threads"}
 
 
 SWITCH = {"placement.kv_offload": ("--kv-offload", "--no-kv-offload")}   # boolean settings: a flag without a value
