@@ -9,7 +9,7 @@ from .components import _cmp_href, _depth_bars, _fp_html, _groups_html, _groups_
 from .data import GPUS
 from .layout import _page
 from .stats import _axis_of, _range_pct
-from .words import _ago, _human, _lineage, _name_of, _quant, _size, esc, model_name, task_name, variant
+from .words import _ago, _human, _lineage, _name_of, _quant, _size, esc, model_name, task_name, variant, SITE_URL
 
 
 # flags only the reference box needs (its port manager, RAM budget, core count, load mode)
@@ -148,9 +148,12 @@ def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool |
     return ('<section class="panel pad run"><div class="lbl">Run it yourself</div>' + head
             + '<div class="rtabs" role="tablist">'
             + "".join(f'<button type="button" class="{"on" if i == 0 else ""}" data-t="{k}">{t}</button>' for i, (k, t) in
-                      enumerate([("srv", "llama-server"), ("win", "Windows"), ("swap", "llama-swap"), ("lms", "LM Studio"), ("oll", "Ollama")]))
+                      enumerate([("one", "One line"), ("srv", "llama-server"), ("win", "Windows"), ("swap", "llama-swap"), ("lms", "LM Studio"), ("oll", "Ollama")]))
             + "</div>"
-            + tab("srv", _cmd_lines(args), "Linux and macOS (Metal), with a current llama.cpp." + left_note, on=True)
+            + tab("one", f"curl -fsSL {SITE_URL}/install.sh | sh -s -- {rid}",
+                  "The shortest way (Linux + NVIDIA with llama.cpp): installs llmbox, fits these settings to your computer, downloads the model, "
+                  "and starts it - it asks before each step and before sending anything.", on=True)
+            + tab("srv", _cmd_lines(args), "Linux and macOS (Metal), with a current llama.cpp." + left_note)
             + tab("win", _cmd_lines(args, win=True), "cmd.exe, with llama-server.exe from a llama.cpp release (the CUDA build for NVIDIA cards)." + left_note)
             + tab("swap", swap, "An entry for llama-swap's config.yaml: one server per model, started when a request asks for it.")
             + tab("lms", lms_txt, "LM Studio on macOS or Windows: the model's load and inference settings."

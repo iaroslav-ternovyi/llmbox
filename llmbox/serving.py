@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import time
 
 from . import hosts, recipe as rc
 from .speed import model_files
@@ -41,6 +43,39 @@ def start(host_name: str, rid: str, port: int | None = None) -> dict:
 
 def stop(host_name: str, pid: int) -> dict:
     return hosts.host_of(hosts.load(host_name)).agent("serve-stop", str(pid), timeout=120)
+
+
+def _state(host_name: str, rid: str) -> str:
+    return os.path.join(hosts.HOME, "serving", f"{host_name}-{rid}.json")
+
+
+def start_background(host_name: str, rid: str, port: int | None = None) -> dict:
+    """Serve the recipe and leave it running (llmbox stop ends it); remembered in ~/.llmbox/serving."""
+    s = start(host_name, rid, port)
+    os.makedirs(os.path.dirname(_state(host_name, rid)), exist_ok=True)
+    json.dump(dict(s, host=host_name, rid=rid, started=time.strftime("%Y-%m-%dT%H:%M:%S")), open(_state(host_name, rid), "w"))
+    return s
+
+
+def running() -> list[dict]:
+    d = os.path.join(hosts.HOME, "serving")
+    out = []
+    for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        try:
+            out.append(json.load(open(os.path.join(d, f))))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def stop_background(host_name: str, rid: str) -> bool:
+    p = _state(host_name, rid)
+    if not os.path.exists(p):
+        return False
+    s = json.load(open(p))
+    stop(host_name, s["pid"])
+    os.remove(p)
+    return True
 
 
 @contextlib.contextmanager

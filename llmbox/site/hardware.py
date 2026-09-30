@@ -25,11 +25,9 @@ def hardware_page(rid: str, rec: dict, shape: dict, data: dict, community: list 
  <span class="src">predicted</span> = from memory speeds, checked against the measured box · <span class="src">rough</span> = outside what was measured (Macs, most of the model on a big card).
  A measured row is the median of the machines in that class (card, RAM speed); each machine counts once.</p></section>
 <section class="panel pad"><div class="lbl">Add your computer</div>
- <p class="q">These commands put your machine on this page: they install the model with the settings measured here, fitted to your hardware, time it, run the 40-minute quality test and send it all. Our server grades every answer again and adds it to the model's score. No account; <code>llmbox submit --dry-run</code> shows exactly what is sent, and nothing in it names you or the machine.</p>
- <pre class="cmd">{esc(INSTALL)}
-llmbox host add me
-llmbox recipe pull && llmbox install {esc(rid)} --from registry --host me --apply
-llmbox test {esc(rid)} --host me</pre></section>'''
+ <p class="q">The first line installs llmbox and this model with the settings measured here, fitted to your hardware, times it and offers to send the time; the second adds the 40-minute quality test. Our server grades every answer again and adds it to the model's score. No account; <code>llmbox submit --dry-run</code> shows exactly what is sent, and nothing in it names you or the machine.</p>
+ <pre class="cmd">{esc(INSTALL)} -s -- {esc(rid)}
+llmbox test {esc(rid)}          # then: the 40-minute quality test too</pre></section>'''
     sp = rec["summary"]["speed"]
     measured = {"gpu": data["ref"]["gpu"], "ram": data["ref"]["ram"], "rambw": data["ref"]["rambw"], "t2": sp.get("decode_tps"),
                 "td": float(report._deep(sp)) if report._deep(sp) != "-" else None}

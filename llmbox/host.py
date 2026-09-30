@@ -27,6 +27,11 @@ class Host:
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", self.ssh, cmd]
         return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, input=input)
 
+    def stream(self, cmd: str, timeout: int | None = None) -> int:
+        """Run a shell command with its output on this terminal (a download's progress bar); the exit code."""
+        argv = ["bash", "-lc", cmd] if self.is_local else ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", self.ssh, cmd]
+        return subprocess.run(argv, timeout=timeout).returncode
+
     def _sync_agent(self) -> str:
         """Ship the stdlib agent + GGUF reader to the host (tiny; done every call so versions never drift)."""
         if self.is_local:

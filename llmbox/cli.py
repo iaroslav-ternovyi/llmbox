@@ -31,8 +31,11 @@ def _print_host(p: dict) -> None:
     print(f"  CPU  {hw['cpu']['model']}  ({hw['cpu']['threads']} threads)")
     print(f"  RAM  {hw['ram_mib']/1024:.1f} GiB   read bandwidth: {p['ram_bw'].get('ram_read_gbs') or '?'} GB/s ({p['ram_bw'].get('source')})")
     for g in hw["gpus"]:
-        print(f"  GPU  {g['name']}  {g['vram_mib']/1024:.1f} GiB  driver {g['driver']}  PCIe {g['pcie_gen']}x{g['pcie_width']}"
-              f"  power {g['power_limit_w']} W (default {g['power_default_w']})  bandwidth {p.get('vram_bw_gbs') or '?'} GB/s")
+        if g.get("unified"):
+            print(f"  GPU  {g['name']}  {g.get('gpu_cores')} cores, {g['vram_mib']/1024:.1f} GiB of the unified memory  bandwidth {p.get('vram_bw_gbs') or '?'} GB/s")
+            continue
+        print(f"  GPU  {g['name']}  {g['vram_mib']/1024:.1f} GiB  driver {g.get('driver', '?')}  PCIe {g.get('pcie_gen', '?')}x{g.get('pcie_width', '?')}"
+              f"  power {g.get('power_limit_w', '?')} W (default {g.get('power_default_w', '?')})  bandwidth {p.get('vram_bw_gbs') or '?'} GB/s")
     for r in hw["runtimes"]:
         print(f"  llama-server  {r['path']}")
     if hw.get("llama_swap", {}).get("config"):
@@ -358,10 +361,14 @@ def cmd_test(a: argparse.Namespace) -> None:
 
 
 def cmd_run(a: argparse.Namespace) -> None:
-    """Serve an installed recipe (OpenAI-compatible) until Ctrl-C: no llama-swap needed."""
+    """Serve an installed recipe (OpenAI-compatible) until Ctrl-C, or in the background: no llama-swap needed."""
     import time as _t
     from . import serving
     host = a.host or _only_host()
+    if a.background:
+        s = serving.start_background(host, a.recipe, port=a.port)
+        print(f"{a.recipe} on {host}: {s['url']}/v1 (model name {a.recipe}), running in the background - `llmbox stop {a.recipe}` ends it")
+        return
     s = serving.start(host, a.recipe, port=a.port)
     print(f"{a.recipe} on {host}: {s['url']}/v1  (OpenAI-compatible; model name: {a.recipe})\n"
           f"  loaded in {s.get('load_seconds')} s, log {s['log']} on {host}; Ctrl-C stops it", flush=True)
@@ -373,6 +380,21 @@ def cmd_run(a: argparse.Namespace) -> None:
     finally:
         serving.stop(host, s["pid"])
         print("stopped")
+
+
+def cmd_start(a: argparse.Namespace) -> None:
+    from . import wizard
+    raise SystemExit(wizard.main(yes=a.yes, model=a.model, host=a.host, plan_only=a.plan))
+
+
+def cmd_stop(a: argparse.Namespace) -> None:
+    from . import serving
+    gone = [s for s in serving.running() if not a.recipes or s["rid"] in a.recipes]
+    for s in gone:
+        serving.stop_background(s["host"], s["rid"])
+        print(f"stopped {s['rid']} on {s['host']}")
+    if not gone:
+        print("nothing llmbox started is running")
 
 
 def _only_host() -> str:
@@ -781,7 +803,7 @@ def cmd_site(a) -> None:
 
 # `llmbox --help` lists the commands by what you want to do, most used first
 COMMAND_GROUPS = [
-    ("Pick and run a model on your box", ["host", "pick", "scout", "fit", "recipe", "install", "run", "tune", "optimize"]),
+    ("Pick and run a model on your box", ["start", "host", "pick", "scout", "fit", "recipe", "install", "run", "stop", "tune", "optimize"]),
     ("Measure it", ["test", "bench", "queue", "speed", "probe", "loops", "traces"]),
     ("Share and compare", ["login", "whoami", "profile", "submit", "logout", "forget", "serve"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
@@ -979,7 +1001,17 @@ def main(argv: list[str] | None = None) -> None:
     ru.add_argument("recipe")
     ru.add_argument("--host", help="the machine (default: the only one registered)")
     ru.add_argument("--port", type=int, help="port (default: a free one)")
+    ru.add_argument("--background", "-d", action="store_true", help="leave it running; `llmbox stop` ends it")
     ru.set_defaults(fn=cmd_run)
+    st_ = command("start", "the guided start (also plain `llmbox`): this computer, the best model for it, install, measure, run")
+    st_.add_argument("model", nargs="?", help="a model id to install instead of the pick")
+    st_.add_argument("--yes", "-y", action="store_true", help="take every default (never sends anything)")
+    st_.add_argument("--host", help="a registered machine (default: this computer)")
+    st_.add_argument("--plan", action="store_true", help="only show the plan")
+    st_.set_defaults(fn=cmd_start)
+    so = command("stop", "stop models llmbox serves in the background (all, or the ones named)")
+    so.add_argument("recipes", nargs="*")
+    so.set_defaults(fn=cmd_stop)
 
     te = command("test", "measure a model on this machine and send it: speed, the 40-minute quality test, the upload")
     te.add_argument("recipe", help="an installed recipe (llmbox install <id> --from registry ...)")
@@ -1052,6 +1084,9 @@ def main(argv: list[str] | None = None) -> None:
     assert not missing, f"commands without a group in COMMAND_GROUPS: {missing}"
     ap.epilog = "\n\n".join(f"{g}:\n" + "\n".join(f"  {c:14s} {helps[c]}" for c in cs if c in helps) for g, cs in COMMAND_GROUPS) + \
         "\n\nllmbox <command> --help for its options. Data lives in ~/.llmbox (results, recipes, queue, site)."
+    if not (argv if argv is not None else sys.argv[1:]):   # plain `llmbox`: the guided start
+        from . import wizard
+        raise SystemExit(wizard.main())
     a = ap.parse_args(argv)
     if hasattr(a, "endpoint") and not a.endpoint:   # the host's own model server (its profile), not a fixed address
         a.endpoint = hosts.endpoint(getattr(a, "host", None), agent=a.cmd == "loops")

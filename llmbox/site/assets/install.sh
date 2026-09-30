@@ -1,7 +1,8 @@
 #!/bin/sh
 # llmbox installer: a private Python environment in ~/.llmbox/venv and the `llmbox` command in ~/.local/bin.
 # No sudo, no background service; everything llmbox keeps is under ~/.llmbox. Remove: rm -rf ~/.llmbox/venv ~/.local/bin/llmbox
-#   curl -fsSL https://llmbox.pages.dev/install.sh | sh
+#   curl -fsSL https://llmbox.pages.dev/install.sh | sh             then the guided start: the best model for this computer
+#   curl -fsSL https://llmbox.pages.dev/install.sh | sh -s -- <id>   the same with that model
 set -eu
 REPO="${LLMBOX_REPO:-https://github.com/iaroslav-ternovyi/llmbox}"
 PY=""
@@ -25,4 +26,8 @@ case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
   *) echo "add ~/.local/bin to your PATH:  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && . ~/.bashrc" ;;
 esac
-echo "next:  llmbox host add me   then   llmbox pick"
+# straight on to the guided start when a person is at the terminal (the script itself came through a pipe: ask /dev/tty)
+if [ -t 1 ] && [ -r /dev/tty ] && [ -z "${LLMBOX_NO_START:-}" ]; then
+  exec "$V/bin/llmbox" start "$@" </dev/tty
+fi
+echo "next:  llmbox    (the guided start: this computer, the best model for it, install, run)"

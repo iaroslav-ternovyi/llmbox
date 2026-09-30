@@ -108,7 +108,10 @@ def plan(rid: str, src: str, target: str, force: bool = False, unload: bool = Fa
     want_sha = (gf.sha256[0] if gf and len(gf.parts) == 1 else None) or m.get("sha256")
     steps.append(Step("verify", "todo" if want_sha else "skipped", f"sha256 against {want_sha[:16]}…" if want_sha else "no sha256 known for this file"))
 
-    # 4-5: launcher and llama-swap entry
+    # 4-5: launcher and llama-swap entry - only where llama-swap is installed; elsewhere `llmbox run` serves the recipe
+    if not (prof["hw"].get("llama_swap") or {}).get("config"):
+        steps.append(Step("serve", "skipped", f"no llama-swap on {target}: `llmbox run {rid}` serves it"))
+        return fitted, steps, h
     cfg = (prof["hw"].get("llama_swap") or {}).get("config") or os.path.expanduser(rc.LLAMA_SWAP_CONFIG)
     lpath = os.path.join(os.path.dirname(cfg), f"start-{rid}.sh")
     text = rc.launcher(fitted)
@@ -155,10 +158,16 @@ def run(rid: str, src: str, target: str, dry_run: bool = True, force: bool = Fal
             continue
         if s.name == "download":
             out("downloading (resumable; re-run install after an interruption) ...")
-            r = h.run(s.cmd, timeout=6 * 3600)
-            if r.returncode:
-                out(f"download failed: {r.stderr.strip()[-400:]}")
-                return 1
+            import sys
+            if sys.stdout.isatty():   # a person is watching: curl's progress bar on this terminal
+                if h.stream(s.cmd.replace("curl -L --fail", "curl -L --fail -#"), timeout=6 * 3600):
+                    out("download failed (run the same command again: it resumes)")
+                    return 1
+            else:
+                r = h.run(s.cmd, timeout=6 * 3600)
+                if r.returncode:
+                    out(f"download failed: {r.stderr.strip()[-400:]}")
+                    return 1
         elif s.name == "verify":
             got = h.agent("sha256", fitted["model"]["path"], timeout=3600).get("sha256")
             want = s.detail.split("against ")[1].rstrip("…")
