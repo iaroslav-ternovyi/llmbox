@@ -28,6 +28,20 @@ GPU_VRAM_MIB = {
 }
 
 
+# Apple silicon memory bandwidth, GB/s (Apple's specs; M5 Pro/Max: newsroom 2026-03): the chip, then by GPU cores
+APPLE_BW = {"M1": 68, "M1 Pro": 200, "M1 Max": 400, "M1 Ultra": 800, "M2": 100, "M2 Pro": 200, "M2 Max": 400, "M2 Ultra": 800,
+            "M3": 100, "M3 Pro": 150, "M3 Max": {30: 300, 40: 400}, "M3 Ultra": 819, "M4": 120, "M4 Pro": 273,
+            "M4 Max": {32: 410, 40: 546}, "M5": 153, "M5 Pro": 307, "M5 Max": {32: 460, 40: 614}}
+
+
+def apple_bw(chip: str, gpu_cores: int = 0) -> float | None:
+    """'Apple M4 Max' with 40 GPU cores -> 546."""
+    v = _lookup(APPLE_BW, chip.replace("Apple ", ""))
+    if isinstance(v, dict):
+        return float(v.get(gpu_cores) or max(v.values()) if gpu_cores >= max(v) else min(v.values()))
+    return float(v) if v else None
+
+
 def _lookup(table: dict, name: str):
     for key in sorted(table, key=len, reverse=True):  # longest match first ("5070 Ti" before "5070")
         if key.lower() in name.lower():
@@ -101,21 +115,25 @@ def detect(name: str, ssh: str | None, ram_bw: float | None = None, measure: boo
     h = Host(name, ssh=ssh)
     info = h.agent("hwinfo")
     bw = {"ram_read_gbs": ram_bw, "source": "manual"} if ram_bw else None
-    if not bw and measure:
+    apple = bool(info["gpus"]) and info["gpus"][0].get("vendor") == "apple"
+    if not bw and measure and not apple:   # a Mac's memory speed is the chip's own figure (below)
         m = h.agent("bandwidth", "3", timeout=600)
         if "ram_read_gbs" in m:
             bw = {"ram_read_gbs": m["ram_read_gbs"], "source": "measured", "threads": m.get("threads")}
         else:
             bw = {"ram_read_gbs": None, "source": m.get("error", "not measured")}
     old = load(name) if os.path.exists(path(name)) else {}
+    gpu = info["gpus"][0] if info["gpus"] else None
+    if gpu and gpu.get("vendor") == "apple" and not ram_bw:   # unified memory: its speed is the chip's (Apple's figure)
+        bw = {"ram_read_gbs": apple_bw(gpu["name"], gpu.get("gpu_cores") or 0), "source": "Apple spec"}
     if (not bw or not bw.get("ram_read_gbs")) and old.get("ram_bw", {}).get("ram_read_gbs"):
         bw = old["ram_bw"]  # keep an earlier measurement rather than losing it
-    gpu = info["gpus"][0] if info["gpus"] else None
-    prof = {
+    prof = dict(old, **{   # what the profile had besides detection (endpoints, power limits, notes) stays
         "name": name, "ssh": ssh, "detected_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "hw": info,
         "ram_bw": bw or {"ram_read_gbs": None, "source": "not measured"},
-        "vram_bw_gbs": gpu_bw(gpu["name"]) if gpu else None,
-    }
+        "vram_bw_gbs": (bw or {}).get("ram_read_gbs") if gpu and gpu.get("vendor") == "apple" else (gpu_bw(gpu["name"]) if gpu else None)
+                       or old.get("vram_bw_gbs"),
+    })
     save(name, prof)
     return prof
 
@@ -126,6 +144,9 @@ def spec(prof: dict, ram_headroom_mib: int = 4096) -> HostSpec:
     if not bw:
         raise SystemExit(f"host {prof['name']}: RAM bandwidth unknown - run `llmbox host add {prof['name']} ... --ram-bw <GB/s>` "
                          "or measure while the host is idle")
+    if gpus and gpus[0].get("unified"):   # Apple: the GPU's share of unified memory is its "VRAM", the rest is RAM at the same speed
+        return HostSpec(vram_mib=gpus[0]["vram_mib"], ram_mib=max(0, prof["hw"]["ram_mib"] - gpus[0]["vram_mib"]),
+                        ram_bw_gbs=float(bw), vram_bw_gbs=float(prof.get("vram_bw_gbs") or bw), ram_headroom_mib=ram_headroom_mib)
     return HostSpec(vram_mib=gpus[0]["vram_mib"] if gpus else 0, ram_mib=prof["hw"]["ram_mib"],
                     ram_bw_gbs=float(bw), vram_bw_gbs=float(prof.get("vram_bw_gbs") or 500.0),
                     ram_headroom_mib=ram_headroom_mib)

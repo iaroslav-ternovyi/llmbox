@@ -25,7 +25,7 @@ def index() -> dict:
     return json.load(open(p))
 
 
-def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = None) -> list[dict]:
+def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = None, mac: bool = False) -> list[dict]:
     """cls: this machine's hardware class (llmbox/hwclass.py): where people measured a model on the same class, their
     median replaces the prediction (measured=machines)."""
     rows = []
@@ -36,8 +36,9 @@ def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = 
         except (OSError, ValueError, SystemExit) as ex:
             rows.append(dict(e, fits=False, why=f"cannot read the model: {ex}"))
             continue
-        f = F.fit(r, shape, hw, cores=cores, cal=registry.calibration(r, shape))
-        cal = registry.calibration(r, shape, at_k=LONG // 1000)
+        # the reference box's measured/predicted ratio is about an NVIDIA card streaming experts over PCIe: not a Mac's
+        f = F.fit(r, shape, hw, cores=cores, cal=F.Calibration() if mac else registry.calibration(r, shape))
+        cal = F.Calibration() if mac else registry.calibration(r, shape, at_k=LONG // 1000)
         # one depth for every model (32k: an agent a few steps in), calibrated with the measured deep ratio
         t32 = E.plan(shape, hw, ctx=f.ctx, kv_type=r["placement"]["kv_type"], ubatch=f.ubatch, depth=LONG).decode_tps_at_depth * cal.kd \
             if f.fits and f.ctx >= LONG else None
@@ -74,7 +75,8 @@ def run(host: str | None, use: str, what_if: tuple | None = None, out=print) -> 
         cores, where = cpu.get("cores") or cpu.get("threads"), f"{host} ({hw.vram_mib / 1024:.0f} GB VRAM · {hw.ram_mib / 1024:.0f} GB RAM @ {hw.ram_bw_gbs:g} GB/s)"
         from . import results
         cls = hwclass.of_host(results.host_fingerprint(prof))
-    rows = rank(hw, cores, use, cls)
+    mac = (cls or "").startswith("apple-")
+    rows = rank(hw, cores, use, cls, mac)
     ok = [x for x in rows if x["fits"] and x.get("use_score") is not None]
     out(f"What to run on {where}, for {USES[use] or 'all work'} ({len(ok)} of {len(rows)} models fit):\n")
     out(f"  {'model':52s} {'% of Opus':>13s} {'tok/s':>6s} {'@32k':>5s} {'context':>7s}")
@@ -91,6 +93,8 @@ def run(host: str | None, use: str, what_if: tuple | None = None, out=print) -> 
     skip = [x for x in rows if not x["fits"]]
     if skip:
         out(f"\ndo not fit: " + ", ".join(f"{x['name']} ({x.get('size_gb') or '?'} GB)" for x in skip))
+    if mac:
+        out("\nMac: speeds are rough - llama.cpp on Metal is not measured here yet (llmbox runs models on Linux + NVIDIA for now)")
     n = sum(1 for x in ok if x.get("measured"))
     out(f"\nm = measured on machines like this one ({hwclass.label(cls) if cls else '?'}; {n} of the models), ~ = predicted "
         "from the model's shape and this machine's memory speeds. `llmbox test <id>` measures one and sends it")

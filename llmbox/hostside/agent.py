@@ -61,6 +61,30 @@ def hwinfo() -> dict:
         f = [x.strip() for x in line.split(",")]
         gpus.append({"vendor": "nvidia", "name": f[0], "vram_mib": int(float(f[1])), "vram_used_mib": int(float(f[2])),
                      "driver": f[3], "pcie_gen": f[4], "pcie_width": f[5], "power_limit_w": f[6], "power_default_w": f[7]})
+    if not gpus and shutil.which("rocm-smi"):   # AMD: product name and VRAM (key names differ across ROCm versions)
+        try:
+            for card, d in json.loads(sh("rocm-smi --showproductname --showmeminfo vram --json") or "{}").items():
+                name = next((v for k, v in d.items() if k.lower() in ("card series", "card model", "marketing name")), card)
+                total = next((v for k, v in d.items() if "vram total memory" in k.lower()), 0)
+                gpus.append({"vendor": "amd", "name": str(name), "vram_mib": int(int(total) / 2**20)})
+        except (ValueError, TypeError):
+            pass
+    if platform.system() == "Darwin":   # Apple silicon: the GPU uses unified memory, macOS lets it wire ~2/3 to 3/4 of it
+        mem_mib = int(sh("sysctl -n hw.memsize") or 0) // 2**20
+        chip = sh("sysctl -n machdep.cpu.brand_string").strip()
+        try:
+            cores = int(json.loads(sh("system_profiler SPDisplaysDataType -json", timeout=60))["SPDisplaysDataType"][0].get("sppci_cores") or 0)
+        except (ValueError, KeyError, IndexError):
+            cores = 0
+        gpus.append({"vendor": "apple", "name": chip, "vram_mib": int(mem_mib * (0.75 if mem_mib >= 36864 else 0.67)),
+                     "gpu_cores": cores, "unified": True})
+        du = shutil.disk_usage(os.path.expanduser("~"))
+        return {"hostname": platform.node(), "os": platform.platform(), "python": sys.version.split()[0],
+                "cpu": {"model": chip, "threads": os.cpu_count(), "cores": int(sh("sysctl -n hw.physicalcpu") or 0) or None},
+                "ram_mib": mem_mib, "ram_available_mib": None, "gpus": gpus, "llama_swap": {},
+                "runtimes": [{"path": p, "version": sh(f"'{p}' --version 2>&1 | head -2", timeout=20).replace(chr(10), " | ")}
+                             for p in sorted({shutil.which("llama-server") or ""} - {""})],
+                "disk_free_gib": round(du.free / 2**30, 1), "models_dir_guess": os.path.expanduser("~/models")}
     mem = {}
     if os.path.exists("/proc/meminfo"):
         for line in open("/proc/meminfo"):

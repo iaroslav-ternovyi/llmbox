@@ -25,6 +25,8 @@ def host_fingerprint(prof: dict) -> dict:
           "gpu_power_limit_w": g.get("power_limit_w"), "cpu": hw["cpu"]["model"], "threads": hw["cpu"]["threads"],
           "ram_gib": round(hw["ram_mib"] / 1024, 1), "ram_read_gbs": (prof.get("ram_bw") or {}).get("ram_read_gbs"),
           "os": hw["os"], "gpu_vendor": g.get("vendor") or ("" if not g else "nvidia"), "gpu_count": len(hw["gpus"])}
+    if g.get("unified"):   # Apple: the class is the chip, its GPU cores and the whole memory
+        fp.update(apple_gpu_cores=g.get("gpu_cores"), vram_gib=round(hw["ram_mib"] / 1024, 1))
     from .hwclass import of_host
     fp["class"] = of_host(fp)   # the machines counted as the same as this one (hwclass.py)
     fp["id"] = hashlib.sha256(json.dumps({k: fp[k] for k in ("gpu", "vram_gib", "cpu", "ram_gib")}, sort_keys=True).encode()).hexdigest()[:12]
