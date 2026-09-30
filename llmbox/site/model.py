@@ -9,7 +9,7 @@ from .components import _cmp_href, _depth_bars, _fp_html, _groups_html, _groups_
 from .data import GPUS
 from .layout import _page
 from .stats import _axis_of, _range_pct
-from .words import _ago, _human, _lineage, _name_of, _quant, _size, esc, model_name, task_name
+from .words import _ago, _human, _lineage, _name_of, _quant, _size, esc, model_name, task_name, variant
 
 
 # flags only the reference box needs (its port manager, RAM budget, core count, load mode)
@@ -182,7 +182,7 @@ def _near_html(rid: str, rs: list[dict], clouds: list[dict], ranks: dict, look: 
         lo, hi = _range_pct(r)
         me = r["id"] == rid
         link = f"<span class='m'>{esc(nm)}</span>" if me else f"<a class='m' href='recipe-{esc(r['id'])}.html'>{esc(nm)}</a>"
-        rows.append(f"<div class='nr{' me' if me else ''}'><span class='rk'>{ranks[r['id']][0]}</span><div class='mw'>{_marker(col, kind)}{link}<span class='qt'>{esc(_quant(r['file']).split(' ')[0])}</span></div>"
+        rows.append(f"<div class='nr{' me' if me else ''}'><span class='rk'>{ranks[r['id']][0]}</span><div class='mw'>{_marker(col, kind)}{link}<span class='qt'>{esc(variant(r['id'], r['file']))}</span></div>"
                     f"{_fp_html(r['vs_ref'], lo, hi, col, ax)}"
                     + ("<span class='q'>this model</span>" if me else f"<a class='cmpl' href='{esc(_cmp_href(rid, r['id']))}'>compare →</a>") + "</div>")
     labels = "".join(f"<span style='left:{max(0, min(100, (v - ax[0]) / (100 - ax[0]) * 100)):.2f}%'>{v}</span>" for v in range(ax[0], 101, ax[1]))
@@ -288,7 +288,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
              f"<span class='src'>{runs_n} run{'s' if runs_n != 1 else ''} · {ctx['solved_h']:.0f} tasks solved per hour</span></div>")
     body = f'''
 <section class="panel title"><div><div class="crumb"><a href="index.html">Models</a> / {esc(nm)}</div>
- <h1>{_marker(col, kind, 18)} {esc(nm)} <span class="muted" style="font-weight:500">· {esc(_quant(m.get("file")))}</span></h1>
+ <h1>{_marker(col, kind, 18)} {esc(nm)} <span class="muted" style="font-weight:500">· {esc(variant(rid, m.get("file"), full=True))}</span></h1>
  <div class="meta">{meta}</div></div>
  <div class="acts"><a class="btn solid" href="#run">RUN IT</a><a class="btn" href="{esc(ctx['cmp'])}">COMPARE</a></div></section>
 <section class="panel verdict"><div class="tiles">{tiles}</div><p class="say">{_stands_sentence(s["blocks"], med)}</p></section>
@@ -302,9 +302,9 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
 <div id="run"></div>{_run_panel(rid, rec, ctx["model_now"], ctx["on_hf"])}
 {_settings_panel(rcp, ctx["opt"])}
 {_runs_panel(ctx["runs"], ref, ctx["counted"])}'''
-    about = (f"{nm} {_quant(m.get('file'))}: {_pct(vs)} of Claude Opus 5.5 on real work (coding, tools, documents, writing)"
+    about = (f"{nm} {variant(rid, m.get('file'), full=True)}: {_pct(vs)} of Claude Opus 5.5 on real work (coding, tools, documents, writing)"
              + (f", {tps:.0f} tok/s on {ref_box}" if tps else "") + ". The file, and the settings to run it in llama.cpp, LM Studio or Ollama.")
-    return _page(f"llmbox · {nm} · {_quant(m.get('file'))}", "MODELS", body, ("pages.css", "model.css"), ("plan.js", "model.js", "runcmd.js"),
+    return _page(f"llmbox · {nm} · {variant(rid, m.get('file'), full=True)}", "MODELS", body, ("pages.css", "model.css"), ("plan.js", "model.js", "runcmd.js"),
                  {"sh": shp, "gpus": GPUS, "ref": ctx["ref_hw"]}, about=about)
 
 

@@ -66,6 +66,36 @@ def _quant(fname: str | None) -> str:
     return (m.group(0) if m else (fname or "")[:24]) + extra
 
 
+# recipe id -> what tells it apart from another measured recipe of the same model file (set by build.set_variants: the
+# reasoning effort, e.g. K2-Horizon at high and at medium); the quant alone names every other recipe
+VARIANT: dict = {}
+
+
+def variant(rid: str, fname: str | None, full: bool = False) -> str:
+    """The quant, plus what sets this recipe apart when the same file is measured with other settings."""
+    q = _quant(fname) if full else _quant(fname).split(" ")[0]
+    return f"{q} · {VARIANT[rid]}" if VARIANT.get(rid) else q
+
+
+def set_variants(host: str, rs: list[dict]) -> None:
+    """Recipes that share a model and quant are told apart by their reasoning effort (or thinking on / off)."""
+    from .. import recipe as rc
+    VARIANT.clear()
+    by: dict = {}
+    for r in rs:
+        by.setdefault((model_name(r), _quant(r.get("file"))), []).append(r["id"])
+    for ids in by.values():
+        if len(ids) < 2:
+            continue
+        for rid in ids:
+            try:
+                kw = (rc.load(host, rid).get("chat") or {}).get("template_kwargs") or {}
+            except (OSError, ValueError):
+                kw = {}
+            VARIANT[rid] = (f"reasoning {kw['reasoning_effort']}" if kw.get("reasoning_effort") else
+                            "thinking " + ("on" if kw["enable_thinking"] else "off") if "enable_thinking" in kw else rid)
+
+
 def model_name(r: dict) -> str:
     """The model's own name, from its Hugging Face repo: a recipe id (tiel-al) is llmbox's handle for a model plus its
     settings and means nothing to a visitor."""

@@ -10,7 +10,7 @@ from .components import _marker, _pct, _profile, _spd, _stands_out
 from .data import optimize_records, queue_state, shape_data
 from .layout import _page
 from .stats import rank_ranges
-from .words import SHORT, _ago, _kind, _quant, _size, BLOCKS, esc, FAMILIES, family, LABEL, model_name, PRESETS
+from .words import _ago, _kind, _size, BLOCKS, esc, FAMILIES, family, LABEL, model_name, PRESETS, SHORT, variant
 
 
 def _scatter(local: list[dict]) -> str:
@@ -53,7 +53,7 @@ def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dic
         pl, lo, hi, grp = ranks[rid]
         tip = f"not measurably apart from places {lo}–{hi}" if lo != hi else "measurably apart from every other model"
         col, kind = family((sd["recipes"].get(rid) or {}).get("arch"))[1], _kind(r.get("hf_repo"))
-        sub = " · ".join(x for x in (_quant(r["file"]), _size(sd["recipes"].get(rid), nm), kind if kind != "release" else "") if x)
+        sub = " · ".join(x for x in (variant(rid, r["file"], full=True), _size(sd["recipes"].get(rid), nm), kind if kind != "release" else "") if x)
         body.append(f"<tr class='mr' data-rid='{esc(rid)}' data-g='{grp}'><td class='rk' title='{tip}'>{pl}</td>"
                     f"<td class='l mod'><div class='mw'>{_marker(col, kind)}<a class='m' href='recipe-{esc(rid)}.html'>{esc(nm)}</a><span class='qt'>{esc(sub)}</span></div></td>"
                     f"<td class='sco'>{_pct(r.get('vs_ref'))}</td><td class='spd r'>{_spd(r['speed'])}</td><td class='fit r'>—</td>"
@@ -111,9 +111,9 @@ def _chart_data(sd: dict, local: list[dict], clouds: list[dict], ref: dict | Non
     """What the page script draws the chart and the ranking from."""
     # one model in two quants (Tiel Q4 and Q6): the chart says which is which
     dup = {n for n in names0.values() if list(names0.values()).count(n) > 1}
-    labels = {rid: n + (f" · {_quant(next(r['file'] for r in local if r['id'] == rid)).split(' ')[0]}" if n in dup else "") for rid, n in names0.items()}
+    labels = {rid: n + (f" · {variant(rid, next(r['file'] for r in local if r['id'] == rid))}" if n in dup else "") for rid, n in names0.items()}
     data = dict(sd, families=[[n, c] for _k, n, c in FAMILIES], presets=[w for _, w in PRESETS], refBlocks=(ref or {}).get("blocks") or {},
-                points=[{"id": r["id"], "name": labels[r["id"]], "model": names0[r["id"]], "quant": _quant(r["file"]).split(" ")[0],
+                points=[{"id": r["id"], "name": labels[r["id"]], "model": names0[r["id"]], "quant": variant(r["id"], r["file"]),
                          "fam": family((sd["recipes"].get(r["id"]) or {}).get("arch"))[0], "kind": _kind(r.get("hf_repo")), "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": r["speed"].get("decode_tps"),
                          "td": float(report._deep(r["speed"])) if report._deep(r["speed"]) != "-" else None, "rank": list(ranks[r["id"]])} for r in local]
                 + [{"id": r["id"], "name": model_name(r), "vs": r.get("vs_ref"), "cap": r["capability"], "ci": r["ci"], "blocks": r["blocks"], "t2": None, "td": None,

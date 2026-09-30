@@ -17,7 +17,7 @@ from .model import recipe_page
 from .new import new_page
 from .run import run_page
 from .stats import rank_ranges
-from .words import _kind, BLOCKS, family
+from .words import _kind, BLOCKS, family, set_variants
 
 
 def build(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick") -> list[str]:
@@ -33,6 +33,7 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
 def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     all_rs = report.rows(host, suite_version=suite_version, tier=tier)
     rs = [r for r in all_rs if r["host"].get("id") != "cloud" and not r.get("partial")]
+    set_variants(host, rs)   # the same file measured with other settings (K2-Horizon high / medium): named apart
     data = shape_data(rs, host)
     written = copy_assets(out_dir) + [home(out_dir, host, suite_version, tier, all_rs, data)]
     recs = load_records(host, suite_version, tier)

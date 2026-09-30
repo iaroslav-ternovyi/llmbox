@@ -5,7 +5,7 @@ from __future__ import annotations
 from .. import report
 from .layout import _page
 from .stats import _range_pct
-from .words import _human, _KNAMES, _quant, esc, GROUPS, model_name, SHORT, TASK_NAMES
+from .words import _human, _KNAMES, esc, GROUPS, model_name, SHORT, TASK_NAMES, variant
 
 
 def _flat_settings(rcp: dict) -> dict:
@@ -30,7 +30,7 @@ def compare_data(rs: list[dict], clouds: list[dict], ranks: dict, local: dict, l
         lo, hi = _range_pct(r) if r.get("vs_ref") is not None else (None, None)
         bd = sorted((report._depth_k(k), d) for k, d in ((r.get("speed") or {}).get("by_depth") or {}).items() if d.get("decode_tps"))
         col, kind = look.get(rid, ("#8b877b", "release"))
-        models.append({"id": rid, "name": model_name(r), "quant": "" if cloud else _quant(r.get("file")).split(" ")[0], "col": col, "kind": kind,
+        models.append({"id": rid, "name": model_name(r), "quant": "" if cloud else variant(rid, r.get("file")), "col": col, "kind": kind,
                        "cloud": cloud, "place": None if cloud else ranks[rid][0], "vs": r.get("vs_ref"), "lo": lo, "hi": hi, "cap": r["capability"], "ci": r["ci"],
                        "blocks": r["blocks"], "t2": None if cloud else (r.get("speed") or {}).get("decode_tps"),
                        "td": None if cloud or report._deep(r["speed"]) == "-" else float(report._deep(r["speed"])),
