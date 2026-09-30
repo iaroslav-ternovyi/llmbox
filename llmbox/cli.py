@@ -332,7 +332,7 @@ def cmd_bench(a: argparse.Namespace) -> None:
               f"telemetry {'on' if (cap.get('telemetry') or {}).get('pid') else 'off'}" + (f"  ({'; '.join(cap['errors'])})" if cap.get("errors") else ""), flush=True)
     if a.adaptive:
         from . import irt, suite as _suite
-        bank = irt.load(_suite.content_hash()) or irt.load(a.bank or "")
+        bank = irt.load(a.bank) if a.bank else irt.bank_for(_suite.content_hash())   # a released version shares its dev tasks' bank (irt.SAME_TASKS)
         if not bank:
             raise SystemExit("no calibrated task bank for this suite: run `llmbox irt calibrate` (or pass --bank <content hash>)")
         # task families the bank has no answers for yet (new levels, rewritten kinds) join with guessed parameters, for
