@@ -301,7 +301,9 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
 <div id="run"></div>{_run_panel(rid, rec, ctx["model_now"], ctx["on_hf"])}
 {_settings_panel(rcp, ctx["opt"])}
 {_runs_panel(ctx["runs"], ref, ctx["counted"])}'''
+    about = (f"{nm} {_quant(m.get('file'))}: {_pct(vs)} of Claude Opus 5.5 on real work (coding, tools, documents, writing)"
+             + (f", {tps:.0f} tok/s on {ref_box}" if tps else "") + ". The file, and the settings to run it in llama.cpp, LM Studio or Ollama.")
     return _page(f"llmbox · {nm} · {_quant(m.get('file'))}", "MODELS", body, ("pages.css", "model.css"), ("plan.js", "model.js", "runcmd.js"),
-                 {"sh": shp, "gpus": GPUS, "ref": ctx["ref_hw"]})
+                 {"sh": shp, "gpus": GPUS, "ref": ctx["ref_hw"]}, about=about)
 
 

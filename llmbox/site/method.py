@@ -133,6 +133,7 @@ Replies are capped at 32k tokens with room kept for the answer after the thinkin
 <p>Scores compare only within one suite version. The content hash identifies the exact tasks and graders. Answers to tasks that did not
 change carry over to the next version; a changed task needs new answers.</p>
 </article></div>'''
-    return _page(f"llmbox · how scores work (suite v{suite.VERSION})", "METHOD", body, ("pages.css", "method.css"))
+    return _page(f"llmbox · how scores work (suite v{suite.VERSION})", "METHOD", body, ("pages.css", "method.css"),
+                 about="How llmbox scores and times local AI models: tasks graded by programs, fresh every run, a score relative to Claude Opus 5.5 with its margin, speed predicted for your box.")
 
 

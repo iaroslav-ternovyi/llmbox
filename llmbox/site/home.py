@@ -132,6 +132,7 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
  Point at a model for its range and speed, click it for its page. <a href="method.html">How scores work</a></p></section>
 <section class="panel rankp"><div class="lbl">Ranking <span class="faint">· suite v{esc(suite_version)}{" · preliminary: runs of this version are still coming in" if "-dev" in suite_version else ""}</span></div>
  <div class="rhead"><div class="seg" role="group" aria-label="rank by"><span class="sc">Rank by</span>{presets}</div>
+  <input id="find" type="search" placeholder="find a model" aria-label="find a model by name, quant or family" autocomplete="off">
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
  <div class="tw"><table class="rank"><thead>{head}</thead><tbody>{''.join(body)}</tbody></table></div>
  <p class="rnote">Places by score. A dashed line between rows: every model above it is measurably better than the ones below; inside a group the order is not settled yet.

@@ -37,7 +37,15 @@ def copy_assets(out_dir: str) -> list[str]:
     return out
 
 
-def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data=None, links: dict | None = None) -> str:
+FONTS = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap"
+ICON = ("data:image/svg+xml," "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230E0F0C'/%3E"
+        "%3Cpath d='M5 22 L11 22 L14 9 L18 25 L21 16 L27 16' fill='none' stroke='%23FFB000' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E")
+ABOUT = ("Local AI models graded on real work (coding, tools, documents, writing) and timed on a real PC: what fits your "
+         "graphics card or Mac, how fast it answers, how close it gets to Claude, and the settings to run it.")
+
+
+def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data=None, links: dict | None = None,
+          about: str | None = None) -> str:
     """A page: the header (tabs, the visitor's box), the body, the footer. Stylesheets and scripts are shared files
     (assets/); a page's own numbers go inline as DATA, before its scripts."""
     links = dict(TAB_LINKS, **(links or {}))
@@ -46,7 +54,9 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
     scripts = ((f"<script>const DATA = {json.dumps(data).replace('</', '<\\/')};</script>" if data is not None else "")
                + "".join(f'<script src="{asset_url(j)}"></script>' for j in ("box.js",) + tuple(js)))
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>{esc(title)}</title>{styles}</head><body>'
+            f'<title>{esc(title)}</title><meta name="description" content="{esc(about or ABOUT)}"><link rel="icon" href="{ICON}">'
+            f'<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+            f'<link rel="stylesheet" href="{FONTS}">{styles}</head><body>'
             '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
             '<div class="wrap"><header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>'
             f'<nav class="tabs">{nav}</nav><a class="boxchip" id="boxchip" href="index.html#box" title="the box speeds and fit are shown for; change it on the home page">'

@@ -181,3 +181,8 @@ document.querySelectorAll(".pick2 input").forEach(c => c.addEventListener("chang
 try { const h = Object.fromEntries(new URLSearchParams(location.hash.slice(1))); const saved = h.gpu ? h : JSON.parse(localStorage.getItem("llmbox-box") || "null");
   if (saved && saved.gpu) { $("#gpu").value = saved.gpu; if (saved.ram) $("#ram").value = saved.ram; if (saved.bw) { const o = [...$("#bw").options].find(o => o.value == saved.bw); if (o) $("#bw").value = saved.bw; else $("#bwn").value = saved.bw; } if (saved.bwn) $("#bwn").value = saved.bwn; readBox(); } else { ["#ram", "#bw", "#bwn"].forEach(s => $(s).disabled = true); render(); }
 } catch (e) { render(); }
+$("#find").addEventListener("input", () => {   // find a model: rows whose name, quant or family match; Claude rows stay as references
+  const q = $("#find").value.trim().toLowerCase(), fam = Object.fromEntries(DATA.points.map(p => [p.id, (p.fam || "").toLowerCase()]));
+  document.querySelectorAll(".rank tr.mr").forEach(tr => { const hit = !q || tr.textContent.toLowerCase().includes(q) || (fam[tr.dataset.rid] || "").includes(q);
+    tr.hidden = !hit; if (!hit) { const pr = document.querySelector(`tr.prof[data-for="${tr.dataset.rid}"]`); pr.hidden = true; tr.classList.remove("open"); } });
+});

@@ -126,6 +126,7 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
             "one the range is for. ECI data: Epoch AI, 'Capabilities &amp; benchmarking', epoch.ai/benchmarks, CC BY 4.0.</p></section>") if pred else ""
     body += note
     return _page("llmbox · new models", "NEW", body, ("pages.css", "new.css"), ("plan.js", "new.js"),
-                 dict(ref=data["ref"], gpus=data["gpus"], ramKinds=data["ramKinds"], rows=rows, eciReady=bool(pred), ax=_axis_of([r.get("vs_ref") for r in rs])))
+                 dict(ref=data["ref"], gpus=data["gpus"], ramKinds=data["ramKinds"], rows=rows, eciReady=bool(pred), ax=_axis_of([r.get("vs_ref") for r in rs])),
+                 about="New local AI models from the last six months: which file fits your graphics card or Mac, how fast it runs, measured or expected quality.")
 
 

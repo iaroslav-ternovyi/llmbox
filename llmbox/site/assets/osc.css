@@ -1,9 +1,8 @@
 /* llmbox "Oscilloscope" design system, rev 2 (2026-09-26): dark instrument panel, amber phosphor, monospace numerals.
    Amber is the signal, not the chrome: it marks data worth reading and the active control. Frames, labels and rules are
    neutral, so the few amber things on a page are the ones the eye should land on. */
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap");
 :root{
-  --bg:#0E0F0C; --panel:#121310; --ink:#E8E4D8; --soft:#cfcabb; --muted:#8b877b; --faint:#5d5a50;
+  --bg:#0E0F0C; --panel:#121310; --ink:#E8E4D8; --soft:#cfcabb; --muted:#9a9689; --faint:#85817a;   /* muted 6.1:1, faint 4.8:1 on the panels (WCAG AA for small text) */
   --amber:#FFB000; --amber-dim:#7a5a14; --amber-faint:#3a2d0c; --red:#ff5a36; --red-dim:#6b2a1a;
   --line:#2a2b24; --line2:#1f201b; --grid:#15160f;
   --t-hi:#FFB000; --t-mid:#c9a255; --t-lo:#ff5a36;
