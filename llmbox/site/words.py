@@ -96,7 +96,7 @@ def set_variants(host: str, rs: list[dict]) -> None:
                             "thinking " + ("on" if kw["enable_thinking"] else "off") if "enable_thinking" in kw else rid)
 
 
-INSTALL = "# llmbox goes public with this site; until then it runs from its repository"   # then: pip install llmbox
+INSTALL = "pip install git+https://github.com/iaroslav-ternovyi/llmbox"   # pip install llmbox once it is on PyPI
 
 
 def model_name(r: dict) -> str:

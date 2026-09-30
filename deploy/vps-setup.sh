@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time setup of the llmbox server on a fresh Ubuntu 24.04 VPS (Hetzner CX23 or alike), as root:
-#   curl -fsSL https://raw.githubusercontent.com/<owner>/llmbox/main/deploy/vps-setup.sh | bash -s -- <repo-url> [<ssh-pubkey>]
+#   curl -fsSL https://raw.githubusercontent.com/iaroslav-ternovyi/llmbox/main/deploy/vps-setup.sh | bash -s -- https://github.com/iaroslav-ternovyi/llmbox [<ssh-pubkey>]
 # It creates the user llmbox, installs Python 3.12, Caddy (HTTPS) and Node (for wrangler), clones llmbox, and starts
 #   llmbox-intake.service   the intake (llmbox serve) on 127.0.0.1:8767; accepted submissions rebuild and publish the site
 #   caddy                   https://<this ip, dashed>.sslip.io -> /api/* of the intake (a certificate without a domain)

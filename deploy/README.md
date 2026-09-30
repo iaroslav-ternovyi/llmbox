@@ -17,7 +17,7 @@ Three parts (docs/roadmap.md §5, stage 2):
 2. **Server**
    - Create a Hetzner CX23 with Ubuntu 24.04 and your ssh key. Then, as root on it:
      ```bash
-     curl -fsSL https://raw.githubusercontent.com/<owner>/llmbox/main/deploy/vps-setup.sh | bash -s -- https://github.com/<owner>/llmbox "$(cat your_key.pub)"
+     curl -fsSL https://raw.githubusercontent.com/iaroslav-ternovyi/llmbox/main/deploy/vps-setup.sh | bash -s -- https://github.com/iaroslav-ternovyi/llmbox "$(cat your_key.pub)"
      ```
      The script prints the intake address `https://<ip-dashed>.sslip.io`. Caddy gets it a certificate, so no domain is needed.
    - Put the Cloudflare secrets in `/etc/llmbox.env` (root only), then run `systemctl restart llmbox-intake`:

@@ -21,7 +21,7 @@ ik_llama.cpp behind [llama-swap](https://github.com/mostlygeek/llama-swap).
 On the machine that runs models (or anywhere, with `--ssh` to it):
 
 ```bash
-pip install -e .
+pip install git+https://github.com/iaroslav-ternovyi/llmbox     # Python 3.12+, no other dependencies
 llmbox host add me                       # this machine: GPU, RAM, measured RAM speed, llama-server builds found
 llmbox pick                              # every measured model fitted to it: fits?, how fast, how good; the pick
 llmbox install qwen36-al --from registry --host me --apply   # download, fit, launcher, llama-swap entry
