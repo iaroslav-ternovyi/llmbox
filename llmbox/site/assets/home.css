@@ -38,7 +38,7 @@
 #find{background:#0b0c09;color:var(--ink);border:1px solid var(--line);padding:6px 10px;font:12.5px "IBM Plex Mono";width:190px}
 #find:focus{border-color:var(--amber);outline:none}.rank tr[hidden]{display:none!important}
 .cmp{display:flex;align-items:center;gap:12px}.cmp .btn[aria-disabled=true]{opacity:.4;pointer-events:none}
-.rnote{padding:8px 16px 0;font-size:12px;color:var(--faint)}
+.rnote{padding:8px 16px 0;font-size:12px;color:var(--faint)}.rnote.unr{color:var(--muted)}.rnote.unr b{color:var(--soft);font-weight:500}
 .rank th[data-sort]{cursor:pointer;user-select:none}.rank th[data-sort]:hover,.rank th[data-sort].on{color:var(--amber)}.rank th[data-sort].on .tip{color:var(--amber)}
 .rank td.mod{min-width:190px}.rank td.so{font-size:12.5px;line-height:1.55;min-width:170px}.rank .fp .trk s{top:-13px;bottom:-13px}
 .pfl u{position:relative;display:inline-block;top:1px;height:10px;margin:0 3px}

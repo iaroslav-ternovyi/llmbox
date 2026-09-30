@@ -10,7 +10,7 @@ from .components import _marker, _pct, _profile, _spd, _stands_out
 from .data import optimize_records, queue_state, shape_data
 from .layout import _page
 from .stats import rank_ranges
-from .words import _ago, _kind, _quant, _size, BLOCKS, esc, FAMILIES, family, LABEL, model_name, PRESETS
+from .words import SHORT, _ago, _kind, _quant, _size, BLOCKS, esc, FAMILIES, family, LABEL, model_name, PRESETS
 
 
 def _scatter(local: list[dict]) -> str:
@@ -121,6 +121,27 @@ def _chart_data(sd: dict, local: list[dict], clouds: list[dict], ref: dict | Non
     return data
 
 
+def _unranked(host: str, local: list[dict]) -> str:
+    """Models with answers in this version that do not cover every block yet: named under the ranking, with what is
+    missing, instead of being invisible until they qualify."""
+    from .. import suite as _s
+    ranked = {r["id"] for r in local}
+    out = []
+    for (rid, where), p in sorted(report.current_pool().items()):
+        if where != host or rid in ranked or not p.get("rows"):
+            continue
+        missing = [SHORT[b] for b in BLOCKS if b in _s.WEIGHTS and b not in p["blocks"]]
+        try:   # the model's own name, from its recipe
+            from .. import recipe as rc
+            m = rc.load(host, rid)["model"]
+            nm = model_name({"id": rid, "hf_repo": m.get("hf_repo"), "file": m.get("file")})
+        except (OSError, ValueError, KeyError):
+            nm = rid
+        if missing:
+            out.append(f"<b>{esc(nm)}</b> <span class='q'>({len(p['rows'])} answers; not yet: {esc(', '.join(missing))})</span>")
+    return (f"<p class='rnote unr'>Measured, not in the ranking until its answers cover every block: {' · '.join(out)}</p>") if out else ""
+
+
 def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick", rs: list[dict] | None = None,
          sd: dict | None = None) -> str:
     """The home page: the chart, the ranking by use, the settings' worth, the latest results, what's new."""
@@ -164,7 +185,7 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
  <div class="tw"><table class="rank"><thead>{head}</thead><tbody>{''.join(body)}</tbody></table></div>
  <p class="rnote">Places by score. A dashed line between rows: every model above it is measurably better than the ones below; inside a group the order is not settled yet.
- Click a row for its nine block scores.</p>{qline}</section>
+ Click a row for its nine block scores.</p>{_unranked(host, local)}{qline}</section>
 <div class="below">{optpanel}<section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
  {_news_panel({r["id"] for r in local})}</div>
 """
