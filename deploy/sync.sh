@@ -11,6 +11,7 @@ mkdir -p "$L/results/community"
 # the box) go back - both ways only newer files win (-u)
 rsync -au "$VPS:.llmbox/results/community/" "$L/results/community/"
 rsync -au "$L/results/community/" "$VPS:.llmbox/results/community/"
+mkdir -p "$L/intake" && rsync -a "$VPS:.llmbox/intake/users.json" "$L/intake/users.json" 2>/dev/null || true   # names on profile pages
 # what the site is built from; the server never writes these (no --delete on results/: community lives there)
 ssh "$VPS" 'mkdir -p ~/.llmbox/results ~/.llmbox/recipes ~/.llmbox/hosts'
 for d in results/box results/cloud; do rsync -a --delete "$L/$d/" "$VPS:.llmbox/$d/"; done

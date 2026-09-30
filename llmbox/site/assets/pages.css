@@ -19,3 +19,4 @@
 .bars.multi{grid-template-columns:150px minmax(0,1fr)}
 @media (max-width:900px){.title,.hd{grid-template-columns:1fr}.tele{grid-template-columns:1fr 1fr!important}.tele>div{border-bottom:1px solid var(--line2)}
  .bars{grid-template-columns:110px minmax(0,1fr)}}
+ul.plain{margin:6px 0 0;padding-left:18px;line-height:1.8}

@@ -176,7 +176,7 @@ def pool(hosts_: tuple = ("box", "cloud", "community")) -> dict:
     return {k: list(v.values()) for k, v in out.items() if v}
 
 
-HELD = {"self-seeded", "outlier"}   # people's runs that are filed but not pooled
+HELD = {"self-seeded", "outlier", "anonymous"}   # people's runs that are filed but not pooled
 
 
 def _recipe_ids(host: str) -> dict:

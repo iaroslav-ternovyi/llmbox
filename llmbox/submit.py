@@ -7,9 +7,10 @@ appear, the recipe's free-text notes, and the host profile's ssh address (record
 its measured speed, OS, driver), the engine build and flags, the model file and its sha256, the numbers. `--dry-run`
 prints the bundle instead of sending it.
 
-Each machine sends under a random install id (~/.llmbox/install-id): no account. The server uses it to count
-machines and people and to rate-limit; speed cannot be checked, so the site shows medians and flags outliers.
-Quality runs are sent the same way once the server checks answers from strangers (stage 3: GitHub login + sandbox).
+Each machine sends under a random install id (~/.llmbox/install-id); the server uses it to count machines and to
+rate-limit. Signed in (`llmbox login`), the results also go to your account and profile page, and quality runs count
+toward the models' scores (anonymous ones are filed only). Speed cannot be checked, so the site shows medians and
+flags outliers; quality answers are graded again by the server.
 """
 from __future__ import annotations
 
@@ -111,9 +112,12 @@ def fresh_seed(server: str = DEFAULT_SERVER) -> int | None:
 
 
 def send(b: dict, server: str = DEFAULT_SERVER, timeout: int = 120) -> dict:
+    from . import account
     body = gzip.compress(json.dumps(b).encode())
-    req = urllib.request.Request(server.rstrip("/") + "/api/v1/runs", data=body, method="POST",
-                                 headers={"Content-Type": "application/json", "Content-Encoding": "gzip", "User-Agent": f"llmbox/{__version__}"})
+    headers = {"Content-Type": "application/json", "Content-Encoding": "gzip", "User-Agent": f"llmbox/{__version__}"}
+    if account.key_for(server):   # signed in: the results go to your account (quality runs count toward the scores)
+        headers["Authorization"] = f"Bearer {account.key_for(server)}"
+    req = urllib.request.Request(server.rstrip("/") + "/api/v1/runs", data=body, method="POST", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())

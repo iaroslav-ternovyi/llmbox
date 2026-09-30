@@ -29,7 +29,9 @@ llmbox pick                              # every measured model fitted to it: fi
 llmbox install qwen36-al --from registry --host me --apply   # download, fit, launcher (and a llama-swap entry if you use it)
 llmbox run qwen36-al --host me           # serve it (OpenAI-compatible) until Ctrl-C; no llama-swap needed
 llmbox tune qwen36-al --host me          # optional: measure the speed knobs on this machine, keep what wins
-llmbox test qwen36-al --host me          # speed, the 40-minute quality test, and the upload (anonymous; the server
+llmbox login                             # GitHub (a code to enter at github.com): your results get a profile page, and
+                                         # your quality runs count toward the scores; `llmbox forget` deletes it all
+llmbox test qwen36-al --host me          # speed, the 40-minute quality test, and the upload (the server
                                          # re-grades every answer; `llmbox submit --dry-run` shows what is sent)
 ```
 
@@ -79,6 +81,7 @@ options.
 | `serving.py` | A model served by llmbox itself (`run`, and `test` for its run): no llama-swap needed |
 | `registry.py`, `pick.py` | The published recipes (export with the site, pull anywhere), the ranking fitted to a machine |
 | `hwclass.py`, `submit.py`, `server.py` | Hardware classes, sending measurements, the intake that takes them in |
+| `account.py` | Signing in with GitHub's device flow, the llmbox key, profile visibility, erasure |
 | `site/` | The static site. `words`: names and texts. `stats`: ties and places. `components`: shared pieces. `data`: records and pools. `layout`: the page frame. One module per page, plus `build`. Styles and scripts are in `site/assets/`. |
 
 Tests: `python3 tests/run_all.py` runs every test in parallel (~1.5 min), `--quick` skips the two slow ones, `--portable`

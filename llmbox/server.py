@@ -3,6 +3,12 @@
   POST /api/v1/seed        {client} -> {seed}: the seed a quality test (`llmbox test`) draws its tasks from
   POST /api/v1/runs        a gzip JSON bundle from `llmbox submit` -> 202 {id, status, url}
   GET  /api/v1/runs/<id>   the submission's status: received / accepted / rejected (with the reason per record)
+  POST /api/v1/login/github {access_token} from `llmbox login` (GitHub device flow) -> {key, handle}: the server checks
+                           who the token belongs to (GET api.github.com/user), keeps the GitHub id, issues its own key
+                           and never keeps the token
+  GET  /api/v1/me          (Authorization: Bearer <key>) the account: handle, public or not, what it sent
+  POST /api/v1/me          {public: true|false}: show the GitHub name on the profile page, or only the handle
+  POST /api/v1/me/forget   delete the account and every result it sent (GDPR erasure)
   GET  /api/v1/health      ok
 
 Bundles are stored as sent (<data>/inbox/<id>.json.gz) and listed in <data>/intake.db. `ingest()` (a thread of the
@@ -22,6 +28,7 @@ the model file is named. A figure more than twice what the formula predicts for 
 """
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import json
@@ -43,7 +50,10 @@ COMMUNITY = "community"
 DB_SCHEMA = """CREATE TABLE IF NOT EXISTS submissions (
   id TEXT PRIMARY KEY, received TEXT, client TEXT, addr TEXT, bytes INTEGER, records INTEGER,
   status TEXT, reason TEXT, detail TEXT);
-CREATE TABLE IF NOT EXISTS seeds (seed INTEGER PRIMARY KEY, client TEXT, issued TEXT, used INTEGER DEFAULT 0)"""
+CREATE TABLE IF NOT EXISTS seeds (seed INTEGER PRIMARY KEY, client TEXT, issued TEXT, used INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, github_id INTEGER UNIQUE, login TEXT, handle TEXT UNIQUE,
+  public INTEGER DEFAULT 0, created TEXT);
+CREATE TABLE IF NOT EXISTS keys (hash TEXT PRIMARY KEY, user_id INTEGER, created TEXT, last_used TEXT)"""
 MISMATCH_MAX = 0.2            # share of re-graded answers that may differ before a quality run is rejected
 SEEDS_PER_DAY = 20
 
@@ -55,6 +65,16 @@ class Intake:
         self.lock = threading.Lock()
         with self._db() as c:
             c.executescript(DB_SCHEMA)
+            if "user_id" not in {r[1] for r in c.execute("PRAGMA table_info(submissions)")}:
+                c.execute("ALTER TABLE submissions ADD COLUMN user_id INTEGER")
+        sp = os.path.join(self.data, "salt")   # handles are hashes of the GitHub id with this server's own salt
+        if not os.path.exists(sp):
+            import secrets
+            fd = os.open(sp, os.O_WRONLY | os.O_CREAT, 0o600)
+            os.write(fd, secrets.token_hex(16).encode())
+            os.close(fd)
+        self.salt = open(sp).read().strip()
+        self.github_user = github_user   # tests swap in a stub
 
     def _db(self) -> sqlite3.Connection:
         c = sqlite3.connect(os.path.join(self.data, "intake.db"), timeout=30)
@@ -66,7 +86,83 @@ class Intake:
         with self._db() as c:
             return c.execute("SELECT count(*) FROM submissions WHERE received > ? AND (client = ? OR addr = ?)", (since, client, addr)).fetchone()[0]
 
-    def receive(self, raw: bytes, addr: str) -> tuple[int, dict]:
+    # ---- accounts: GitHub login, the llmbox key, the profile's visibility, erasure --------------------------------------
+
+    def login(self, raw: bytes) -> tuple[int, dict]:
+        import secrets
+        try:
+            tok = str(json.loads(raw or b"{}").get("access_token") or "")
+        except ValueError:
+            return 400, {"error": "not JSON"}
+        gh = self.github_user(tok) if tok else None
+        if not gh or not gh.get("id"):
+            return 401, {"error": "GitHub did not accept that token"}
+        now = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+        handle = "u-" + hashlib.sha256(f"{self.salt}:{gh['id']}".encode()).hexdigest()[:8]
+        key = "lbx_" + secrets.token_urlsafe(32)
+        with self.lock, self._db() as c:
+            c.execute("INSERT INTO users (github_id, login, handle, public, created) VALUES (?,?,?,0,?) "
+                      "ON CONFLICT(github_id) DO UPDATE SET login = excluded.login", (gh["id"], gh.get("login"), handle, now))
+            uid, public = c.execute("SELECT id, public FROM users WHERE github_id = ?", (gh["id"],)).fetchone()
+            c.execute("INSERT INTO keys VALUES (?,?,?,?)", (hashlib.sha256(key.encode()).hexdigest(), uid, now, now))
+        self.export_users()
+        return 200, {"key": key, "handle": handle, "login": gh.get("login"), "public": bool(public)}
+
+    def user_of(self, auth: str | None) -> dict | None:
+        """The account of an 'Authorization: Bearer <key>' header, or None."""
+        if not auth or not auth.startswith("Bearer "):
+            return None
+        h = hashlib.sha256(auth[7:].strip().encode()).hexdigest()
+        with self._db() as c:
+            r = c.execute("SELECT u.* FROM keys k JOIN users u ON u.id = k.user_id WHERE k.hash = ?", (h,)).fetchone()
+            if r:
+                c.execute("UPDATE keys SET last_used = ? WHERE hash = ?", (time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), h))
+        return dict(r) if r else None
+
+    def me(self, user: dict, raw: bytes | None = None) -> tuple[int, dict]:
+        if raw:
+            try:
+                pub = bool(json.loads(raw).get("public"))
+            except ValueError:
+                return 400, {"error": "not JSON"}
+            with self._db() as c:
+                c.execute("UPDATE users SET public = ? WHERE id = ?", (int(pub), user["id"]))
+            user = dict(user, public=int(pub))
+            self.export_users()
+        with self._db() as c:
+            n = c.execute("SELECT count(*), coalesce(sum(records), 0) FROM submissions WHERE user_id = ?", (user["id"],)).fetchone()
+        return 200, {"handle": user["handle"], "login": user["login"], "public": bool(user["public"]), "submissions": n[0], "records": n[1]}
+
+    def forget(self, user: dict, save_host: str = COMMUNITY) -> tuple[int, dict]:
+        """Every result the account sent, its submissions, keys and the account itself: gone."""
+        gone = 0
+        for p, r in results.files(save_host):
+            if (r.get("submission") or {}).get("user") == user["handle"]:
+                os.remove(p)
+                gone += 1
+        with self.lock, self._db() as c:
+            for (sid,) in c.execute("SELECT id FROM submissions WHERE user_id = ?", (user["id"],)).fetchall():
+                with contextlib.suppress(OSError):
+                    os.remove(os.path.join(self.data, "inbox", f"{sid}.json.gz"))
+            c.execute("DELETE FROM submissions WHERE user_id = ?", (user["id"],))
+            c.execute("DELETE FROM keys WHERE user_id = ?", (user["id"],))
+            c.execute("DELETE FROM users WHERE id = ?", (user["id"],))
+        with contextlib.suppress(Exception):
+            from . import db
+            db.sync()
+        self.export_users()
+        return 200, {"deleted_results": gone, "account": "deleted"}
+
+    def export_users(self) -> None:
+        """users.json for the site's profile pages: handle -> the GitHub name only when the person made it public."""
+        with self._db() as c:
+            us = {r["handle"]: {"login": r["login"] if r["public"] else None, "public": bool(r["public"])}
+                  for r in c.execute("SELECT handle, login, public FROM users")}
+        tmp = os.path.join(self.data, "users.json.tmp")
+        json.dump(us, open(tmp, "w"))
+        os.replace(tmp, os.path.join(self.data, "users.json"))
+
+    def receive(self, raw: bytes, addr: str, user: dict | None = None) -> tuple[int, dict]:
         try:
             if raw[:2] == b"\x1f\x8b":
                 d = zlib.decompressobj(16 + zlib.MAX_WBITS)
@@ -88,8 +184,9 @@ class Intake:
             sid = uuid.uuid4().hex[:12]
             open(os.path.join(self.data, "inbox", f"{sid}.json.gz"), "wb").write(gzip.compress(json.dumps(b).encode()))
             with self._db() as c:
-                c.execute("INSERT INTO submissions VALUES (?,?,?,?,?,?,?,?,?)",
-                          (sid, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), client, a, len(raw), len(b["records"]), "received", "", "[]"))
+                c.execute("INSERT INTO submissions (id, received, client, addr, bytes, records, status, reason, detail, user_id) "
+                          "VALUES (?,?,?,?,?,?,?,?,?,?)", (sid, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), client, a, len(raw),
+                                                           len(b["records"]), "received", "", "[]", (user or {}).get("id")))
         return 202, {"id": sid, "status": "received", "url": f"/api/v1/runs/{sid}"}
 
     def seed(self, raw: bytes) -> tuple[int, dict]:
@@ -122,6 +219,8 @@ class Intake:
         """Check every received submission and file its accepted records; returns the submission ids done."""
         with self._db() as c:
             todo = [r["id"] for r in c.execute("SELECT id FROM submissions WHERE status = 'received' ORDER BY received")]
+            handles = {r[0]: r[1] for r in c.execute("SELECT s.id, u.handle FROM submissions s JOIN users u ON u.id = s.user_id "
+                                                     "WHERE s.status = 'received'")}
         done = []
         for sid in todo:
             b = json.loads(gzip.decompress(open(os.path.join(self.data, "inbox", f"{sid}.json.gz"), "rb").read()))
@@ -138,8 +237,10 @@ class Intake:
                         detail.append({"record": str(rec.get("id"))[:36], "status": "rejected", "reason": why})
                         continue
                     flags += qflags
+                    if sid not in handles:   # a quality run counts toward a score only from someone signed in
+                        flags.append("anonymous")
                 rec = dict(rec, submission={"id": sid, "client": hashlib.sha256(b["client"].encode()).hexdigest()[:12],
-                                            "received": time.strftime("%Y-%m-%dT%H:%M:%S"), "flags": flags})
+                                            "user": handles.get(sid), "received": time.strftime("%Y-%m-%dT%H:%M:%S"), "flags": flags})
                 rec["host"] = dict(rec["host"], **{"class": hwclass.of_host(rec["host"])})
                 results.save(save_host, rec)
                 ok += 1
@@ -187,6 +288,20 @@ class Intake:
             rec["verified"]["off"] = far
             flags.append("outlier")
         return rec, None, flags
+
+
+def github_user(token: str) -> dict | None:
+    """{id, login} of a GitHub token's owner (GET https://api.github.com/user), or None."""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request("https://api.github.com/user", headers={"Authorization": f"Bearer {token}", "User-Agent": "llmbox",
+                                                                        "Accept": "application/vnd.github+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            d = json.loads(r.read())
+        return {"id": int(d["id"]), "login": d.get("login")}
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        return None
 
 
 def off_score(rec: dict) -> dict | None:
@@ -266,6 +381,9 @@ def handler(intake: Intake):
         def do_GET(self):
             if self.path == "/api/v1/health":
                 return self._json(200, {"ok": True})
+            if self.path == "/api/v1/me":
+                u = intake.user_of(self.headers.get("Authorization"))
+                return self._json(*intake.me(u)) if u else self._json(401, {"error": "not signed in (llmbox login)"})
             if self.path.startswith("/api/v1/runs/"):
                 st = intake.status(self.path.rsplit("/", 1)[-1][:32])
                 return self._json(200, st) if st else self._json(404, {"error": "no such submission"})
@@ -275,13 +393,26 @@ def handler(intake: Intake):
             n = int(self.headers.get("Content-Length") or 0)
             if self.path == "/api/v1/seed" and n <= 4096:
                 return self._json(*intake.seed(self.rfile.read(n)))
+            if self.path == "/api/v1/login/github" and n <= 4096:
+                return self._json(*intake.login(self.rfile.read(n)))
+            if self.path in ("/api/v1/me", "/api/v1/me/forget") and n <= 4096:
+                u = intake.user_of(self.headers.get("Authorization"))
+                if not u:
+                    return self._json(401, {"error": "not signed in (llmbox login)"})
+                body = self.rfile.read(n)
+                return self._json(*(intake.forget(u) if self.path.endswith("forget") else intake.me(u, body or None)))
             if self.path != "/api/v1/runs":
                 return self._json(404, {"error": "not found"})
             if not 0 < n <= MAX_BODY:
                 return self._json(413, {"error": f"body must be 1 byte to {MAX_BODY // 2**20} MB"})
             # behind Caddy: the last X-Forwarded-For entry is the one Caddy added (a client can send its own first ones)
             addr = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip() or self.client_address[0]
-            code, obj = intake.receive(self.rfile.read(n), addr)
+            u = None
+            if self.headers.get("Authorization"):
+                u = intake.user_of(self.headers.get("Authorization"))
+                if not u:
+                    return self._json(401, {"error": "that llmbox key is not valid any more: llmbox login"})
+            code, obj = intake.receive(self.rfile.read(n), addr, u)
             self._json(code, obj)
 
         def log_message(self, fmt, *args):   # one line per request, no addresses

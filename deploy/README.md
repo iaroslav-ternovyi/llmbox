@@ -25,7 +25,15 @@ Three parts (docs/roadmap.md §5, stage 2):
      CLOUDFLARE_API_TOKEN=...
      CLOUDFLARE_ACCOUNT_ID=...
      ```
-3. **The author's machine**
+3. **GitHub sign-in** (`llmbox login`)
+   - At github.com → Settings → Developer settings → OAuth Apps → New OAuth App, fill in:
+     - name `llmbox`;
+     - homepage `https://llmbox.pages.dev`;
+     - callback URL the same (the device flow does not use it).
+   - Tick **Enable Device Flow** and register the app.
+   - Copy the **Client ID** into `account.GITHUB_CLIENT_ID`. It is public: the device flow needs no client secret, so
+     none is created or stored anywhere.
+4. **The author's machine**
    - Write `llmbox@<server ip>` to `~/.llmbox/vps`.
    - Run `deploy/sync.sh` once. The server gets the reference results and publishes the first site.
    - From then on, `~/.llmbox/bin/site-on-done.sh` runs `deploy/sync.sh` after every finished benchmark job.

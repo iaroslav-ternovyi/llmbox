@@ -257,7 +257,7 @@ def community_speeds(recipes: dict, ref_host: str = "box") -> dict:
             "p5": round(_pct(t2s, 0.05), 1) if len(t2s) >= 5 else None, "p95": round(_pct(t2s, 0.95), 1) if len(t2s) >= 5 else None,
             "outliers": sum(1 for rows in machines.values() for r in rows if r[5]),
             "ctx": int(st.median([r[7] for rows in good.values() for r in rows if r[7]] or [0])),
-            "ref": any(r[6] for rows in machines.values() for r in rows)})
+            "ref": any(r[6] for rows in machines.values() for r in rows), "values": sorted(t2s)})   # values: for a person's place
     for v in out.values():
         v.sort(key=lambda c: (-c["machines"], -(c["t2"] or 0)))
     return out

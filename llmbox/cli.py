@@ -333,6 +333,9 @@ def cmd_test(a: argparse.Namespace) -> None:
     seed = None if a.no_submit else submit.fresh_seed(server)
     if seed is None and not a.no_submit:
         print(f"{server} did not answer: the test runs on a seed of its own, and its answers are filed but not pooled")
+    from . import account
+    if not a.no_submit and not account.key_for(server):
+        print("not signed in: the quality run is filed but counts toward the model's score only from an account (llmbox login)")
     seed = seed if seed is not None else random.randrange(10**6, 10**9)
     import time as _t
     t0 = _t.time()
@@ -378,6 +381,33 @@ def _only_host() -> str:
     if len(names) != 1:
         raise SystemExit("which machine? --host <name> (llmbox host list)")
     return names[0]
+
+
+def cmd_account(a: argparse.Namespace) -> None:
+    """login / logout / whoami / profile / forget against the intake server."""
+    from . import account, registry, submit
+    server = a.server or submit.DEFAULT_SERVER
+    page = lambda h: f"{registry.DEFAULT_URL.rstrip('/')}/{h}.html"
+    if a.cmd == "login":
+        acc = account.login(server)
+        print(f"signed in as {acc.get('login')} - your profile page: {page(acc['handle'])} "
+              f"(shows {'your GitHub name' if acc.get('public') else 'the handle ' + acc['handle'] + ', not your GitHub name; llmbox profile --public shows it'})")
+    elif a.cmd == "logout":
+        print("signed out (the key is removed from this machine)" if account.logout(server) else "not signed in")
+    elif a.cmd == "whoami":
+        me = account.whoami(server)
+        print(f"{me['login']} ({me['handle']}, {'public' if me['public'] else 'private'} profile): {me['submissions']} submissions, "
+              f"{me['records']} results - {page(me['handle'])}" if me else "not signed in: llmbox login")
+    elif a.cmd == "profile":
+        if a.public == a.private:
+            raise SystemExit("llmbox profile --public (show your GitHub name) or --private (only the handle)")
+        me = account.set_public(server, a.public)
+        print(f"profile {page(me['handle'])} now shows {'your GitHub name ' + str(me['login']) if me['public'] else 'only ' + me['handle']}")
+    elif a.cmd == "forget":
+        if input("delete your account and every result you sent? type yes: ").strip() != "yes":
+            raise SystemExit("nothing deleted")
+        r = account.forget(server)
+        print(f"deleted: the account and {r['deleted_results']} results")
 
 
 def cmd_submit(a: argparse.Namespace) -> None:
@@ -733,7 +763,7 @@ def cmd_site(a) -> None:
 COMMAND_GROUPS = [
     ("Pick and run a model on your box", ["host", "pick", "scout", "fit", "recipe", "install", "run", "tune", "optimize"]),
     ("Measure it", ["test", "bench", "queue", "speed", "probe", "loops", "traces"]),
-    ("Share and compare", ["submit", "serve"]),
+    ("Share and compare", ["login", "whoami", "profile", "submit", "logout", "forget", "serve"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
     ("Develop the test", ["validate", "snapshot"]),
 ]
@@ -932,7 +962,18 @@ def main(argv: list[str] | None = None) -> None:
     te.add_argument("--no-submit", action="store_true", help="measure only; `llmbox submit` sends it later")
     te.set_defaults(fn=cmd_test)
 
-    sb = command("submit", "send your speed measurements to the shared results (anonymous; --dry-run shows exactly what is sent)")
+    for name, what in (("login", "sign in with GitHub (a code to enter at github.com): your results get an account and a profile page"),
+                       ("logout", "remove this machine's llmbox key"), ("whoami", "who you are signed in as, and your profile page"),
+                       ("profile", "show your GitHub name on your profile page (--public) or only its handle (--private)"),
+                       ("forget", "delete your account and every result you sent")):
+        ac = command(name, what)
+        ac.add_argument("--server", help="intake address (default $LLMBOX_SERVER)")
+        if name == "profile":
+            ac.add_argument("--public", action="store_true")
+            ac.add_argument("--private", action="store_true")
+        ac.set_defaults(fn=cmd_account)
+
+    sb = command("submit", "send your measurements (speed and quality) to the shared results; --dry-run shows exactly what is sent")
     sb.add_argument("results", nargs="*", help="result files (default: every speed, optimize and quality record not sent yet)")
     sb.add_argument("--host", help="only this host's records")
     sb.add_argument("--server", help="intake address (default $LLMBOX_SERVER or the local intake)")

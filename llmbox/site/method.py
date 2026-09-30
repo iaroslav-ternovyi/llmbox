@@ -137,6 +137,9 @@ five machines are in it. <code>llmbox run &lt;model&gt;</code> serves the model 
 visible): the answers are code that runs. The server's grade replaces the one sent. A run with more than a fifth of its answers graded
 differently is rejected.</li>
 <li><b>The tasks come from a seed the server hands out</b> for each test, so they cannot be prepared in advance.</li>
+<li><b>Quality runs count from people signed in</b> with GitHub (<code>llmbox login</code>); anonymous ones are kept but do not count.
+Each person's results are on their <a href="people.html">page</a>, under a handle unless they choose to show their name, and
+<code>llmbox forget</code> deletes the account and everything it sent.</li>
 <li><b>The same model file with the same settings must score the same</b> on any machine. A run whose range does not meet the model's
 range (answers from a stronger model, or a broken setup) is kept aside, out of the score. Verified answers that agree join the model's
 score, and every run narrows its range for everyone.</li>

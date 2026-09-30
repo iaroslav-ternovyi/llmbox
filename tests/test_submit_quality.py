@@ -22,8 +22,8 @@ real_home = results.HOME
 
 home = tempfile.mkdtemp()
 os.environ["LLMBOX_NO_DB"] = "1"
-from llmbox import hosts, irt, recipe as rc, server, submit  # noqa: E402
-hosts.HOME = submit.HOME = server.HOME = results.HOME = rc.HOME = irt.HOME = home
+from llmbox import account, hosts, irt, recipe as rc, server, submit  # noqa: E402
+hosts.HOME = submit.HOME = server.HOME = results.HOME = rc.HOME = irt.HOME = account.HOME = home
 submit.LEDGER = os.path.join(home, "submitted.json")
 os.makedirs(os.path.join(home, "recipes", "box"))
 for rid in ("k2-horizon", "k2-medium"):   # the reference recipes a person's run can join
@@ -39,6 +39,8 @@ intake = server.Intake(os.path.join(home, "intake"))
 srv = ThreadingHTTPServer(("127.0.0.1", 0), server.handler(intake))
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 url = f"http://127.0.0.1:{srv.server_address[1]}"
+intake.github_user = lambda t: {"id": 7, "login": "tester"} if t == "tok" else None
+account.login(url, token="tok")   # signed in: its quality runs can count (tests/test_accounts.py covers anonymous ones)
 
 seed = submit.fresh_seed(url)
 assert isinstance(seed, int) and seed >= 10**6, seed
