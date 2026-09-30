@@ -346,7 +346,7 @@ def cmd_bench(a: argparse.Namespace) -> None:
         pr = tuple(float(x) for x in a.prior.split(",")) if a.prior else None   # default: the bank's population prior
         res = bench.run_adaptive(a.endpoint, a.model, bank, budget_min=a.budget, target=a.target, prior=pr,
                                  seed0=7000 + 1000 * a.seed,   # --seed: fresh instances for a repeated adaptive run
-                                 api_key=None, progress=lambda m: print(m, flush=True), jsonl_path=jl, explore=a.explore)
+                                 api_key=None, progress=lambda m: print(m, flush=True), jsonl_path=jl, explore=a.explore, blocks=a.block)
     else:
         res = bench.run(a.endpoint, a.model, tier=a.tier, seed0=a.seed, blocks=a.block, jsonl_path=jl,
                         progress=lambda m: print(m, flush=True), resume=a.resume, rerun=a.rerun, parallel=a.parallel)

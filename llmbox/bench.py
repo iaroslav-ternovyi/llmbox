@@ -429,12 +429,16 @@ EXPLORE = 6   # provisional families tried per adaptive run (v0.11: new tools le
 
 def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, target: float = 5.0, prior: tuple | None = None,
                  seed0: int = 7000, api_key: str | None = None, progress=print, jsonl_path: str | None = None,
-                 min_per_block: int = 1, max_per_family: int = 2, explore: int | None = None) -> dict:
+                 min_per_block: int = 1, max_per_family: int = 2, explore: int | None = None, blocks: list[str] | None = None) -> dict:
     """Adaptive run (llmbox/irt.py): after every task, the family with the most information per expected second at the
     current estimate; fresh seeds, so a family can be drawn again (at most max_per_family times). Stops when the 95%
     interval of the capability is within +-target points or the time budget is spent. The capability is reported on
     the quick suite's scale (expected weighted score of its task families at the estimated theta)."""
     from . import irt
+    if blocks:   # some blocks only (the model has the others already): their families, calibrated and provisional
+        prov_keep = [f for f in bank.provisional if bank.block.get(f) in blocks]
+        bank = irt.subset(bank, {f for f in bank.a if bank.block[f] in blocks})
+        bank.provisional = prov_keep
     # provisional families (guessed parameters, llmbox/irt.py with_provisional) are explored, not scored: every third
     # task at most, EXPLORE per run; the estimate and the stopping rule use the calibrated families only
     prov = set(bank.provisional)
@@ -455,7 +459,7 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         on_target = bool(obs) and (sel["hi"] - sel["lo"]) / 2 <= target
         if spent >= budget_min * 60 or (on_target and (not prov or len(explored) >= min(quota, len(prov)))):
             break
-        short = [b for b in bank.weights if counts.get(b, 0) < min_per_block]
+        short = [b for b in bank.weights if counts.get(b, 0) < min_per_block and b in set(bank.block.values())]   # blocks this run can reach
         # an item that failed at once (HTTP 502 while the server restarts) says nothing about its time: 0 s made a
         # family free and crashed the choice (K2 Horizon, 2026-09-29)
         timed = [r for r in rows if not r.get("error") and r["seconds"] > 0]
@@ -523,4 +527,5 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
     if stopped:
         s["stopped"] = stopped
     return {"suite": {"version": suite.VERSION, "tier": "adaptive", "seed0": seed0, "content_hash": suite.content_hash(),
-                      "weights": suite.WEIGHTS, "budget_min": budget_min, "target": target}, "summary": s, "rows": rows}
+                      "weights": suite.WEIGHTS, "budget_min": budget_min, "target": target, "blocks": sorted(blocks) if blocks else None},
+            "summary": s, "rows": rows}
