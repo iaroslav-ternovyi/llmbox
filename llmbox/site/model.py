@@ -297,7 +297,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
  {_groups_legend(ref=bool(ref))}<p class="q">Click a line to see the tasks it lost and why.</p></section>
 <section class="panel pad"><div class="lbl">Speed as the context grows</div>
  <p class="yb" id="yourbox" hidden></p>{_depth_bars([(rid, sp.get("by_depth") or {})])}
- <p class="q" style="margin-top:16px">Measured on the reference PC ({esc(ref_box)}). <a href="hardware-{esc(rid)}.html">Speed on 35 other graphics cards and Macs →</a></p></section>
+ <p class="q" style="margin-top:16px">Measured on the reference PC ({esc(ref_box)}). <a href="hardware-{esc(rid)}.html">Speed on {len(GPUS)} other graphics cards and Macs →</a></p></section>
 <div id="run"></div>{_run_panel(rid, rec, ctx["model_now"], ctx["on_hf"])}
 {_settings_panel(rcp, ctx["opt"])}
 {_runs_panel(ctx["runs"], ref, ctx["counted"])}'''

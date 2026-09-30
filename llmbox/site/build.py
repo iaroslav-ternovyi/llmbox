@@ -11,7 +11,7 @@ from .components import _cmp_href
 from .data import _model_now, load_records, optimize_records, shape_data, task_flags
 from .hardware import hardware_page
 from .home import home
-from .layout import copy_assets
+from .layout import _page, copy_assets
 from .method import method_page
 from .model import recipe_page
 from .new import new_page
@@ -87,4 +87,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
         print(f"new.html skipped: {e}")
     if np_:
         w("new.html", np_)
+    w("404.html", _page("llmbox · page not found", "", '<section class="panel hd"><div><h1>Page not found</h1><p class="q" style="margin-top:8px">'
+                        'The model or run may have been renamed. <a href="index.html">The ranking</a> · <a href="new.html">new models</a> · '
+                        '<a href="compare.html">compare</a> · <a href="method.html">how scores work</a></p></div></section>', ("pages.css",)))
     return written
