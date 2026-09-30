@@ -11,6 +11,7 @@ from .components import _cmp_href
 from .data import _model_now, load_records, optimize_records, shape_data, task_flags
 from .hardware import hardware_page
 from .home import home
+from .layout import copy_assets
 from .method import method_page
 from .model import recipe_page
 from .new import new_page
@@ -33,7 +34,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     all_rs = report.rows(host, suite_version=suite_version, tier=tier)
     rs = [r for r in all_rs if r["host"].get("id") != "cloud" and not r.get("partial")]
     data = shape_data(rs, host)
-    written = [home(out_dir, host, suite_version, tier, all_rs, data)]
+    written = copy_assets(out_dir) + [home(out_dir, host, suite_version, tier, all_rs, data)]
     recs = load_records(host, suite_version, tier)
     local_run, ref = recs["local"], recs["ref"]
     allrecs = report.results.load_all(host)

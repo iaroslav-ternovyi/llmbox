@@ -7,7 +7,7 @@ import os
 from .. import report
 from .components import _cmp_href, _depth_bars, _fp_html, _groups_html, _groups_legend, _marker, _pct, _stands_sentence
 from .data import GPUS
-from .layout import _page, PLAN_JS
+from .layout import _page
 from .stats import _axis_of, _range_pct
 from .words import _ago, _human, _lineage, _name_of, _quant, _size, esc, model_name, task_name
 
@@ -159,33 +159,6 @@ def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool |
             + "</section>")
 
 
-RUN_JS = r"""
-document.querySelectorAll(".run").forEach(sec => {
-  const pick = t => { sec.querySelectorAll(".rtabs button").forEach(x => x.classList.toggle("on", x.dataset.t === t));
-    sec.querySelectorAll(".rp").forEach(x => x.classList.toggle("on", x.dataset.t === t)); };
-  sec.querySelectorAll(".rtabs button").forEach(b => b.addEventListener("click", () => {
-    pick(b.dataset.t); try { localStorage.setItem("llmbox-runtab", b.dataset.t); } catch (e) {} }));
-  try { const t = localStorage.getItem("llmbox-runtab"); if (t && sec.querySelector(`.rtabs button[data-t="${t}"]`)) pick(t); } catch (e) {}   // the app the visitor uses
-  sec.querySelectorAll(".more").forEach(b => { const all = b.textContent; b.addEventListener("click", () => { const pre = b.parentElement.querySelector("pre");
-    pre.classList.toggle("clip"); b.textContent = pre.classList.contains("clip") ? all : "show fewer lines ▴"; }); });
-  sec.querySelectorAll(".cpy").forEach(b => b.addEventListener("click", async () => {
-    const t = b.parentElement.querySelector("pre").innerText;
-    try { await navigator.clipboard.writeText(t); b.textContent = "COPIED"; } catch (e) { b.textContent = "SELECT AND COPY"; }
-    setTimeout(() => b.textContent = "COPY", 1500); }));
-});
-"""
-
-
-RUN_CSS = """
-.run .rtabs{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}.run .rtabs button{background:none;border:1px solid transparent;color:var(--muted);font:12px "IBM Plex Mono";padding:5px 10px;cursor:pointer}
-.run .rtabs button.on{color:var(--amber);border-color:var(--amber-dim)}.run .rp{display:none;position:relative}.run .rp.on{display:block}
-.run pre.cp{background:#0b0c09;border:1px solid var(--line);padding:12px 14px;font-size:12px;line-height:1.6;color:var(--soft);overflow-x:auto;white-space:pre;margin:6px 0 0}
-.run .cpy{position:absolute;top:34px;right:8px;font-size:11px;padding:4px 10px}.run .rpn{margin:0}
-.run pre.clip{max-height:calc(14 * 1.6em + 24px);overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent);mask-image:linear-gradient(#000 70%,transparent)}
-.run .more{background:none;border:0;color:var(--amber);font:12px "IBM Plex Mono";padding:6px 0;cursor:pointer}
-"""
-
-
 def _near_html(rid: str, rs: list[dict], clouds: list[dict], ranks: dict, look: dict) -> str:
     """Where the model sits: the two models above and below it, and the Claude models in that span, on the ranking's scale."""
     order = sorted([r for r in rs if r.get("vs_ref") is not None], key=lambda r: (-r["vs_ref"], r["id"]))
@@ -328,53 +301,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
 <div id="run"></div>{_run_panel(rid, rec, ctx["model_now"], ctx["on_hf"])}
 {_settings_panel(rcp, ctx["opt"])}
 {_runs_panel(ctx["runs"], ref, ctx["counted"])}'''
-    js = (PLAN_JS + f"\nconst DATA = {json.dumps({'sh': shp, 'gpus': GPUS, 'ref': ctx['ref_hw']})};\n" + RECIPE_JS + RUN_JS)
-    return _page(f"llmbox · {nm} · {_quant(m.get('file'))}", "MODELS", body, _RECIPE_CSS + RUN_CSS, js)
+    return _page(f"llmbox · {nm} · {_quant(m.get('file'))}", "MODELS", body, ("pages.css", "model.css"), ("plan.js", "model.js", "runcmd.js"),
+                 {"sh": shp, "gpus": GPUS, "ref": ctx["ref_hw"]})
 
 
-RECIPE_JS = r"""
-(function () {   // the visitor's box (picked on the home page): speed and fit predicted for it
-  const box = savedBox(DATA);
-  if (!box || !DATA.sh || !DATA.sh.layers || sameClassAs(box, DATA.ref)) return;
-  const f = forBox(DATA.sh, box), sp = document.querySelector("#vspd"), ft = document.querySelector("#vfit"), yb = document.querySelector("#yourbox");
-  if (f.fits) {
-    sp.querySelector("b").innerHTML = `~${Math.round(f.t2)}<small> tok/s</small>`;
-    sp.querySelector(".sub").textContent = `short chat · ~${Math.round(f.td)} with a long document`;
-    ft.querySelector("b").textContent = `✓ ${Math.round(f.ctx / 1024)}k`;
-    yb.innerHTML = `On your box (${boxLabel(box)}): <b>~${Math.round(f.t2)} tok/s</b> in a short chat, <b>~${Math.round(f.td)}</b> with a long document, up to ${Math.round(f.ctx / 1024)}k context. Predicted; the bars below are measured on the reference PC.`;
-  } else {
-    sp.querySelector("b").textContent = "—"; sp.querySelector(".sub").textContent = "does not fit on your box";
-    ft.querySelector("b").innerHTML = '<span class="red">✗ too big</span>';
-    yb.innerHTML = `On your box (${boxLabel(box)}) this model does not fit, even with a smaller context. The bars below are the reference PC.`;
-  }
-  sp.querySelector(".src").textContent = "predicted for your box"; ft.querySelector(".sub").textContent = "context on your box";
-  ft.querySelector(".src").textContent = boxLabel(box); yb.hidden = false;
-})();
-"""
-
-
-_RECIPE_CSS = """
-.title h1 .mk{vertical-align:2px;margin-right:4px}.title .meta a{color:var(--muted);border-bottom:1px dotted var(--faint)}
-.verdict .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
-.verdict .tiles>div{padding:18px 22px;border-right:1px solid var(--line2);display:flex;flex-direction:column;gap:2px;min-width:0}.verdict .tiles .src{white-space:normal}.verdict .tiles>div:last-child{border-right:0}
-.verdict .tiles b{font:300 40px/1.1 "IBM Plex Mono";color:var(--ink);margin:6px 0 4px}.verdict .tiles>div:first-child b{color:var(--amber)}
-.verdict .tiles b small{font-size:14px;color:var(--muted);margin-left:2px}.verdict .tiles span{font-size:12.5px;color:var(--soft)}.verdict .tiles .src{margin-top:4px;font-size:11px}
-.verdict .say{border-top:1px solid var(--line2);padding:14px 22px;font-size:14px;color:var(--soft)}.verdict .say .up{color:var(--amber);font-weight:500}.verdict .say .dn{color:#e0826a;font-weight:500}
-.near .nr{display:grid;grid-template-columns:30px minmax(180px,1.1fr) minmax(0,2.2fr) 100px;gap:14px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line2)}
-.near .nr.hd{padding:0 0 6px}.near .nr .rk{color:var(--muted);font-size:13px}.near .nr.me{background:rgba(255,176,0,.05)}.near .nr.me .m{color:var(--amber)}
-.near .nr.cl{padding:5px 0}.near .nr.cl .m{font-size:14px;color:var(--muted);font-weight:500}.near .nr.cl .num{color:var(--muted);font-size:14px}
-.near .m{font:600 15px "IBM Plex Sans Condensed";color:var(--ink)}.near .cmpl{font-size:12px;text-align:right}.near .q{text-align:right}
-.near .fp .trk s{top:-10px;bottom:-10px}.near .nr.hd .trk{height:16px}
-.yb{font-size:13px;color:var(--soft);margin:0 0 16px;padding:10px 14px;border:1px dashed var(--amber-dim)}.yb b{color:var(--ink);font-weight:500}
-.rgrid{display:grid;grid-template-columns:1.3fr 1fr}.rgrid>div{padding:18px 22px}.rgrid>div:first-child{border-right:1px solid var(--line2)}
-.rgrid .sc{margin-bottom:10px}.rgrid dl{display:grid;grid-template-columns:110px 1fr;row-gap:7px;font-size:13px}.rgrid dt{color:var(--muted)}.rgrid dd.val{color:var(--amber)}
-.notes,.worth{padding:14px 22px 16px;border-top:1px solid var(--line2)}.notes .sc,.worth .sc{margin-bottom:8px}
-.notes li{list-style:none;font-size:12.5px;color:var(--soft);padding:3px 0 3px 14px;position:relative}.notes li:before{content:"›";position:absolute;left:0;color:var(--amber)}
-.worth dl{display:grid;grid-template-columns:190px 1fr;row-gap:6px;font-size:13px;margin-bottom:8px}.worth dt{color:var(--muted)}.worth b{color:var(--ink);font-weight:500}.worth em{font-style:normal;color:var(--amber);margin-left:6px}
-.runs .cfg{font-size:12.5px;color:var(--soft)}.runs .rn{padding:10px 16px 14px;margin:0}
-@media (max-width:1000px){.verdict .tiles{grid-template-columns:1fr 1fr}.verdict .tiles>div:nth-child(2){border-right:0}.verdict .tiles>div:nth-child(-n+2){border-bottom:1px solid var(--line2)}}
-@media (max-width:760px){.near .nr{grid-template-columns:24px minmax(0,1fr) 70px;row-gap:4px}.near .nr .fp{grid-column:2/4;grid-row:2}.near .nr.hd{display:none}
- .near .nr.cl{grid-template-columns:24px minmax(0,1fr)}.near .nr.cl .fp{grid-column:2}.near .nr.cl>span:last-child{display:none}
- .rgrid{grid-template-columns:1fr}.rgrid>div:first-child{border-right:0;border-bottom:1px solid var(--line2)}.worth dl{grid-template-columns:1fr}.worth dd{margin-bottom:6px}
- .verdict .tiles b{font-size:32px}.verdict .tiles>div{padding:14px 16px}}
-"""

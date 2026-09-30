@@ -64,20 +64,6 @@ def run_page(rid: str, rec: dict, ref: dict | None, flags: dict) -> str:
 {_telemetry_panel(rec.get("telemetry"))}
 <section class="panel tasks"><div class="lbl">Every task</div>
  <div class="tw"><table><tr><th class="l">TASK</th><th>SCORE</th><th>TIME</th><th>STEPS</th><th>LONGEST REPLY<br><span class="faint">tokens</span></th><th class="l">FLAGS</th></tr>{"".join(body_rows)}</table></div></section>'''
-    js = 'const c=document.getElementById("copy");if(c)c.onclick=()=>{navigator.clipboard.writeText(document.getElementById("argv").innerText.trim().replace(/\\s*\\n\\s*/g," ")).then(()=>{c.textContent="COPIED";setTimeout(()=>c.textContent="COPY SETTINGS",1500)})};'
-    return _page(f"llmbox · run {rec['id'][:8]} · {rid}", "MODELS", body, _RUN_CSS, js)
+    return _page(f"llmbox · run {rec['id'][:8]} · {rid}", "MODELS", body, ("pages.css", "run.css"), ("run.js",))
 
 
-_RUN_CSS = """
-.sum{display:grid;grid-template-columns:repeat(6,minmax(0,1fr))}.sum>div{padding:16px 18px;border-right:1px solid var(--line2)}.sum>div:last-child{border-right:0}
-.sum b{display:block;font:300 32px "IBM Plex Mono";color:var(--amber);line-height:1.1}.sum b.w{color:var(--ink)}.sum span{font-size:12px;color:var(--muted)}
-.two{display:grid;grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:22px}
-.sys dl{display:grid;grid-template-columns:90px 1fr;row-gap:7px;font-size:12.5px;padding:18px 22px}.sys dt{color:var(--muted)}.sys dd{word-break:break-word}.sys dd.todo{color:var(--red)}
-.argv{padding:16px 22px;font-size:12px;line-height:1.7;color:var(--soft);columns:2 260px;column-gap:28px}.argv span{display:block;word-break:break-all}
-.diff{padding:10px 22px 16px;border-top:1px solid var(--line2);font-size:12.5px}
-.tasks td{padding:7px 8px;font-size:12.5px}.tasks .m2{font:500 13px "IBM Plex Mono";color:var(--ink)}
-.mb{display:inline-block;width:90px;height:5px;background:var(--line);position:relative;vertical-align:middle;margin-right:10px}.mb i{position:absolute;left:0;top:0;bottom:0;background:var(--soft);opacity:.7}
-.mb.ok i{background:var(--amber);opacity:.9}.mb.no{background:rgba(255,90,54,.25)}.mv{font:500 13px "IBM Plex Mono";color:var(--ink)}
-.tasks tr.grp td{color:var(--muted);font-size:11px;letter-spacing:.16em;padding:16px 10px 6px;border-bottom:1px solid var(--line)}
-@media (max-width:900px){.sum{grid-template-columns:1fr 1fr}.sum>div{border-bottom:1px solid var(--line2)}.two{grid-template-columns:1fr}}
-"""

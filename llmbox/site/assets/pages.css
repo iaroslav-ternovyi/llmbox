@@ -1,0 +1,21 @@
+/* every page but the home page: titles, panels, telemetry, speed bars */
+.opt{border-collapse:collapse;margin:8px 0 4px;font-size:13px}.opt th,.opt td{padding:7px 12px;border-bottom:1px solid var(--line2);text-align:right}
+.opt th{color:var(--muted);font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase}.opt .l{text-align:left}.opt tr.me td{color:var(--amber)}.opt small{color:var(--muted);margin-left:4px}
+.title,.hd{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:18px;padding:18px 22px}
+.title h1,.hd h1{font:600 32px/1.1 "IBM Plex Sans Condensed";margin-top:6px}.title h1 a,.hd h1 a{color:var(--ink);border-bottom:1px dotted var(--faint)}
+.title .meta{font-size:12px;color:var(--muted);margin-top:8px}
+.title .acts,.hd .acts{display:flex;flex-wrap:wrap;gap:10px}
+.hd .id{font-size:12px;color:var(--muted);margin-top:6px}
+.tele{display:grid}.tele>div{padding:14px 16px;border-right:1px solid var(--line2)}.tele>div:last-child{border-right:0}
+.tele .tv{font-size:22px;margin-top:2px}.tele .tv small{font-size:11px;color:var(--muted);margin-left:4px}
+.spark{width:100%;height:40px;display:block;margin-top:6px}
+.flag{font-size:10px;letter-spacing:.12em;border:1px solid var(--line);color:var(--soft);padding:1px 6px;margin-right:4px}.flag.lo{border-color:var(--red-dim);color:var(--red)}
+.m2{font:600 14px "IBM Plex Sans Condensed";color:var(--ink)}
+.bars{grid-template-columns:170px minmax(0,1fr) 170px}
+.bars .tr{position:relative;height:26px;background:var(--line2)}.bars .tr+.tr{margin-top:4px}
+.bars .tr i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,rgba(255,176,0,.28),rgba(255,176,0,.7));box-shadow:0 0 10px rgba(255,176,0,.2)}
+.bars .tr.b i{background:rgba(232,228,216,.2);box-shadow:none}
+.bars .tr span{position:absolute;left:10px;top:4px;font-size:13px;white-space:nowrap}.bars .tr span em{font-style:normal;color:rgba(232,228,216,.7);margin-left:10px}
+.bars.multi{grid-template-columns:150px minmax(0,1fr)}
+@media (max-width:900px){.title,.hd{grid-template-columns:1fr}.tele{grid-template-columns:1fr 1fr!important}.tele>div{border-bottom:1px solid var(--line2)}
+ .bars{grid-template-columns:110px minmax(0,1fr)}}

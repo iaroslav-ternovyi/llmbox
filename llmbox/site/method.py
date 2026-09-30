@@ -133,22 +133,6 @@ Replies are capped at 32k tokens with room kept for the answer after the thinkin
 <p>Scores compare only within one suite version. The content hash identifies the exact tasks and graders. Answers to tasks that did not
 change carry over to the next version; a changed task needs new answers.</p>
 </article></div>'''
-    return _page(f"llmbox · how scores work (suite v{suite.VERSION})", "METHOD", body, _METHOD_CSS)
+    return _page(f"llmbox · how scores work (suite v{suite.VERSION})", "METHOD", body, ("pages.css", "method.css"))
 
 
-_METHOD_CSS = """
-.mdoc{display:grid;grid-template-columns:200px minmax(0,1fr);gap:34px;align-items:start}
-.toc{position:sticky;top:18px;display:flex;flex-direction:column;gap:2px;margin-top:34px;border-left:1px solid var(--line);padding-left:14px}
-.toc a{font-size:12.5px;color:var(--muted);padding:3px 0}.toc a:hover{color:var(--amber);text-decoration:none}
-.doc{max-width:880px;margin:10px 0 0;padding:6px 0 10px}
-.doc h2{font:600 22px "IBM Plex Sans Condensed";margin:34px 0 10px;scroll-margin-top:16px}
-.doc p{font-size:14px;line-height:1.75;color:var(--soft);max-width:74ch;margin-top:10px}.doc p b{color:var(--ink);font-weight:500}
-.doc table{margin-top:12px}.doc td.q{font-size:12.5px;line-height:1.55;padding:12px 8px}.doc td{vertical-align:top}
-.doc tr.grp td{font:600 15px "IBM Plex Sans Condensed";color:var(--amber);padding:18px 8px 6px;border-bottom:1px solid var(--line)}
-.short{border:1px solid var(--line);padding:4px 22px 16px;margin-top:22px;background:rgba(255,176,0,.03)}.short h2{margin-top:14px}
-.short li{list-style:none;font-size:14px;line-height:1.65;color:var(--soft);padding:5px 0 5px 16px;position:relative}.short li:before{content:"›";position:absolute;left:0;color:var(--amber)}
-.short b{color:var(--ink);font-weight:500}
-.exs{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin:18px 0 6px}.exs .sc{margin-bottom:8px}
-.ex{display:grid;grid-template-columns:200px minmax(0,1fr);gap:12px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line2)}.ex .m{font:600 14px "IBM Plex Sans Condensed"}
-@media (max-width:900px){.mdoc{grid-template-columns:minmax(0,1fr)}.toc{display:none}.exs{grid-template-columns:1fr}.ex{grid-template-columns:1fr}}
-"""
