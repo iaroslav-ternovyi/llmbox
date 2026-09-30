@@ -142,6 +142,15 @@ def _unranked(host: str, local: list[dict]) -> str:
     return (f"<p class='rnote unr'>Measured, not in the ranking until its answers cover every block: {' · '.join(out)}</p>") if out else ""
 
 
+def _trust(local: list[dict]) -> str:
+    """The proof in one line: how much is measured, how it is graded, that it is open, that nothing leaves unasked."""
+    answers = sum(r.get("answers") or 0 for r in local)
+    runs = sum(r.get("runs") or 0 for r in local)
+    return (f"<b>{len(local)}</b> models · <b>{answers:,}</b> answers from <b>{runs}</b> runs, graded by programs, not by another AI · "
+            f'<a href="https://github.com/iaroslav-ternovyi/llmbox">open source</a> · nothing is sent from your computer without your yes · '
+            f'<a href="method.html">how it works</a>')
+
+
 def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick", rs: list[dict] | None = None,
          sd: dict | None = None) -> str:
     """The home page: the chart, the ranking by use, the settings' worth, the latest results, what's new."""
@@ -165,8 +174,9 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     data = dict(_chart_data(sd, local, clouds, ref, ranks, names0), site=SITE_URL)
     body = f"""
 <h1 class="q1">What should I run on my box?</h1>
-<p class="lede">AI models you can run on your own computer, graded on real work (coding, tools, documents, writing) and timed on a real PC.
-Pick your graphics card or Mac: the table shows what fits, how fast it answers and how close it gets to Claude. Every model page has the file to download and settings to copy. <a href="method.html#people">Measure your own computer →</a></p>
+<p class="lede">AI models you can run on your own computer, graded on real work and timed on real PCs. Pick your graphics card or Mac:
+the best model for it, how fast it answers, how close it gets to Claude, and one line that installs and starts it.</p>
+<p class="trust">{_trust(local)}</p>
 {NEWBIE}
 <section class="boxbar" id="box"><span class="sc">Your box</span>
  <select id="gpu" aria-label="GPU or Mac"><option value="">the reference PC ({esc(ref_box)})</option></select>
