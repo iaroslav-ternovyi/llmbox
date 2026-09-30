@@ -1,0 +1,20 @@
+[Unit]
+Description=llmbox intake: takes submitted measurements, rebuilds and publishes the site
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=llmbox
+WorkingDirectory=/home/llmbox/llmbox
+EnvironmentFile=/etc/llmbox.env
+Environment=PATH=/home/llmbox/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/llmbox/venv/bin/llmbox serve --bind 127.0.0.1 --port 8767 --rebuild /home/llmbox/site --deploy "npx --yes wrangler pages deploy {site} --project-name llmbox --branch main --commit-dirty=true"
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/llmbox
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

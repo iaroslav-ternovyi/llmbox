@@ -325,16 +325,22 @@ def cmd_serve(a: argparse.Namespace) -> None:
     if a.ingest_once:
         ids = server.Intake(a.data).ingest()
         print(f"{len(ids)} submission(s) checked")
-        if ids and a.rebuild:
-            _rebuild_site(a.rebuild)
+        if (ids or a.force_rebuild) and a.rebuild:
+            _rebuild_site(a.rebuild, a.deploy)
         return
-    server.serve(a.data, port=a.port, bind=a.bind, on_accept=(lambda ids: _rebuild_site(a.rebuild)) if a.rebuild else None)
+    server.serve(a.data, port=a.port, bind=a.bind, on_accept=(lambda ids: _rebuild_site(a.rebuild, a.deploy)) if a.rebuild else None)
 
 
-def _rebuild_site(out: str) -> None:
+def _rebuild_site(out: str, deploy: str | None = None) -> None:
+    """Rebuild the site; then publish it with the deploy command ({site} = the folder), e.g. wrangler pages deploy."""
+    import shlex
+    import subprocess
     from . import site
     site.build(out)
-    print(f"site rebuilt in {out}")
+    print(f"site rebuilt in {out}", flush=True)
+    if deploy:
+        r = subprocess.run(deploy.replace("{site}", shlex.quote(os.path.expanduser(out))), shell=True, capture_output=True, text=True, timeout=600)
+        print(f"deploy: {'ok' if r.returncode == 0 else 'FAILED ' + (r.stderr or r.stdout)[-400:]}", flush=True)
 
 
 def cmd_speed(a: argparse.Namespace) -> None:
@@ -860,6 +866,8 @@ def main(argv: list[str] | None = None) -> None:
     sv.add_argument("--bind", default="127.0.0.1")
     sv.add_argument("--rebuild", metavar="SITE_DIR", help="rebuild the site into SITE_DIR after accepting submissions")
     sv.add_argument("--ingest-once", action="store_true", help="check waiting submissions once and exit")
+    sv.add_argument("--deploy", help="after a rebuild, run this to publish the site ({site} = the folder), e.g. wrangler pages deploy")
+    sv.add_argument("--force-rebuild", action="store_true", help="with --ingest-once: rebuild (and deploy) even when nothing new came in")
     sv.set_defaults(fn=cmd_serve)
 
     rc_ = command("recipe", "recipes: list / show / render a launcher / check the host runs what the recipe says / pull the site's")
