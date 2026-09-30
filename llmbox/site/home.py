@@ -134,7 +134,7 @@ def _unranked(host: str, local: list[dict]) -> str:
         try:   # the model's own name, from its recipe
             from .. import recipe as rc
             m = rc.load(host, rid)["model"]
-            nm = model_name({"id": rid, "hf_repo": m.get("hf_repo"), "file": m.get("file")})
+            nm = model_name({"id": rid, "hf_repo": m.get("hf_repo"), "file": m.get("file")}) + f" · {variant(rid, m.get('file'))}"
         except (OSError, ValueError, KeyError):
             nm = rid
         if missing:
