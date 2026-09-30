@@ -311,10 +311,9 @@ def cmd_pick(a: argparse.Namespace) -> None:
         registry.pull(a.url or registry.DEFAULT_URL)
     what_if = (a.gpu, a.vram_gb, a.ram_gb, a.ram_bw) if a.gpu else None
     if not what_if and not a.host:
-        names = [f[:-5] for f in os.listdir(os.path.join(hosts.HOME, "hosts")) if f.endswith(".json")] if os.path.isdir(os.path.join(hosts.HOME, "hosts")) else []
-        if len(names) != 1:
+        a.host = hosts.default_host()
+        if not a.host:
             raise SystemExit("which machine? --host <name> (llmbox host list), or describe one: --gpu 'RTX 4090' --ram-gb 64 --ram-bw 60")
-        a.host = names[0]
     raise SystemExit(pick.run(a.host, a.use, what_if))
 
 
@@ -441,11 +440,10 @@ def _standing(host: str, rid: str, recs: list[dict]) -> None:
 
 
 def _only_host() -> str:
-    d = os.path.join(hosts.HOME, "hosts")
-    names = sorted(f[:-5] for f in os.listdir(d) if f.endswith(".json")) if os.path.isdir(d) else []
-    if len(names) != 1:
-        raise SystemExit("which machine? --host <name> (llmbox host list)")
-    return names[0]
+    h = hosts.default_host()
+    if not h:
+        raise SystemExit("which machine? --host <name> (llmbox host list), or `llmbox` to set this computer up")
+    return h
 
 
 def cmd_account(a: argparse.Namespace) -> None:

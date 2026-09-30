@@ -44,5 +44,6 @@ s = hosts.spec(m)
 assert s.vram_mib == 98304 and s.ram_mib == 131072 - 98304 and s.ram_bw_gbs == 546.0
 assert hwclass.of_host(results.host_fingerprint(m)) == "apple-m4-max-40c-128g|metal", hwclass.of_host(results.host_fingerprint(m))
 assert hosts.endpoint("mac") == "http://localhost:8080"
+assert hosts.default_host() == "mac", "a remote box beside it: the command means this computer"
 assert hosts.apple_bw("Apple M4 Max", 32) == 410 and hosts.apple_bw("Apple M2", 10) == 100 and hosts.apple_bw("Apple M3 Max", 30) == 300
 print("all passed")

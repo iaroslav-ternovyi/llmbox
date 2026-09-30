@@ -86,6 +86,16 @@ def box_ssh(name: str = "box") -> str:
     return s
 
 
+def default_host() -> str | None:
+    """The machine a command means when none is named: the only registered one, else the only one that is this
+    computer (no ssh) - a remote box registered beside it does not make "this computer" ambiguous."""
+    ns = names()
+    if len(ns) == 1:
+        return ns[0]
+    local = [n for n in ns if not load(n).get("ssh")]
+    return local[0] if len(local) == 1 else None
+
+
 def path(name: str) -> str:
     return os.path.join(HOME, "hosts", f"{name}.json")
 
