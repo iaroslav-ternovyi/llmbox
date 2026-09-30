@@ -126,9 +126,12 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
     `<p><b>${Math.round(best.vs)}%</b> of Claude Opus · <b>${best.pred ? "~" : ""}${Math.round(best.t2)}</b> tokens/s` +
     (best.td ? `, ${Math.round(best.td)} with a long document` : "") +
     ` · ${why}</p></div>` +
-    `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
-    `<p class="q">installs llmbox and this model, with the settings measured here fitted to your computer, then starts it (Linux + NVIDIA; <a href="install.html">more</a>)</p></div></div>`;
-  $("#pickcpy").onclick = () => navigator.clipboard && navigator.clipboard.writeText(cmd).then(() => { $("#pickcpy").textContent = "COPIED"; setTimeout(() => $("#pickcpy").textContent = "COPY", 1500); });
+    (hwNow && hwNow.mac   // llmbox does not run models on a Mac yet: the settings for the apps a Mac has
+      ? `<div class="pkc"><p><a class="btn solid" href="recipe-${best.id}.html#run">SETTINGS FOR LM STUDIO AND OLLAMA</a></p>` +
+        `<p class="q">the file and the settings it was measured with; llmbox itself runs models on Linux + NVIDIA for now</p></div></div>`
+      : `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
+        `<p class="q">installs llmbox and this model, with the settings measured here fitted to your computer, then starts it (Linux + NVIDIA; <a href="install.html">more</a>)</p></div></div>`);
+  if ($("#pickcpy")) $("#pickcpy").onclick = () => navigator.clipboard && navigator.clipboard.writeText(cmd).then(() => { $("#pickcpy").textContent = "COPIED"; setTimeout(() => $("#pickcpy").textContent = "COPY", 1500); });
 }
 function render() {
   const w = DATA.presets[preset], refW = weighted(DATA.refBlocks, w);
@@ -209,7 +212,10 @@ document.querySelectorAll(".pick2 input").forEach(c => c.addEventListener("chang
   else { go.removeAttribute("href"); go.setAttribute("aria-disabled", "true"); go.classList.remove("solid"); $("#cmpn").textContent = ids.length ? `${ids[0]} vs …` : "tick two models to compare"; }
 }));
 try { const h = Object.fromEntries(new URLSearchParams(location.hash.slice(1))); const saved = h.gpu ? h : JSON.parse(localStorage.getItem("llmbox-box") || "null");
-  if (saved && saved.gpu) { $("#gpu").value = saved.gpu; if (saved.ram) $("#ram").value = saved.ram; if (saved.bw) { const o = [...$("#bw").options].find(o => o.value == saved.bw); if (o) $("#bw").value = saved.bw; else $("#bwn").value = saved.bw; } if (saved.bwn) $("#bwn").value = saved.bwn; readBox(); } else { ["#ram", "#bw", "#bwn"].forEach(s => $(s).disabled = true); render(); }
+  const guess = !saved || !saved.gpu ? browserGpu(DATA.gpus) : null;   // a first visit: the card this browser reports
+  if (saved && saved.gpu) { $("#gpu").value = saved.gpu; if (saved.ram) $("#ram").value = saved.ram; if (saved.bw) { const o = [...$("#bw").options].find(o => o.value == saved.bw); if (o) $("#bw").value = saved.bw; else $("#bwn").value = saved.bw; } if (saved.bwn) $("#bwn").value = saved.bwn; readBox(); }
+  else if (guess) { $("#gpu").value = guess[0]; readBox(); $("#boxnote").textContent = `${guess[0]}: what this browser reports - change it, and the RAM, if they are not yours`; }
+  else { ["#ram", "#bw", "#bwn"].forEach(s => $(s).disabled = true); render(); }
 } catch (e) { render(); }
 $("#find").addEventListener("input", () => {   // find a model: rows whose name, quant or family match; Claude rows stay as references
   const q = $("#find").value.trim().toLowerCase(), fam = Object.fromEntries(DATA.points.map(p => [p.id, (p.fam || "").toLowerCase()]));

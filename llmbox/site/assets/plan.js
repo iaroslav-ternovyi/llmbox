@@ -44,3 +44,15 @@ function measuredFor(rid, hw) {   // [t2, deep, machines, people] people measure
   return c && c[k] ? c[k] : null;
 }
 
+function browserGpu(gpus) {   // the graphics card this browser reports (WebGL renderer), matched to a picker entry; nothing is sent
+  try {
+    const gl = document.createElement("canvas").getContext("webgl"), ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
+    const r = (ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "").toLowerCase();   // "ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 ..." / "... Apple M2 Max ..."
+    if (!r) return null;
+    const base = g => g[0].toLowerCase().replace(/ \d+ gb$/, "").replace(/^mac /, "apple ");
+    const hits = gpus.filter(g => r.includes(base(g)));
+    if (!hits.length) return null;
+    hits.sort((a, b) => base(b).length - base(a).length);   // "rtx 4070 ti super" before "rtx 4070"
+    return hits.length > 1 && base(hits[0]) === base(hits[1]) ? null : hits[0];
+  } catch (e) { return null; }
+}
