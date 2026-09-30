@@ -104,6 +104,72 @@ page = people.pages({"k2-medium": "K2-Horizon"}, {}, people.users(os.path.join(h
 assert "<h1>alice</h1>" in page
 assert "people.html" in pg and acc["handle"] in pg["people.html"]
 
+# signing in on the site: GitHub's web flow, back to the site page with a one-time ticket for the key
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+
+
+class GitHubWeb(BaseHTTPRequestHandler):
+    def do_POST(self):   # the code for a token, only with the app's secret
+        body = dict(urllib.parse.parse_qsl(self.rfile.read(int(self.headers["Content-Length"])).decode()))
+        out = json.dumps({"access_token": "tok-bob"} if body.get("code") == "c0de" and body.get("client_secret") == "s3cret" else {"error": "bad"}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def log_message(self, *a):
+        pass
+
+
+import urllib.parse  # noqa: E402
+ghw = ThreadingHTTPServer(("127.0.0.1", 0), GitHubWeb)
+threading.Thread(target=ghw.serve_forever, daemon=True).start()
+server.GH_TOKEN = f"http://127.0.0.1:{ghw.server_address[1]}/token"
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+opener = urllib.request.build_opener(NoRedirect)
+def location(path):
+    try:
+        opener.open(url + path)
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Location")
+    raise AssertionError("no redirect")
+
+
+site = "http://127.0.0.1:8766/account.html"
+code, _ = location("/api/v1/login/web/start?return=" + urllib.parse.quote(site))
+assert code == 503, "without the app's secret the site's sign-in says it is not set up"
+os.environ["LLMBOX_GITHUB_CLIENT_ID"], os.environ["LLMBOX_GITHUB_SECRET"] = "cid", "s3cret"
+assert location("/api/v1/login/web/start?return=" + urllib.parse.quote("https://evil.example/x"))[0] == 400, "only the site's pages"
+code, to = location("/api/v1/login/web/start?return=" + urllib.parse.quote(site))
+q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(to).query))
+assert code == 302 and to.startswith(server.GH_AUTHORIZE) and q["client_id"] == "cid" and q["redirect_uri"].endswith("/api/v1/login/web/callback")
+code, back = location(f"/api/v1/login/web/callback?code=c0de&state={q['state']}")
+assert code == 302 and back.startswith(site + "#ticket="), back
+assert location(f"/api/v1/login/web/callback?code=c0de&state={q['state']}")[0] == 400, "a state is used once"
+ticket = back.split("#ticket=")[1]
+bob = account._call(url, "/api/v1/login/web/redeem", {"ticket": ticket})
+assert bob["login"] == "bob" and bob["key"].startswith("lbx_")
+try:
+    account._call(url, "/api/v1/login/web/redeem", {"ticket": ticket})
+    raise AssertionError("a ticket redeemed twice")
+except SystemExit as e:
+    assert "400" in str(e)
+assert account._call(url, "/api/v1/me", key=bob["key"])["login"] == "bob"
+account._call(url, "/api/v1/me/logout", {}, key=bob["key"])
+try:
+    account._call(url, "/api/v1/me", key=bob["key"])
+    raise AssertionError("a signed-out key still works")
+except SystemExit as e:
+    assert "401" in str(e)
+ghw.shutdown()
+
 gone = account.forget(url)
 assert gone["deleted_results"] == 2, gone
 left = {r["id"] for _p, r in results.files(server.COMMUNITY)}

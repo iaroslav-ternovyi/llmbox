@@ -9,6 +9,11 @@
   GET  /api/v1/me          (Authorization: Bearer <key>) the account: handle, public or not, what it sent
   POST /api/v1/me          {public: true|false}: show the GitHub name on the profile page, or only the handle
   POST /api/v1/me/forget   delete the account and every result it sent (GDPR erasure)
+  POST /api/v1/me/logout   revoke this key
+  GET  /api/v1/login/web/start?return=<site page>   sign in on the site: to GitHub (web flow, needs the app's
+                           secret in $LLMBOX_GITHUB_SECRET) and back to /callback, which issues a key and returns to the
+                           site page with a one-time ticket in the #fragment (no cookie: the site and the API are two
+                           origins); POST /api/v1/login/web/redeem {ticket} -> {key, handle}
   GET  /api/v1/health      ok
 
 Bundles are stored as sent (<data>/inbox/<id>.json.gz) and listed in <data>/intake.db. `ingest()` (a thread of the
@@ -53,7 +58,13 @@ DB_SCHEMA = """CREATE TABLE IF NOT EXISTS submissions (
 CREATE TABLE IF NOT EXISTS seeds (seed INTEGER PRIMARY KEY, client TEXT, issued TEXT, used INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, github_id INTEGER UNIQUE, login TEXT, handle TEXT UNIQUE,
   public INTEGER DEFAULT 0, created TEXT);
-CREATE TABLE IF NOT EXISTS keys (hash TEXT PRIMARY KEY, user_id INTEGER, created TEXT, last_used TEXT)"""
+CREATE TABLE IF NOT EXISTS keys (hash TEXT PRIMARY KEY, user_id INTEGER, created TEXT, last_used TEXT);
+CREATE TABLE IF NOT EXISTS web (token TEXT PRIMARY KEY, kind TEXT, value TEXT, expires REAL)"""
+GH_AUTHORIZE = "https://github.com/login/oauth/authorize"
+GH_TOKEN = "https://github.com/login/oauth/access_token"
+# site pages a web sign-in may return to (the public site; the local one for development); $LLMBOX_SITE_ORIGINS adds more
+SITE_ORIGINS = ["https://llmbox.pages.dev", "http://127.0.0.1:8766", "http://localhost:8766"] + \
+    [o for o in os.environ.get("LLMBOX_SITE_ORIGINS", "").split(",") if o]
 MISMATCH_MAX = 0.2            # share of re-graded answers that may differ before a quality run is rejected
 SEEDS_PER_DAY = 20
 
@@ -89,7 +100,6 @@ class Intake:
     # ---- accounts: GitHub login, the llmbox key, the profile's visibility, erasure --------------------------------------
 
     def login(self, raw: bytes) -> tuple[int, dict]:
-        import secrets
         try:
             tok = str(json.loads(raw or b"{}").get("access_token") or "")
         except ValueError:
@@ -97,6 +107,11 @@ class Intake:
         gh = self.github_user(tok) if tok else None
         if not gh or not gh.get("id"):
             return 401, {"error": "GitHub did not accept that token"}
+        return 200, self._issue(gh)
+
+    def _issue(self, gh: dict) -> dict:
+        """The account of a GitHub user (made on the first sign-in) and a new llmbox key for it."""
+        import secrets
         now = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
         handle = "u-" + hashlib.sha256(f"{self.salt}:{gh['id']}".encode()).hexdigest()[:8]
         key = "lbx_" + secrets.token_urlsafe(32)
@@ -106,7 +121,71 @@ class Intake:
             uid, public = c.execute("SELECT id, public FROM users WHERE github_id = ?", (gh["id"],)).fetchone()
             c.execute("INSERT INTO keys VALUES (?,?,?,?)", (hashlib.sha256(key.encode()).hexdigest(), uid, now, now))
         self.export_users()
-        return 200, {"key": key, "handle": handle, "login": gh.get("login"), "public": bool(public)}
+        return {"key": key, "handle": handle, "login": gh.get("login"), "public": bool(public)}
+
+    def _stash(self, kind: str, value: str, ttl: float = 600) -> str:
+        import secrets
+        t = secrets.token_urlsafe(24)
+        with self._db() as c:
+            c.execute("DELETE FROM web WHERE expires < ?", (time.time(),))
+            c.execute("INSERT INTO web VALUES (?,?,?,?)", (t, kind, value, time.time() + ttl))
+        return t
+
+    def _take(self, kind: str, token: str) -> str | None:
+        """A one-time value: read and deleted; None when unknown, used or expired."""
+        with self.lock, self._db() as c:
+            r = c.execute("SELECT value, expires FROM web WHERE token = ? AND kind = ?", (token, kind)).fetchone()
+            c.execute("DELETE FROM web WHERE token = ?", (token,))
+        return r[0] if r and r[1] >= time.time() else None
+
+    def web_start(self, api: str, ret: str) -> tuple[int, dict, str | None]:
+        """(status, body, redirect): off to GitHub, remembering where on the site to come back to."""
+        from urllib.parse import urlencode, urlsplit
+        cid, secret = os.environ.get("LLMBOX_GITHUB_CLIENT_ID"), os.environ.get("LLMBOX_GITHUB_SECRET")
+        if not cid or not secret:
+            return 503, {"error": "sign-in on the site is not set up on this server yet; `llmbox login` works from a terminal"}, None
+        o = urlsplit(ret)
+        if f"{o.scheme}://{o.netloc}" not in SITE_ORIGINS:
+            return 400, {"error": "not a page of the llmbox site"}, None
+        state = self._stash("state", ret)
+        q = urlencode({"client_id": cid, "redirect_uri": f"{api}/api/v1/login/web/callback", "state": state, "scope": "", "allow_signup": "true"})
+        return 302, {}, f"{GH_AUTHORIZE}?{q}"
+
+    def web_callback(self, api: str, code: str, state: str) -> tuple[int, dict, str | None]:
+        """GitHub is back with a code: trade it for a token (the app's secret), look up the user, issue a key, and send
+        the browser back to the site page with a one-time ticket for it."""
+        import urllib.parse
+        import urllib.request
+        ret = self._take("state", state or "")
+        if not ret or not code:
+            return 400, {"error": "that sign-in link expired or was already used: start again from the site"}, None
+        body = urllib.parse.urlencode({"client_id": os.environ.get("LLMBOX_GITHUB_CLIENT_ID", ""), "client_secret": os.environ.get("LLMBOX_GITHUB_SECRET", ""),
+                                       "code": code, "redirect_uri": f"{api}/api/v1/login/web/callback"}).encode()
+        try:
+            req = urllib.request.Request(GH_TOKEN, data=body, method="POST", headers={"Accept": "application/json", "User-Agent": "llmbox"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                tok = json.loads(r.read()).get("access_token")
+        except (OSError, ValueError):
+            tok = None
+        gh = self.github_user(tok) if tok else None
+        if not gh:
+            return 401, {"error": "GitHub did not confirm the sign-in"}, None
+        acc = self._issue(gh)   # the GitHub token ends here: only the id and name are kept
+        ticket = self._stash("ticket", json.dumps(acc), ttl=120)
+        return 302, {}, f"{ret.split('#')[0]}#ticket={ticket}"
+
+    def web_redeem(self, raw: bytes) -> tuple[int, dict]:
+        try:
+            t = str(json.loads(raw or b"{}").get("ticket") or "")
+        except ValueError:
+            return 400, {"error": "not JSON"}
+        v = self._take("ticket", t)
+        return (200, json.loads(v)) if v else (400, {"error": "that ticket expired or was already used: sign in again"})
+
+    def revoke(self, auth: str) -> tuple[int, dict]:
+        with self._db() as c:
+            c.execute("DELETE FROM keys WHERE hash = ?", (hashlib.sha256(auth[7:].strip().encode()).hexdigest(),))
+        return 200, {"signed_out": True}
 
     def user_of(self, auth: str | None) -> dict | None:
         """The account of an 'Authorization: Bearer <key>' header, or None."""
@@ -378,7 +457,33 @@ def handler(intake: Intake):
             self.end_headers()
             self.wfile.write(body)
 
+        def _api(self) -> str:   # this server's public address (behind Caddy: https and the real host name)
+            return os.environ.get("LLMBOX_API_URL") or f"{self.headers.get('X-Forwarded-Proto') or 'http'}://{self.headers.get('Host')}"
+
+        def _redirect(self, code: int, obj: dict, loc: str | None) -> None:
+            if not loc:
+                return self._json(code, obj)
+            self.send_response(302)
+            self.send_header("Location", loc)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_OPTIONS(self):   # the site's pages call the API from another origin with a key: the browser asks first
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Max-Age", "86400")
+            self.end_headers()
+
         def do_GET(self):
+            from urllib.parse import parse_qs, urlsplit
+            u = urlsplit(self.path)
+            q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            if u.path == "/api/v1/login/web/start":
+                return self._redirect(*intake.web_start(self._api(), q.get("return", "")))
+            if u.path == "/api/v1/login/web/callback":
+                return self._redirect(*intake.web_callback(self._api(), q.get("code", ""), q.get("state", "")))
             if self.path == "/api/v1/health":
                 return self._json(200, {"ok": True})
             if self.path == "/api/v1/me":
@@ -395,11 +500,15 @@ def handler(intake: Intake):
                 return self._json(*intake.seed(self.rfile.read(n)))
             if self.path == "/api/v1/login/github" and n <= 4096:
                 return self._json(*intake.login(self.rfile.read(n)))
-            if self.path in ("/api/v1/me", "/api/v1/me/forget") and n <= 4096:
+            if self.path == "/api/v1/login/web/redeem" and n <= 4096:
+                return self._json(*intake.web_redeem(self.rfile.read(n)))
+            if self.path in ("/api/v1/me", "/api/v1/me/forget", "/api/v1/me/logout") and n <= 4096:
                 u = intake.user_of(self.headers.get("Authorization"))
                 if not u:
                     return self._json(401, {"error": "not signed in (llmbox login)"})
                 body = self.rfile.read(n)
+                if self.path.endswith("logout"):
+                    return self._json(*intake.revoke(self.headers["Authorization"]))
                 return self._json(*(intake.forget(u) if self.path.endswith("forget") else intake.me(u, body or None)))
             if self.path != "/api/v1/runs":
                 return self._json(404, {"error": "not found"})

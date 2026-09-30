@@ -25,14 +25,20 @@ Three parts (docs/roadmap.md §5, stage 2):
      CLOUDFLARE_API_TOKEN=...
      CLOUDFLARE_ACCOUNT_ID=...
      ```
-3. **GitHub sign-in** (`llmbox login`)
+3. **GitHub sign-in** (`llmbox login` in a terminal, SIGN IN on the site)
    - At github.com → Settings → Developer settings → OAuth Apps → New OAuth App, fill in:
      - name `llmbox`;
      - homepage `https://llmbox.pages.dev`;
-     - callback URL the same (the device flow does not use it).
+     - callback URL `https://<ip-dashed>.sslip.io/api/v1/login/web/callback` (the site's sign-in comes back there).
    - Tick **Enable Device Flow** and register the app.
-   - Copy the **Client ID** into `account.GITHUB_CLIENT_ID`. It is public: the device flow needs no client secret, so
-     none is created or stored anywhere.
+   - Copy the **Client ID** into `account.GITHUB_CLIENT_ID` (it is public: the terminal's device flow needs no secret).
+   - Generate a **client secret** for the site's sign-in and put both in `/etc/llmbox.env` on the server, never in the repo:
+     ```
+     LLMBOX_GITHUB_CLIENT_ID=...
+     LLMBOX_GITHUB_SECRET=...
+     LLMBOX_SERVER=https://<ip-dashed>.sslip.io
+     ```
+     `LLMBOX_SERVER` also tells the site build where the account page calls the API.
 4. **The author's machine**
    - Write `llmbox@<server ip>` to `~/.llmbox/vps`.
    - Run `deploy/sync.sh` once. The server gets the reference results and publishes the first site.

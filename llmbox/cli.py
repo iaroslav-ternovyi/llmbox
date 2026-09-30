@@ -585,6 +585,26 @@ def cmd_queue(a: argparse.Namespace) -> None:
             res = os.path.basename(r["result"] or "") if r["status"] == "done" else (r["note"] or "")
             print(f"{r['id']:>4} {r['status']:<11} {r['model']:<24} {r['suite']:<11} {r['tier']:<6} "
                   f"{' '.join(json.loads(r['args'] or '[]'))[:60]:<60} {prog or res}")
+    elif a.action == "precision":   # where one more run narrows the ranking most (llmbox/precision.py)
+        import random
+        from . import precision
+        skip = set((a.skip or "").split(",")) - {""}
+        pl = precision.plan(a.host or "box", jobs=a.jobs, target=a.target, skip=skip)
+        for m in pl:
+            print(f"  {m['rid']:18s} {'top ' if m['top'] else 'open' if m['open'] else '    '} {m['n']:4d} answers  "
+                  f"±{m['half']:.1f} -> ±{m['half_after']:.1f}  {m['runs']} run{'s' if m['runs'] > 1 else ''} of {a.budget:g} min (~{m['per_run']} answers each)")
+        total = sum(m["runs"] for m in pl)
+        print(f"{total} runs, ~{total * (a.budget + 5) / 60:.1f} h of the box" + ("" if a.apply else " (--apply queues them)"))
+        if a.apply:
+            for m in pl:
+                for _ in range(m["runs"]):   # a fresh seed each: new instances of the tasks, not the same ones again
+                    from . import irt, suite as _su
+                    tag = "suite-v" + irt.RELEASES[irt.canonical(_su.content_hash())]   # the released suite's snapshot
+                    jid = q.add(m["rid"], tag, tier="quick", host=a.host or "box",
+                                args=["--recipe", m["rid"], "--adaptive", "--budget", f"{a.budget:g}", "--target", "2.5",
+                                      "--seed", str(random.randrange(1, 10**6))],
+                                note=f"precision: ±{m['half']:.1f} with {m['n']} answers")
+                    print(f"  queued job {jid}: {m['rid']}")
     elif a.action == "run":
         q.run(until_empty=a.until_empty)
     elif a.action == "cancel":
@@ -772,6 +792,8 @@ COMMAND_GROUPS = [
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="llmbox", description="Get the most quality x speed out of local LLMs on your hardware.",
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    from . import __version__
+    ap.add_argument("--version", action="version", version=f"llmbox {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True, metavar="<command>")
     helps: dict = {}
 
@@ -907,7 +929,7 @@ def main(argv: list[str] | None = None) -> None:
     b.set_defaults(fn=cmd_bench)
 
     qp = command("queue", "persistent benchmark job queue with GPU health gating and auto-resume")
-    qp.add_argument("action", choices=["add", "list", "status", "run", "cancel", "retry", "pause", "resume"])
+    qp.add_argument("action", choices=["add", "list", "status", "run", "cancel", "retry", "pause", "resume", "precision"])
     qp.add_argument("models", nargs="*", help="add: model ids at the endpoint")
     qp.add_argument("--suite", default="suite-v0.8", help="git tag of the suite to run (frozen via llmbox snapshot)")
     qp.add_argument("--tier", default="quick")
@@ -918,6 +940,11 @@ def main(argv: list[str] | None = None) -> None:
     qp.add_argument("--until-empty", action="store_true", help="run: exit when no job is left")
     qp.add_argument("--ids", nargs="*", default=[], help="cancel / retry: job ids")
     qp.add_argument("--bench-args", default="", help='add: extra bench args, e.g. --bench-args "--recipe x --parallel 3"')
+    qp.add_argument("--jobs", type=int, default=8, help="precision: how many runs to hand out")
+    qp.add_argument("--target", type=float, default=3.0, help="precision: stop narrowing a range at +- this many points")
+    qp.add_argument("--budget", type=float, default=40, help="precision: minutes per run")
+    qp.add_argument("--skip", help="precision: recipe ids to leave out, comma-separated")
+    qp.add_argument("--apply", action="store_true", help="precision: queue the runs (default: show the plan)")
     qp.set_defaults(fn=cmd_queue)
     va = command("validate", "check every task kind: determinism, oracle = 1, empty = 0, answer-format tolerance")
     va.add_argument("--all", action="store_true", help="every kind of every block (default: the quick tier's kinds)")

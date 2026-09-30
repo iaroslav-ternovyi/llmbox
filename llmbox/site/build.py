@@ -90,6 +90,10 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     written += registry.export(host, order, out_dir, {r["id"]: _meta(r) for r in rs})   # recipes/: what `llmbox recipe pull` installs
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
     w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
+    from .install import account_page, install_page
+    from ..submit import DEFAULT_SERVER
+    w("install.html", install_page())
+    w("account.html", account_page(DEFAULT_SERVER.rstrip("/")))
     from .people import pages as people_pages, users
     from ..hosts import HOME
     for name, html_ in people_pages({r["id"]: model_name(r) for r in rs}, cs, users(os.path.join(HOME, "intake", "users.json"))).items():
@@ -108,6 +112,6 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     # kinds of file, so a folder with other things in it keeps them
     keep = {os.path.basename(p) for p in written}
     for f in os.listdir(out_dir):
-        if f not in keep and re.fullmatch(r"(index|new|method|compare|people|404|(recipe|run|hardware|compare)-.+|u-[0-9a-f]{8})\.html|[a-z0-9]+\.(css|js)", f):
+        if f not in keep and re.fullmatch(r"(index|new|method|compare|people|install|account|404|(recipe|run|hardware|compare)-.+|u-[0-9a-f]{8})\.html|[a-z0-9]+\.(css|js)", f):
             os.remove(os.path.join(out_dir, f))
     return written

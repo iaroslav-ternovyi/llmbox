@@ -20,3 +20,5 @@
 @media (max-width:900px){.title,.hd{grid-template-columns:1fr}.tele{grid-template-columns:1fr 1fr!important}.tele>div{border-bottom:1px solid var(--line2)}
  .bars{grid-template-columns:110px minmax(0,1fr)}}
 ul.plain{margin:6px 0 0;padding-left:18px;line-height:1.8}
+pre.cmd{background:#0b0c09;border:1px solid var(--line);padding:12px 14px;font-size:12px;line-height:1.6;color:var(--soft);overflow-x:auto;white-space:pre;margin:10px 0}
+.copy{position:relative}.copy pre.cmd{padding-right:88px}.copy .cpy{position:absolute;top:8px;right:8px}
