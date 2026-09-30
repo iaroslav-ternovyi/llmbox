@@ -410,10 +410,11 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
             "gpus": GPUS, "ramKinds": RAM_KINDS}
 
 
-def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick") -> str:
+def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick", rs: list[dict] | None = None,
+         sd: dict | None = None) -> str:
     from . import suite as _s
     suite_version = suite_version or _s.VERSION
-    rs = report.rows(host, suite_version=suite_version, tier=tier)
+    rs = rs if rs is not None else report.rows(host, suite_version=suite_version, tier=tier)
     ref = next((r for r in rs if r["host"].get("id") == "cloud"), None)
     local = [r for r in rs if r["host"].get("id") != "cloud" and not r.get("partial")]
     clouds = [r for r in rs if r["host"].get("id") == "cloud" and not r.get("partial")]
@@ -421,7 +422,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     ref_box = f'{hw.get("gpu", "").replace("NVIDIA GeForce ", "")} + {hw.get("ram_gib", "?")} GB RAM'
     ranks = rank_ranges(local)
     q = [j for j in queue_state() if j["model"] not in {r["id"] for r in local}]
-    sd = shape_data(local, host)
+    sd = sd or shape_data(local, host)
     names0 = {r["id"]: model_name(r) for r in local}
     # one model in two quants (Tiel Q4 and Q6): the chart legend and the picks say which is which
     dup = {n for n in names0.values() if list(names0.values()).count(n) > 1}
@@ -1201,15 +1202,18 @@ def task_flags(rec: dict) -> dict:
     """item id -> {'cut': bool, 'loop': bool, 'max_reply': int} from the rows and the saved thinking."""
     import gzip
     import json as _json
-    from . import loopdetect
+    from . import cache, loopdetect
     td = _trace_dir(rec)
+    scanner = cache.key(open(loopdetect.__file__).read())   # a changed detector re-scans
     out = {}
     for r in rec.get("rows", []):
         cut = bool(r.get("reasoning_cut")) or "I have reasoned enough" in (r.get("reasoning_tail") or "")
         loop = False
-        if td and os.path.exists(os.path.join(td, r["id"] + ".json.gz")):
-            t = _json.load(gzip.open(os.path.join(td, r["id"] + ".json.gz"), "rt"))
-            loop = any(loopdetect.scan(x)["fired_at"] for x in t["thinking"])
+        f = os.path.join(td, r["id"] + ".json.gz") if td else ""
+        if f and os.path.exists(f):   # scanning the saved thinking is slow: cached by the file's size and time
+            st = os.stat(f)
+            loop = cache.memo("loops", cache.key(f, st.st_size, st.st_mtime, scanner),
+                              lambda: any(loopdetect.scan(x)["fired_at"] for x in _json.load(gzip.open(f, "rt"))["thinking"]))
         out[r["id"]] = {"cut": cut, "loop": loop, "max_reply": max([x.get("predicted_n") or 0 for x in r.get("timings") or []] or [0])}
     return out
 
@@ -2088,16 +2092,21 @@ def build(out_dir: str, host: str = "box", suite_version: str | None = None, tie
     import json as _json
     out_dir = os.path.expanduser(out_dir)
     os.makedirs(out_dir, exist_ok=True)
-    written = [home(out_dir, host, suite_version, tier)]
+    with report.results.frozen():   # every page reads the same records: once
+        return _build(out_dir, host, suite_version, tier)
+
+
+def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
+    all_rs = report.rows(host, suite_version=suite_version, tier=tier)
+    rs = [r for r in all_rs if r["host"].get("id") != "cloud" and not r.get("partial")]
+    data = shape_data(rs, host)
+    written = [home(out_dir, host, suite_version, tier, all_rs, data)]
     recs = load_records(host, suite_version, tier)
     local_run, ref = recs["local"], recs["ref"]
     allrecs = report.results.load_all(host)
     local = {rid: report.with_probe(rec, allrecs) for rid, rec in local_run.items()}   # speed re-measured after tune; run pages keep their own
-    all_rs = report.rows(host, suite_version=suite_version, tier=tier)
-    rs = [r for r in all_rs if r["host"].get("id") != "cloud" and not r.get("partial")]
     ranks = rank_ranges(rs)
     n_total = len(rs) + len([j for j in queue_state() if j["model"] not in local])
-    data = shape_data(rs, host)
     opts = optimize_records(host)
     order = sorted(local, key=lambda k: (-local[k]["summary"]["capability"], k))   # ties by id: recipe pages and the home page name pairs the same way
     TAB_LINKS["COMPARE"] = "compare.html"

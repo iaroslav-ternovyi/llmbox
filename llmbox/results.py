@@ -5,6 +5,7 @@ sha256), the fully resolved recipe, and the measured numbers next to the predict
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -48,9 +49,34 @@ def save(host: str, rec: dict) -> str:
     return path
 
 
+_FROZEN: dict | None = None
+
+
+@contextlib.contextmanager
+def frozen():
+    """Inside: every host's results are read once and handed out as shallow copies. A site build reads the same
+    records dozens of times (rows, pools, pages) and nothing writes results meanwhile; callers only replace top-level
+    keys of a record, never edit nested ones, so shallow copies keep the cached records clean."""
+    global _FROZEN
+    outer = _FROZEN
+    _FROZEN = {} if outer is None else outer
+    try:
+        yield
+    finally:
+        _FROZEN = outer
+
+
 def files(host: str | None = None) -> list[tuple[str, dict]]:
     """(path, record) of every result, per host directory in file-name order: from the results database
     (llmbox/db.py), or straight from the JSON files with LLMBOX_NO_DB=1."""
+    if _FROZEN is not None:
+        if host not in _FROZEN:
+            _FROZEN[host] = _files(host)
+        return [(p, dict(r)) for p, r in _FROZEN[host]]
+    return _files(host)
+
+
+def _files(host: str | None = None) -> list[tuple[str, dict]]:
     if not os.environ.get("LLMBOX_NO_DB"):
         from . import db
         return db.files(host)

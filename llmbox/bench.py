@@ -159,7 +159,14 @@ def rescore(rec: dict) -> dict:
 
 
 def capability_ci(rows: list[dict], n_boot: int = 2000, seed: int = 7) -> tuple[float, float]:
-    """95% bootstrap CI, resampling items within each block (blocks keep their weights)."""
+    """95% bootstrap CI, resampling items within each block (blocks keep their weights). Deterministic (seeded), so
+    kept in the persistent cache by rows and weights."""
+    from . import cache
+    k = cache.key([(x["block"], x["score"]) for x in rows], suite.WEIGHTS, n_boot, seed)
+    return tuple(cache.memo("capability_ci", k, lambda: _capability_ci(rows, n_boot, seed)))
+
+
+def _capability_ci(rows: list[dict], n_boot: int, seed: int) -> tuple[float, float]:
     r = random.Random(seed)
     by = {}
     for x in rows:
