@@ -74,9 +74,6 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
             w(f"run-{x['id'][:8]}.html", run_page(rid, x, ref, fl[x.get("created")]))
         if rid in data["recipes"]:
             w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
-    for old in os.listdir(out_dir):   # the pair pages of earlier builds: one compare page does any pair now
-        if re.fullmatch(r"compare-.+-vs-.+\.html", old):
-            os.remove(os.path.join(out_dir, old))
     w("compare.html", compare_app(compare_data(rs, clouds, ranks, local, look, data, rel)))
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
     w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
@@ -90,4 +87,10 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     w("404.html", _page("llmbox · page not found", "", '<section class="panel hd"><div><h1>Page not found</h1><p class="q" style="margin-top:8px">'
                         'The model or run may have been renamed. <a href="index.html">The ranking</a> · <a href="new.html">new models</a> · '
                         '<a href="compare.html">compare</a> · <a href="method.html">how scores work</a></p></div></section>', ("pages.css",)))
+    # pages of earlier builds this one did not write (a run that no longer counts, a renamed recipe): only the site's own
+    # kinds of file, so a folder with other things in it keeps them
+    keep = {os.path.basename(p) for p in written}
+    for f in os.listdir(out_dir):
+        if f not in keep and re.fullmatch(r"(index|new|method|compare|404|(recipe|run|hardware|compare)-.+)\.html|[a-z0-9]+\.(css|js)", f):
+            os.remove(os.path.join(out_dir, f))
     return written
