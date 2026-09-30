@@ -77,7 +77,7 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
             out("Without llama.cpp nothing can run; `llmbox` again when it is installed.")
     _fresh_registry(out)
     cpu = prof["hw"].get("cpu") or {}
-    rows = pick.rank(spec, cpu.get("cores") or cpu.get("threads"), "all", cls, mac)
+    rows = pick.rank(spec, cpu.get("cores") or cpu.get("threads"), "all", cls, mac, pick.engines_of(prof))
     ok = [x for x in rows if x["fits"] and x.get("use_score") is not None]
     if not ok:
         out("None of the measured models fits this computer's memory yet.")
@@ -120,7 +120,8 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
     a = _ask("\nInstall and start it?", "y", yes, "ynl")
     if a == "l":   # the others, numbered
         for i, x in enumerate(ok[:12], 1):
-            out(f"  {i:2d}. {x['name'][:50]:50s} {x['score']:5.1f}%  ~{x['t2']:.0f} tok/s  {x.get('size_gb') or '?'} GB")
+            out(f"  {i:2d}. {x['name'][:50]:50s} {x['score']:5.1f}%  ~{x['t2']:.0f} tok/s  {x.get('size_gb') or '?'} GB"
+                + (f"  (needs {x['needs']}: build it yourself)" if x.get("needs") else ""))
         n = input("which one (number)? ").strip()
         if not n.isdigit() or not 1 <= int(n) <= min(12, len(ok)):
             out("nothing chosen")

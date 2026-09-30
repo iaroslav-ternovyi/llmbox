@@ -108,7 +108,8 @@ function scoreCell(p, ax) {   // a dot at the score, a line over its 95% range; 
 }
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function drawPick(pts) {   // the answer first: the best model for the picked box, and the one line that installs it
-  const ok = pts.filter(p => !p.cloud && p.t2 && p.vs != null);
+  // a model on an engine llmbox cannot install (ik_llama.cpp) is not what a newcomer's one line should start with
+  const ok = pts.filter(p => !p.cloud && p.t2 && p.vs != null && ((DATA.recipes[p.id] || {}).engine || "llama.cpp") === "llama.cpp");
   if (!ok.length) { $("#pick").innerHTML = `<p class="q">No measured model fits this box.</p>`; return; }
   const rng = p => { const k = p.vs / p.cap; return [p.ci[0] * k, Math.min(100, p.ci[1] * k)]; };
   // as llmbox pick: the best score, unless a model not measurably apart from it, at most 5 points below, is 1.3x as fast

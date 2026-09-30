@@ -28,9 +28,18 @@ def index() -> dict:
 FASTER, CLOSE = 1.3, 5.0   # the pick trades score for speed only for a model this much faster and this close to the best
 
 
+def engines_of(prof: dict | None) -> set:
+    """The engines a machine can run models with: llama.cpp always (llmbox installs its official build), others only
+    when a build of them is there (ik_llama.cpp has no release builds to install)."""
+    rts = ((prof or {}).get("hw") or {}).get("runtimes") or []
+    return {"llama.cpp"} | ({"ik_llama.cpp"} if any("ik_llama" in (r.get("path") or "") for r in rts) else set())
+
+
 def choose(ok: list[dict]) -> tuple[dict, str]:
     """The recommendation among the models that fit (best score first) and why: the best score, unless a model not
-    measurably apart from it and at most CLOSE points below runs at least FASTER times as fast 32k into a session."""
+    measurably apart from it and at most CLOSE points below runs at least FASTER times as fast 32k into a session.
+    A model needing an engine this machine does not have is never the recommendation."""
+    ok = [x for x in ok if not x.get("needs")] or ok
     top = ok[0]
     long = lambda x: min(x["t2"], x["td"] or x["t2"])
     quick = [x for x in ok[1:] if x.get("tied") and x["use_score"] >= top["use_score"] - CLOSE and long(x) >= FASTER * long(top)]
@@ -40,7 +49,8 @@ def choose(ok: list[dict]) -> tuple[dict, str]:
     return top, "the best score among the models that fit"
 
 
-def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = None, mac: bool = False) -> list[dict]:
+def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = None, mac: bool = False,
+         engines: set | None = None) -> list[dict]:
     """cls: this machine's hardware class (llmbox/hwclass.py): where people measured a model on the same class, their
     median replaces the prediction (measured=machines)."""
     rows = []
@@ -58,8 +68,10 @@ def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = 
         t32 = E.plan(shape, hw, ctx=f.ctx, kv_type=r["placement"]["kv_type"], ubatch=f.ubatch, depth=LONG).decode_tps_at_depth * cal.kd \
             if f.fits and f.ctx >= LONG else None
         score = e.get("score") if USES[use] is None else (e.get("uses") or {}).get(USES[use])
+        eng = e.get("engine") or "llama.cpp"
         row = dict(e, fits=f.fits, why=f.reason if not f.fits else "", ctx=f.ctx, t2=f.tps, td=t32, measured=0,
-                   use_score=score, size_gb=round((shape.total_bytes or 0) / 1e9, 1))
+                   use_score=score, size_gb=round((shape.total_bytes or 0) / 1e9, 1),
+                   needs=eng if eng not in (engines or {"llama.cpp"}) else None)
         m = (e.get("measured") or {}).get(cls) if cls else None
         if m and m[0]:
             row.update(fits=True, why="", t2=m[0], td=m[1] or row["td"], measured=m[3])
@@ -91,14 +103,15 @@ def run(host: str | None, use: str, what_if: tuple | None = None, out=print) -> 
         from . import results
         cls = hwclass.of_host(results.host_fingerprint(prof))
     mac = (cls or "").startswith("apple-")
-    rows = rank(hw, cores, use, cls, mac)
+    rows = rank(hw, cores, use, cls, mac, engines_of(None if what_if else prof))
     ok = [x for x in rows if x["fits"] and x.get("use_score") is not None]
     out(f"What to run on {where}, for {USES[use] or 'all work'} ({len(ok)} of {len(rows)} models fit):\n")
     out(f"  {'model':52s} {'% of Opus':>13s} {'tok/s':>6s} {'@32k':>5s} {'context':>7s}")
     for x in ok:
         rg = f" ({x['range'][0]:.0f}-{x['range'][1]:.0f})" if x.get("range") and USES[use] is None else ""
         mark = "m" if x.get("measured") else "~"
-        out(f"{'*' if x.get('tied') else ' '} {x['name'][:52]:52s} {x['use_score']:5.1f}{rg:>8s} {mark}{x['t2']:5.0f} {x['td'] or 0:5.0f} {x['ctx'] // 1024:5d}k")
+        out(f"{'*' if x.get('tied') else ' '} {x['name'][:52]:52s} {x['use_score']:5.1f}{rg:>8s} {mark}{x['t2']:5.0f} {x['td'] or 0:5.0f} {x['ctx'] // 1024:5d}k"
+            + (f"  needs {x['needs']}" if x.get("needs") else ""))
     if ok:
         best, why = choose(ok)
         out(f"\n* not measurably apart from the best score.  The pick: {best['name']} ({best['t2']:.0f} tok/s, {best['td'] or best['t2']:.0f} at 32k) - {why}")

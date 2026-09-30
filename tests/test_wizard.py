@@ -31,5 +31,10 @@ best, _ = pick.choose([x("a", 88, 55, 52), x("b", 86, 70, 60)])
 assert best["id"] == "a", "15% faster is not enough to give up score"
 best, _ = pick.choose([x("a", 88, 55, 52), x("b", 86, 90, 80, tied=False)])
 assert best["id"] == "a", "measurably below the best: never the pick"
+# a model on an engine the machine does not have (ik_llama.cpp: no release builds) is never the recommendation
+best, _ = pick.choose([dict(x("k2", 90, 80, 70), needs="ik_llama.cpp"), x("a", 88, 55, 52)])
+assert best["id"] == "a", best
+assert pick.engines_of({"hw": {"runtimes": [{"path": "/h/ik_llama.cpp/build/bin/llama-server"}]}}) == {"llama.cpp", "ik_llama.cpp"}
+assert pick.engines_of(None) == {"llama.cpp"}
 print(lines[2] if len(lines) > 2 else text)
 print("all passed")

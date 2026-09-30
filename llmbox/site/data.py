@@ -75,7 +75,7 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
                         "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "ctx": ctx, "k2": round(cal.k2, 4), "kd": round(cal.kd, 4),
                         "deepK": cal.deep_k, "size": round((sh.total_bytes or 0) / 1e9, 1),
                         "arch": sh.arch, "params": int(sh.total_params * (1 - (sh.mtp_bytes or 0) / sh.total_bytes)) if sh.total_bytes else 0,
-                        "active": sh.active_params}
+                        "active": sh.active_params, "engine": rec["runtime"].get("engine") or "llama.cpp"}
     return {"recipes": out, "ref": {"gpu": prof["hw"]["gpus"][0]["name"].replace("NVIDIA GeForce ", "") if prof["hw"]["gpus"] else "",
                                     "vram": ref_hw.vram_mib, "ram": ref_hw.ram_mib, "rambw": ref_hw.ram_bw_gbs, "vrambw": ref_hw.vram_bw_gbs},
             "gpus": GPUS, "ramKinds": RAM_KINDS,
