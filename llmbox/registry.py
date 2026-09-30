@@ -108,12 +108,20 @@ def export(host: str, rids: list[str], out_dir: str, meta: dict | None = None) -
         m = p["model"]
         index.append(dict({"id": rid, "name": rid}, **(meta or {}).get(rid, {}), hf_repo=m.get("hf_repo"), file=m.get("file"),
                           sha256=m.get("sha256"), engine=p["runtime"].get("engine", "llama.cpp"), reference=p.get("reference") or {}))
+    # the calibrated task bank of the released suite: `llmbox test` on another machine picks its tasks with it
+    from . import irt, suite
+    ch = irt.canonical(suite.content_hash())
+    bank = {}
+    if os.path.exists(irt.bank_path(ch)):
+        open(os.path.join(d, f"bank-{ch}.json"), "w").write(open(irt.bank_path(ch)).read())
+        written.append(os.path.join(d, f"bank-{ch}.json"))
+        bank = {"version": suite.VERSION, "hash": ch, "file": f"bank-{ch}.json"}
     ip = os.path.join(d, "index.json")
-    json.dump({"schema": SCHEMA, "built": time.strftime("%Y-%m-%dT%H:%M:%S"), "recipes": index}, open(ip, "w"), indent=1)
-    keep = {os.path.basename(x) for x in written} | {"index.json"}
+    json.dump({"schema": SCHEMA, "built": time.strftime("%Y-%m-%dT%H:%M:%S"), "recipes": index, "suite": bank}, open(ip, "w"), indent=1)
+    keep = {os.path.basename(x) for x in written} | {"index.json"}   # (an old bank-*.json goes too)
     for sub in (d, os.path.join(d, "shapes")):   # recipes the ranking no longer has
         for f in os.listdir(sub) if os.path.isdir(sub) else []:
-            if f not in keep and f.endswith((".toml", ".json")) and f != "index.json":
+            if f not in keep and f.endswith((".toml", ".json")):
                 os.remove(os.path.join(sub, f))
     return written + [ip]
 
@@ -147,5 +155,10 @@ def pull(url: str = DEFAULT_URL, only: list[str] | None = None, out=print) -> li
             except OSError:   # no published shape: fit reads the header from Hugging Face
                 pass
     json.dump(idx, open(os.path.join(d, "index.json"), "w"), indent=1)   # scores for llmbox pick
+    b = idx.get("suite") or {}
+    if b.get("file"):   # the task bank, for `llmbox test`
+        from . import irt
+        os.makedirs(os.path.dirname(irt.bank_path(b["hash"])), exist_ok=True)
+        open(irt.bank_path(b["hash"]), "wb").write(_get(f"{base}/recipes/{b['file']}"))
     out(f"{len(got)} recipes from {base} in {d}")
     return got

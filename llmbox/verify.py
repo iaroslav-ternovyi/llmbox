@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -91,15 +92,21 @@ def run_one(path: str, rec: dict | None = None, timeout: int = 3600) -> dict:
     ch = su.get("content_hash")
     if rec.get("kind") != "suite" or not ch:
         return {"path": path, "error": "not a suite run"}
-    code = None if ch == suite.content_hash() else famfp.snapshot_for(ch)
-    if ch != suite.content_hash() and not code:
+    from . import irt
+    same = irt.canonical(ch) == irt.canonical(suite.content_hash())   # the same tasks: the working tree grades them
+    code = None if same else famfp.snapshot_for(ch)
+    if not same and not code:
         return {"path": path, "error": f"no code of suite {su.get('version')} ({ch}): its snapshot is gone"}
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     if code:
         env["PYTHONPATH"] = code
     cwd = code or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     t = time.time()
-    p = subprocess.run([sys.executable, "-c", SCRIPT, path], capture_output=True, text=True, env=env, cwd=cwd, timeout=timeout)
+    # a stranger's answers run as code (hidden tests, real programs): on the server inside the sandbox command
+    # $LLMBOX_SANDBOX (deploy/sandbox.sh: no network, no home, limits), which gets the paths it must read
+    box = (shlex.split(os.environ["LLMBOX_SANDBOX"]) + ["--read", os.path.abspath(path), "--read", cwd, "--read", sys.prefix]
+           + (["--read", code] if code else []) + ["--"]) if os.environ.get("LLMBOX_SANDBOX") else []
+    p = subprocess.run(box + [sys.executable, "-c", SCRIPT, os.path.abspath(path)], capture_output=True, text=True, env=env, cwd=cwd, timeout=timeout)
     line = next((x for x in p.stdout.splitlines() if x.startswith("@@VERIFY@@")), None)
     if not line:
         return {"path": path, "error": f"re-grading failed: {(p.stderr or p.stdout)[-300:]}"}

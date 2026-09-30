@@ -315,6 +315,45 @@ def cmd_pick(a: argparse.Namespace) -> None:
     raise SystemExit(pick.run(a.host, a.use, what_if))
 
 
+def cmd_test(a: argparse.Namespace) -> None:
+    """The whole measurement of a model on this machine: speed, the 40-minute quality test, then the upload."""
+    import random
+    from . import irt, recipe as rc, submit, suite
+    host = a.host or _only_host()
+    try:
+        rc.load(host, a.recipe)
+    except OSError:
+        raise SystemExit(f"{a.recipe} is not installed on {host}: llmbox install {a.recipe} --from registry --host {host} --apply")
+    ch = irt.canonical(suite.content_hash())
+    if ch not in irt.RELEASES:
+        raise SystemExit(f"this llmbox's tasks ({suite.VERSION}, {ch}) are not a released version: update llmbox")
+    if not irt.load(ch):
+        raise SystemExit("no task bank for this version here: llmbox recipe pull")
+    server = a.server or submit.DEFAULT_SERVER
+    seed = None if a.no_submit else submit.fresh_seed(server)
+    if seed is None and not a.no_submit:
+        print(f"{server} did not answer: the test runs on a seed of its own, and its answers are filed but not pooled")
+    seed = seed if seed is not None else random.randrange(10**6, 10**9)
+    print(f"1/3 speed of {a.recipe} on {host}", flush=True)
+    main(["speed", a.recipe, "--host", host, "--depth", "32000", "--depth", "80000", "--unload"])
+    print(f"\n2/3 quality: adaptive test, {a.budget:g} minutes", flush=True)
+    main(["bench", a.recipe, "--host", host, "--recipe", a.recipe, "--adaptive", "--budget", str(a.budget), "--target", "2.5",
+          "--seed", str(seed), "--speed-probe"])
+    if a.no_submit:
+        print("\n3/3 not sent (--no-submit): `llmbox submit` sends it later")
+        return
+    print("\n3/3 upload", flush=True)
+    submit.run([], host, server, dry_run=False)
+
+
+def _only_host() -> str:
+    d = os.path.join(hosts.HOME, "hosts")
+    names = sorted(f[:-5] for f in os.listdir(d) if f.endswith(".json")) if os.path.isdir(d) else []
+    if len(names) != 1:
+        raise SystemExit("which machine? --host <name> (llmbox host list)")
+    return names[0]
+
+
 def cmd_submit(a: argparse.Namespace) -> None:
     from . import submit
     raise SystemExit(submit.run(a.results, a.host, a.server or submit.DEFAULT_SERVER, a.dry_run))
@@ -667,7 +706,7 @@ def cmd_site(a) -> None:
 # `llmbox --help` lists the commands by what you want to do, most used first
 COMMAND_GROUPS = [
     ("Pick and run a model on your box", ["host", "pick", "scout", "fit", "recipe", "install", "tune", "optimize"]),
-    ("Measure it", ["bench", "queue", "speed", "probe", "loops", "traces"]),
+    ("Measure it", ["test", "bench", "queue", "speed", "probe", "loops", "traces"]),
     ("Share and compare", ["submit", "serve"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
     ("Develop the test", ["validate", "snapshot"]),
@@ -853,8 +892,16 @@ def main(argv: list[str] | None = None) -> None:
     pk.add_argument("--url", help="the site to pull from")
     pk.set_defaults(fn=cmd_pick)
 
+    te = command("test", "measure a model on this machine and send it: speed, the 40-minute quality test, the upload")
+    te.add_argument("recipe", help="an installed recipe (llmbox install <id> --from registry ...)")
+    te.add_argument("--host", help="this machine's name (default: the only one registered)")
+    te.add_argument("--budget", type=float, default=40, help="minutes for the quality test (default 40)")
+    te.add_argument("--server", help="intake address (default $LLMBOX_SERVER)")
+    te.add_argument("--no-submit", action="store_true", help="measure only; `llmbox submit` sends it later")
+    te.set_defaults(fn=cmd_test)
+
     sb = command("submit", "send your speed measurements to the shared results (anonymous; --dry-run shows exactly what is sent)")
-    sb.add_argument("results", nargs="*", help="result files (default: every speed / optimize record not sent yet)")
+    sb.add_argument("results", nargs="*", help="result files (default: every speed, optimize and quality record not sent yet)")
     sb.add_argument("--host", help="only this host's records")
     sb.add_argument("--server", help="intake address (default $LLMBOX_SERVER or the local intake)")
     sb.add_argument("--dry-run", action="store_true", help="print the bundle, send nothing")

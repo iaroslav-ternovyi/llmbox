@@ -1,5 +1,6 @@
 """`llmbox serve`: the intake of submitted measurements (stdlib only, like the rest of llmbox).
 
+  POST /api/v1/seed        {client} -> {seed}: the seed a quality test (`llmbox test`) draws its tasks from
   POST /api/v1/runs        a gzip JSON bundle from `llmbox submit` -> 202 {id, status, url}
   GET  /api/v1/runs/<id>   the submission's status: received / accepted / rejected (with the reason per record)
   GET  /api/v1/health      ok
@@ -7,6 +8,12 @@
 Bundles are stored as sent (<data>/inbox/<id>.json.gz) and listed in <data>/intake.db. `ingest()` (a thread of the
 server, or `llmbox serve --ingest-once`) checks each record and files the accepted ones as results of the pseudo
 host "community" (~/.llmbox/results/community), where the site reads them.
+
+A quality run (kind suite, from `llmbox test`) is never taken at its word: every answer is graded again here
+(llmbox/verify.py, inside the sandbox $LLMBOX_SANDBOX: the answers are code that runs), the server's score replaces the
+client's, explanations wait for the reader model on the reference box (pending), an answer that cannot be re-graded is
+left out, and a run with more than a fifth of its answers graded differently is rejected. The run must use a released
+suite and a seed this server gave that install ("self-seeded" otherwise: filed, not pooled).
 
 Checks for a speed record (speed cannot be proven, docs/roadmap.md §4): the schema and kind; the host fingerprint
 has a card or says it has none; the numbers are positive and not absurd (under 2000 tok/s decode, 100k prefill);
@@ -33,7 +40,10 @@ PER_HOUR = 30                 # submissions per install id and per address
 COMMUNITY = "community"
 DB_SCHEMA = """CREATE TABLE IF NOT EXISTS submissions (
   id TEXT PRIMARY KEY, received TEXT, client TEXT, addr TEXT, bytes INTEGER, records INTEGER,
-  status TEXT, reason TEXT, detail TEXT)"""
+  status TEXT, reason TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS seeds (seed INTEGER PRIMARY KEY, client TEXT, issued TEXT, used INTEGER DEFAULT 0)"""
+MISMATCH_MAX = 0.2            # share of re-graded answers that may differ before a quality run is rejected
+SEEDS_PER_DAY = 20
 
 
 class Intake:
@@ -42,7 +52,7 @@ class Intake:
         os.makedirs(os.path.join(self.data, "inbox"), exist_ok=True)
         self.lock = threading.Lock()
         with self._db() as c:
-            c.execute(DB_SCHEMA)
+            c.executescript(DB_SCHEMA)
 
     def _db(self) -> sqlite3.Connection:
         c = sqlite3.connect(os.path.join(self.data, "intake.db"), timeout=30)
@@ -75,6 +85,27 @@ class Intake:
                           (sid, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), client, a, len(raw), len(b["records"]), "received", "", "[]"))
         return 202, {"id": sid, "status": "received", "url": f"/api/v1/runs/{sid}"}
 
+    def seed(self, raw: bytes) -> tuple[int, dict]:
+        """A fresh seed for this install's next quality test (the tasks cannot be prepared in advance)."""
+        import secrets
+        try:
+            client = str(json.loads(raw or b"{}").get("client") or "")[:64]
+        except ValueError:
+            return 400, {"error": "not JSON"}
+        if len(client) < 16:
+            return 400, {"error": "no install id"}
+        since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 86400))
+        with self.lock, self._db() as c:
+            if c.execute("SELECT count(*) FROM seeds WHERE client = ? AND issued > ?", (client, since)).fetchone()[0] >= SEEDS_PER_DAY:
+                return 429, {"error": f"more than {SEEDS_PER_DAY} tests a day from this install"}
+            s = 10**6 + secrets.randbelow(10**9)
+            c.execute("INSERT OR IGNORE INTO seeds VALUES (?,?,?,0)", (s, client, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())))
+        return 200, {"seed": s}
+
+    def seeded(self, client: str, seed) -> bool:
+        with self._db() as c:
+            return c.execute("SELECT 1 FROM seeds WHERE seed = ? AND client = ?", (seed, client)).fetchone() is not None
+
     def status(self, sid: str) -> dict | None:
         with self._db() as c:
             r = c.execute("SELECT id, received, records, status, reason, detail FROM submissions WHERE id = ?", (sid,)).fetchone()
@@ -94,6 +125,12 @@ class Intake:
                     detail.append({"record": str(rec.get("id"))[:36], "status": "rejected", "reason": why})
                     continue
                 flags = outlier_flags(rec, predict)
+                if rec.get("kind") == "suite":
+                    rec, why, qflags = self.regrade(rec, b["client"])
+                    if why:
+                        detail.append({"record": str(rec.get("id"))[:36], "status": "rejected", "reason": why})
+                        continue
+                    flags += qflags
                 rec = dict(rec, submission={"id": sid, "client": hashlib.sha256(b["client"].encode()).hexdigest()[:12],
                                             "received": time.strftime("%Y-%m-%dT%H:%M:%S"), "flags": flags})
                 rec["host"] = dict(rec["host"], **{"class": hwclass.of_host(rec["host"])})
@@ -108,12 +145,44 @@ class Intake:
         return done
 
 
+    def regrade(self, rec: dict, client: str) -> tuple[dict, str | None, list[str]]:
+        """A quality run with the server's own grades: (record, why it is rejected or None, flags)."""
+        from . import verify
+        work = os.path.join(self.data, "work")
+        os.makedirs(work, exist_ok=True)
+        p = os.path.join(work, f"{uuid.uuid4().hex}.json")
+        json.dump(rec, open(p, "w"))
+        try:
+            res = verify.run_one(p, rec)
+        finally:
+            os.remove(p)
+        if res.get("error"):
+            return rec, f"could not be re-graded: {res['error'][:200]}", []
+        rows = [dict(x) for x in rec.get("rows") or []]
+        graded = diff = 0
+        for v in res["rows"]:
+            x = rows[v["n"]]
+            if v["status"] in ("match", "mismatch"):
+                graded += 1
+                diff += v["status"] == "mismatch"
+                x.update(score=v["server"], verified=True)
+            elif v["status"] in ("reader", "pending"):
+                x.update(pending=True, score=None)       # the reader on the reference box grades it
+            elif v["status"] != "no_answer":
+                x.update(error=f"not verified: {v.get('reason') or v['status']}"[:200], score=None)
+        if graded and diff / graded > MISMATCH_MAX:
+            return rec, f"{diff} of {graded} answers grade differently here: not the answers the suite gave", []
+        s0 = (rec.get("suite") or {}).get("seed0") or 0   # bench: seed0 = 7000 + 1000 * --seed
+        flags = [] if (s0 - 7000) % 1000 == 0 and self.seeded(client, (s0 - 7000) // 1000) else ["self-seeded"]
+        return dict(rec, rows=rows, verified={"graded": graded, "differed": diff, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}), None, flags
+
+
 def check(rec: dict) -> str | None:
     """Why a submitted record cannot be used, or None."""
     if rec.get("schema") != results.SCHEMA:
         return "unknown record schema"
-    if rec.get("kind") not in ("speed", "optimize"):
-        return f"kind {rec.get('kind')!r} is not taken yet (speed and optimize are)"
+    if rec.get("kind") not in ("speed", "optimize", "suite"):
+        return f"kind {rec.get('kind')!r} is not taken (speed, optimize and suite are)"
     h = rec.get("host") or {}
     if not h.get("cpu") or not h.get("ram_gib") or h.get("gpu") is None and h.get("vram_gib"):
         return "the record does not say what machine it ran on"
@@ -122,6 +191,14 @@ def check(rec: dict) -> str | None:
     m = rec.get("model") or {}
     if not (m.get("file") or m.get("path")):
         return "no model file named"
+    if rec.get("kind") == "suite":
+        from . import irt
+        su = rec.get("suite") or {}
+        if irt.canonical(su.get("content_hash")) not in irt.RELEASES:
+            return f"suite {su.get('version')} ({su.get('content_hash')}) is not a released version: update llmbox"
+        if su.get("tier") != "adaptive" or not rec.get("rows"):
+            return "a quality run must be an adaptive test with its answers"
+        return None if len(json.dumps(rec)) <= 15 * 2**20 else "record too large"
     sp = (rec.get("speed") if rec.get("kind") == "speed" else ((rec.get("runs") or {}).get("llmbox") or {})) or {}
     dec = sp.get("decode_tps") if rec.get("kind") == "speed" else sp.get("decode")
     pre = sp.get("prefill_tps") if rec.get("kind") == "speed" else sp.get("prefill")
@@ -163,9 +240,11 @@ def handler(intake: Intake):
             self._json(404, {"error": "not found"})
 
         def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            if self.path == "/api/v1/seed" and n <= 4096:
+                return self._json(*intake.seed(self.rfile.read(n)))
             if self.path != "/api/v1/runs":
                 return self._json(404, {"error": "not found"})
-            n = int(self.headers.get("Content-Length") or 0)
             if not 0 < n <= MAX_BODY:
                 return self._json(413, {"error": f"body must be 1 byte to {MAX_BODY // 2**20} MB"})
             addr = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or self.client_address[0]

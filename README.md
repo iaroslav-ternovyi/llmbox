@@ -26,8 +26,8 @@ llmbox host add me                       # this machine: GPU, RAM, measured RAM 
 llmbox pick                              # every measured model fitted to it: fits?, how fast, how good; the pick
 llmbox install qwen36-al --from registry --host me --apply   # download, fit, launcher, llama-swap entry
 llmbox tune qwen36-al --host me          # optional: measure the speed knobs on this machine, keep what wins
-llmbox speed qwen36-al --host me         # time it at 0 / 32k / 80k tokens of context
-llmbox submit                            # add the measurement to the site (anonymous; --dry-run shows what is sent)
+llmbox test qwen36-al --host me          # speed, the 40-minute quality test, and the upload (anonymous; the server
+                                         # re-grades every answer; `llmbox submit --dry-run` shows what is sent)
 ```
 
 `llmbox pick --gpu "RTX 4090" --ram-gb 64 --ram-bw 60` answers for a machine you do not have yet.

@@ -11,13 +11,18 @@ REPO="${1:?usage: vps-setup.sh <repo-url> [<ssh public key for the llmbox user>]
 PUBKEY="${2:-}"
 
 apt-get update -q
-apt-get install -y -q python3 python3-venv git rsync ufw debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+apt-get install -y -q python3 python3-venv git rsync ufw bubblewrap nodejs debian-keyring debian-archive-keyring apt-transport-https curl gnupg
 if ! command -v caddy >/dev/null; then
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
   apt-get update -q && apt-get install -y -q caddy
 fi
-command -v node >/dev/null || apt-get install -y -q nodejs npm
+command -v npx >/dev/null || apt-get install -y -q npm
+# Ubuntu 24.04 lets only profiled programs make user namespaces: allow bubblewrap (the re-grading sandbox)
+if [ -d /etc/apparmor.d ] && [ ! -f /etc/apparmor.d/bwrap-llmbox ]; then
+  printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile bwrap-llmbox /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' > /etc/apparmor.d/bwrap-llmbox
+  apparmor_parser -r /etc/apparmor.d/bwrap-llmbox || true
+fi
 
 id llmbox >/dev/null 2>&1 || useradd -m -s /bin/bash llmbox
 if [ -n "$PUBKEY" ]; then   # the author's machine pushes results with rsync over ssh as this user

@@ -105,7 +105,7 @@ def timed_out(row: dict) -> bool:
     e = str(row.get("error") or "").lower()
     # a read that timed out on a live server; not a box that went down (bench.REBOOTED_SINCE rewrites those) and not a
     # connection that never opened (urlopen error: the server was unreachable)
-    return "timed out" in e and "restarted" not in e and "urlopen error" not in e
+    return "timed out" in e and "restarted" not in e and "urlopen error" not in e and not e.startswith("not verified")
 
 
 def real_zero(row: dict) -> bool:
@@ -120,20 +120,28 @@ def counted(row: dict) -> dict | None:
     return None if row.get("pending") or row.get("error") else row
 
 
-def pool(hosts_: tuple = ("box", "cloud")) -> dict:
+def pool(hosts_: tuple = ("box", "cloud", "community")) -> dict:
     """{(recipe id, host): [rows]}: every answer, from any suite version and any run (fixed, adaptive, one block only),
     to a task family that is unchanged in the current suite (llmbox/famfp.py). Text-graded answers from another version
     are graded again by the current grader; answers graded on a tool world, a workspace or by the reader count as saved.
-    An answer saved twice (a resumed run) counts once."""
+    An answer saved twice (a resumed run) counts once. People's runs (the community host, re-graded by the server) join
+    the reference recipe they measured the same way (community_home); others stay under their own id."""
     from . import famfp, suite
     from .bench import TEXT_GRADED
     cur = suite.content_hash()
     recs = []
+    homes = _recipe_ids("box") if "community" in hosts_ else {}
     for h in hosts_:
         for f, r in results.files(h):
             su = r.get("suite") or {}
             if r.get("kind") != "suite" or su.get("tier") not in ("quick", "adaptive", "medium", "deep") or not su.get("content_hash"):
                 continue
+            if h == "community":
+                if not r.get("verified") or set((r.get("submission") or {}).get("flags") or []) & HELD:
+                    continue   # only runs the server re-graded, from a seed it gave
+                home = community_home(r, homes)
+                if home:
+                    r, h = dict(r, recipe=dict(r.get("recipe") or {}, id=home)), "box"
             recs.append((h, r))
     fams_by_hash: dict = {}
     for h, r in recs:
@@ -166,6 +174,39 @@ def pool(hosts_: tuple = ("box", "cloud")) -> dict:
     if len(cache) != n0:
         json.dump(cache, open(cp, "w"))
     return {k: list(v.values()) for k, v in out.items() if v}
+
+
+HELD = {"self-seeded", "outlier"}   # people's runs that are filed but not pooled
+
+
+def _recipe_ids(host: str) -> dict:
+    """{recipe id: (model file, portable layer)} of a host's recipes: what a person's run must match to join one."""
+    from . import fit as F, recipe as rc
+    out = {}
+    for rid in rc.ids(host):
+        try:
+            r = rc.load(host, rid)
+        except (OSError, ValueError):
+            continue
+        out[rid] = (os.path.basename(r["model"].get("file") or r["model"].get("path") or ""), _portable(F, r))
+    return out
+
+
+def _portable(F, r: dict) -> str:
+    """The settings the score belongs to (fit.PORTABLE without the texts and the file's hash), as one comparable string."""
+    lay = F.layer(r, tuple(p for p in F.PORTABLE if p not in ("description", "notes", "model.sha256", "model.hf_repo")))
+    return json.dumps(lay, sort_keys=True)
+
+
+def community_home(rec: dict, homes: dict) -> str | None:
+    """The reference recipe a person's run measured: the same id, model file and portable settings; else None."""
+    from . import fit as F, recipe as rc
+    rid = (rec.get("recipe") or {}).get("id")
+    if rid not in homes:
+        return None
+    r = rc._merge(rc.DEFAULTS, rec.get("recipe") or {})
+    f = os.path.basename((rec.get("model") or {}).get("file") or r["model"].get("file") or "")
+    return rid if (f, _portable(F, r)) == homes[rid] else None
 
 
 def pooled_responses(hosts_: tuple = ("box", "cloud")) -> list[Resp]:

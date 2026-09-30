@@ -27,7 +27,7 @@ from . import __version__, results
 from .hosts import HOME
 
 SCHEMA = "llmbox.submission/1"
-KINDS = ("speed", "optimize")          # suite runs join when the server can check strangers' answers
+KINDS = ("speed", "optimize", "suite")   # a suite run is re-graded by the server (llmbox/server.py)
 DEFAULT_SERVER = os.environ.get("LLMBOX_SERVER", "http://127.0.0.1:8767")
 LEDGER = os.path.join(HOME, "submitted.json")
 
@@ -90,6 +90,17 @@ def pending(host: str | None = None, kinds: tuple = KINDS) -> list[tuple[str, di
 def bundle(records: list[dict]) -> dict:
     words = _private_words()
     return {"schema": SCHEMA, "client": install_id(), "llmbox": __version__, "records": [scrub(r, words) for r in records]}
+
+
+def fresh_seed(server: str = DEFAULT_SERVER) -> int | None:
+    """A seed from the server for the next quality test (its tasks cannot be prepared in advance); None if unreachable."""
+    req = urllib.request.Request(server.rstrip("/") + "/api/v1/seed", data=json.dumps({"client": install_id()}).encode(),
+                                 method="POST", headers={"Content-Type": "application/json", "User-Agent": f"llmbox/{__version__}"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return int(json.loads(r.read())["seed"])
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        return None
 
 
 def send(b: dict, server: str = DEFAULT_SERVER, timeout: int = 120) -> dict:
