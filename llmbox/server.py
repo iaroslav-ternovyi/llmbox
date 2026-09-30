@@ -174,7 +174,32 @@ class Intake:
             return rec, f"{diff} of {graded} answers grade differently here: not the answers the suite gave", []
         s0 = (rec.get("suite") or {}).get("seed0") or 0   # bench: seed0 = 7000 + 1000 * --seed
         flags = [] if (s0 - 7000) % 1000 == 0 and self.seeded(client, (s0 - 7000) // 1000) else ["self-seeded"]
-        return dict(rec, rows=rows, verified={"graded": graded, "differed": diff, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}), None, flags
+        rec = dict(rec, rows=rows, verified={"graded": graded, "differed": diff, "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
+        far = off_score(rec)
+        if far:   # the same file and settings answer like another model: filed, held out of the score
+            rec["verified"]["off"] = far
+            flags.append("outlier")
+        return rec, None, flags
+
+
+def off_score(rec: dict) -> dict | None:
+    """A person's run whose 95% range does not meet the reference recipe's pooled range: the same model file with the
+    same portable settings should score the same anywhere, so a run clearly above it (answers from a stronger model)
+    or below it (a broken setup) is held out of the score. None when it agrees, or there is nothing to compare with."""
+    from . import irt, report
+    bank = irt.bank_for((rec.get("suite") or {}).get("content_hash"))
+    home = irt.community_home(rec, irt._recipe_ids("box"))
+    if not bank or not home:
+        return None
+    rows = [x for x in (irt.counted(r) for r in rec.get("rows") or []) if x]
+    run = irt.score_rows(bank, rows) if rows else None
+    ref = (report.current_pool().get((home, "box")) or {}).get("score")
+    if not run or not ref or not run.get("ci95") or not ref.get("ci95"):
+        return None
+    (lo, hi), (rlo, rhi) = run["ci95"], ref["ci95"]
+    if lo > rhi or hi < rlo:
+        return {"run": run["capability"], "run_ci": run["ci95"], "recipe": home, "pooled": ref["capability"], "pooled_ci": ref["ci95"]}
+    return None
 
 
 def check(rec: dict) -> str | None:
