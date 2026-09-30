@@ -7,8 +7,10 @@ set -euo pipefail
 VPS="${LLMBOX_VPS:-$(cat "$HOME/.llmbox/vps" 2>/dev/null)}"; [ -n "$VPS" ] || { echo "set LLMBOX_VPS=llmbox@<server> or write it to ~/.llmbox/vps"; exit 1; }
 L="$HOME/.llmbox"
 mkdir -p "$L/results/community"
-# people's measurements: the server's are the truth, this machine keeps a copy for its local site
-rsync -a "$VPS:.llmbox/results/community/" "$L/results/community/"
+# people's measurements: new ones come home; explanations the reader graded here (the queue worker's grade-pending, on
+# the box) go back - both ways only newer files win (-u)
+rsync -au "$VPS:.llmbox/results/community/" "$L/results/community/"
+rsync -au "$L/results/community/" "$VPS:.llmbox/results/community/"
 # what the site is built from; the server never writes these (no --delete on results/: community lives there)
 ssh "$VPS" 'mkdir -p ~/.llmbox/results ~/.llmbox/recipes ~/.llmbox/hosts'
 for d in results/box results/cloud; do rsync -a --delete "$L/$d/" "$VPS:.llmbox/$d/"; done

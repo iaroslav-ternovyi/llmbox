@@ -11,7 +11,7 @@ REPO="${1:?usage: vps-setup.sh <repo-url> [<ssh public key for the llmbox user>]
 PUBKEY="${2:-}"
 
 apt-get update -q
-apt-get install -y -q python3 python3-venv git rsync ufw bubblewrap nodejs debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+apt-get install -y -q python3 python3-venv git rsync ufw bubblewrap nodejs apparmor debian-keyring debian-archive-keyring apt-transport-https curl gnupg
 if ! command -v caddy >/dev/null; then
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
@@ -58,6 +58,6 @@ systemctl daemon-reload
 systemctl enable --now llmbox-intake caddy
 systemctl reload caddy
 
-ufw allow OpenSSH >/dev/null && ufw allow 80/tcp >/dev/null && ufw allow 443/tcp >/dev/null && ufw --force enable >/dev/null
+ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw --force enable >/dev/null
 echo "intake: https://$HOST/api/v1/health"
 echo "next: put CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in /etc/llmbox.env, then systemctl restart llmbox-intake"

@@ -35,6 +35,9 @@ text = json.dumps(b)
 for w in ("/home/someone", "secretbox", "someone", "Alice"):
     assert w not in text, f"{w!r} left the machine"
 assert "~/models/x.gguf" in text and b["records"][0]["host"]["gpu"] == real["host"]["gpu"]
+# a machine whose user is called llmbox (the server's): llmbox's own words and the answers stay as they are
+r2 = submit.scrub({"schema": results.SCHEMA, "tool": {"name": "llmbox"}, "rows": [{"final": "ran on secretbox"}]}, ["llmbox", "secretbox"])
+assert r2["schema"] == results.SCHEMA and r2["tool"]["name"] == "llmbox" and r2["rows"][0]["final"] == "ran on secretbox", r2
 
 intake = server.Intake(os.path.join(home, "intake"))
 srv = ThreadingHTTPServer(("127.0.0.1", 0), server.handler(intake))

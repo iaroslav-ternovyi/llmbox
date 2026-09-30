@@ -55,22 +55,29 @@ def _private_words(extra: tuple = ()) -> list[str]:
     return sorted((w for w in words | set(extra) if w and len(w) >= 3), key=len, reverse=True)
 
 
-def scrub(obj, words: list[str] | None = None):
-    """The record with home folders shortened to ~ and private names replaced; ssh, hostname and free-text notes dropped."""
-    words = _private_words() if words is None else words
-    pats = [(re.compile(r"(/home|/Users)/[^/\s\"']+"), "~")] + [(re.compile(re.escape(w), re.I), "user") for w in words]
+COMMON = {"llmbox", "llama", "server", "model", "models", "local", "localhost", "ubuntu", "debian", "root", "admin", "user",
+          "users", "home", "host", "box", "linux", "mac", "macbook", "desktop", "workstation", "runner", "cuda", "nvidia"}
 
-    def s(x):
+
+def scrub(obj, words: list[str] | None = None):
+    """The record with home folders shortened to ~ and private names replaced (whole words, not a word llmbox itself
+    uses); ssh, hostname and free-text notes dropped. The answers (rows) are left exactly as the model gave them: the
+    server grades them again, and a changed answer would grade differently."""
+    words = _private_words() if words is None else words
+    words = [w for w in words if w.lower() not in COMMON]
+    pats = [(re.compile(r"(/home|/Users)/[^/\s\"']+"), "~")] + [(re.compile(rf"(?<![\w.-]){re.escape(w)}(?![\w-])", re.I), "user") for w in words]
+
+    def s(x, top=False):
         if isinstance(x, str):
             for p, r in pats:
                 x = p.sub(r, x)
             return x
         if isinstance(x, dict):
-            return {k: s(v) for k, v in x.items() if k not in ("ssh", "hostname", "notes")}
+            return {k: (v if top and k == "rows" else s(v)) for k, v in x.items() if k not in ("ssh", "hostname", "notes")}
         if isinstance(x, list):
             return [s(v) for v in x]
         return x
-    return s(obj)
+    return s(obj, top=True)
 
 
 def ledger() -> dict:
