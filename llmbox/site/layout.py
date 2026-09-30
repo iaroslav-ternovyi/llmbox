@@ -59,8 +59,8 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
             f'<link rel="stylesheet" href="{FONTS}">{styles}</head><body>'
             '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
             '<div class="wrap"><header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>'
-            f'<nav class="tabs">{nav}</nav><a class="boxchip" id="boxchip" href="index.html#box" title="the box speeds and fit are shown for; change it on the home page">'
+            f'<nav class="tabs" aria-label="sections">{nav}</nav><a class="boxchip" id="boxchip" href="index.html#box" title="the box speeds and fit are shown for; change it on the home page">'
             f'Your box <b>reference PC</b></a><a class="getbtn" href="install.html">GET LLMBOX</a>'
-            f'<a class="signin" id="signin" href="account.html">SIGN IN</a></header>{body}'
+            f'<a class="signin" id="signin" href="account.html">SIGN IN</a></header><main id="main">{body}</main>'
             f'<footer><span>Every number comes from a saved run. The score does not depend on the box; speed does. <a href="method.html">How scores work →</a></span>'
             f'<span>generated {time.strftime("%b %d, %Y %H:%M")}</span></footer></div>{scripts}</body></html>')

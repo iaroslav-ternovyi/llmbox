@@ -61,7 +61,7 @@ def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None =
     body = f'''
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / how scores work</div><h1>How the numbers are made</h1>
  <p class="q" style="margin-top:6px">Suite v{esc(suite.VERSION)} · content hash {esc(suite.content_hash())}</p></div></section>
-<div class="mdoc"><nav class="toc">{"".join(f'<a href="#{k}">{esc(t)}</a>' for k, t in toc)}</nav>
+<div class="mdoc"><nav class="toc" aria-label="contents">{"".join(f'<a href="#{k}">{esc(t)}</a>' for k, t in toc)}</nav>
 <article class="doc">
 <section class="short" id="short"><h2>In 30 seconds</h2><ul>
 <li><b>Real work, graded by programs.</b> {n} tasks from coding, tool use, questions about your own machine, documents and writing; hidden tests and checkers grade them, no model grades another.</li>

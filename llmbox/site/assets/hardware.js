@@ -12,12 +12,12 @@ else $("#yourbox").innerHTML = `Pick your graphics card or Mac <a href="index.ht
 function card(title, hw, note) {
   const f = forBox(DATA.sh, hw), g = f.t2 / cur.t2;
   const txt = g > 1.05 ? `+${Math.round((g - 1) * 100)}%` : g < 0.95 ? `${Math.round((g - 1) * 100)}%` : "±0%";
-  return `<div><h4>${title}</h4><div class="g ${Math.abs(g - 1) < 0.05 ? "no" : ""}">${txt}</div><p>~${Math.round(f.t2)} tok/s. ${note}${rough(hw) ? ' <span class="src">rough</span>' : ""}</p></div>`;
+  return `<div><h2>${title}</h2><div class="g ${Math.abs(g - 1) < 0.05 ? "no" : ""}">${txt}</div><p>~${Math.round(f.t2)} tok/s. ${note}${rough(hw) ? ' <span class="src">rough</span>' : ""}</p></div>`;
 }
 const faster = DATA.ramKinds.map(r => r[1]).filter(v => v >= box.rambw * 1.2)[0];   // a step worth buying
 const gp = n => { const g = DATA.gpus.find(x => x[0].startsWith(n)); return { gpu: n, vram: g[1], vrambw: g[2], ram: box.ram, rambw: box.rambw }; };
-if (box.mac) { $("#adv").innerHTML = `<div><h4>A Mac with more memory bandwidth</h4><p>On a Mac the whole model sits in unified memory: its bandwidth sets the speed (Max and Ultra chips have 2–4× a base chip's).</p></div>`; }
-else $("#adv").innerHTML = (faster ? card(`Faster RAM (${faster} GB/s)`, Object.assign({}, box, { rambw: faster }), "Same card, faster memory.") : "<div><h4>Faster RAM</h4><p class='q'>already at the fastest common speed</p></div>")
+if (box.mac) { $("#adv").innerHTML = `<div><h2>A Mac with more memory bandwidth</h2><p>On a Mac the whole model sits in unified memory: its bandwidth sets the speed (Max and Ultra chips have 2–4× a base chip's).</p></div>`; }
+else $("#adv").innerHTML = (faster ? card(`Faster RAM (${faster} GB/s)`, Object.assign({}, box, { rambw: faster }), "Same card, faster memory.") : "<div><h2>Faster RAM</h2><p class='q'>already at the fastest common speed</p></div>")
   + card("A 16 GB card (RTX 5070 Ti)", gp("RTX 5070 Ti"), "More of the model on the graphics card.")
   + card("A 24 GB card (RTX 4090)", gp("RTX 4090"), "Most of the model on the graphics card.");
 $("#why").textContent = DATA.sh.moe ? `A mixture-of-experts model: what does not fit on the graphics card runs from system RAM, so on small cards the RAM speed, not the GPU, sets the pace. At ${Math.round(cur.gf * 100)}% of the experts on the card now.`

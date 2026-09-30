@@ -46,7 +46,7 @@ def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dic
             "in a short chat (big number) and with a long document in context (small). Measured on the reference PC, predicted for the box you pick. Click to sort.")
             + "</th><th class='r'>" + _pop("FITS", "Does it fit?", "Whether the model and its context fit in the graphics card plus RAM of the box you pick, "
             "and the largest context that does.") + "</th><th class='l'>" + _pop("STANDS OUT", "Stands out", "Blocks where the model scores at least "
-            "6 points above (▲) or below (▼) the typical (median) local model here. Click a row for all nine.") + "</th><th></th></tr>")
+            "6 points above (▲) or below (▼) the typical (median) local model here. Click a row for all nine.") + "</th><th><span class='sr'>compare</span></th></tr>")
     body = []
     for r in local:
         rid, nm = r["id"], model_name(r)

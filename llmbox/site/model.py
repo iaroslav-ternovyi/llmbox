@@ -146,7 +146,7 @@ def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool |
             + (f' · <a href="{esc(dl)}" rel="noopener">download it from Hugging Face</a>' if dl else "") + made
             + ". The settings this model was measured with. On another box <code>--fit</code> places the weights for it by itself.</p>")
     return ('<section class="panel pad run"><div class="lbl">Run it yourself</div>' + head
-            + '<div class="rtabs" role="tablist">'
+            + '<div class="rtabs" role="group" aria-label="how to run it">'
             + "".join(f'<button type="button" class="{"on" if i == 0 else ""}" data-t="{k}">{t}</button>' for i, (k, t) in
                       enumerate([("one", "One line"), ("srv", "llama-server"), ("win", "Windows"), ("swap", "llama-swap"), ("lms", "LM Studio"), ("oll", "Ollama")]))
             + "</div>"
