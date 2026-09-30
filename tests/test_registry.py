@@ -14,9 +14,10 @@ src = "box"
 rids = [r for r in ("qwen36-al", "k2-medium") if r in rc.ids(src)]
 assert rids, "needs the box's recipes"
 out = tempfile.mkdtemp()
-files = registry.export(src, rids, out, {r: r.upper() for r in rids})
+files = registry.export(src, rids, out, {r: {"name": r.upper(), "score": 80.0} for r in rids})
 idx = json.load(open(os.path.join(out, "recipes", "index.json")))
 assert [e["id"] for e in idx["recipes"]] == rids and idx["schema"] == registry.SCHEMA
+assert idx["recipes"][0]["name"] == rids[0].upper() and idx["recipes"][0]["score"] == 80.0
 for rid in rids:
     text = open(os.path.join(out, "recipes", f"{rid}.toml")).read()
     assert "/home/" not in text and "mixer" not in text, f"{rid}: a path of the box leaked"

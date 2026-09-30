@@ -112,7 +112,7 @@ def calibration(r: dict, shape: E.ModelShape, ref_host: str) -> Calibration:
     dk, dv = max(deep) if deep else (88, None)
     kd = dv / E.plan(shape, hw, ctx=ctx, kv_type=kv, depth=int(dk * 1000)).decode_tps_at_depth if dv else k2
     return Calibration(k2, kd, int(dk), f"calibrated on 1 run on {ref_host} ({rec.get('created', '')[:10]})",
-                       {"decode_tps": sp["decode_tps"], "deep_tps": dv})
+                       {"decode_tps": sp["decode_tps"], "deep_tps": dv, "by_depth": {str(int(round(k))): v for k, v in sorted(deep)}})
 
 
 # ---- the fit ----------------------------------------------------------------------------------------------------------

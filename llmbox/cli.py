@@ -301,6 +301,20 @@ def cmd_loops(a: argparse.Namespace) -> None:
     print("summary:", json.dumps(loops.summarize(results)))
 
 
+def cmd_pick(a: argparse.Namespace) -> None:
+    from . import pick
+    if a.pull or not os.path.exists(os.path.join(hosts.HOME, "recipes", "registry", "index.json")):
+        from . import registry
+        registry.pull(a.url or registry.DEFAULT_URL)
+    what_if = (a.gpu, a.vram_gb, a.ram_gb, a.ram_bw) if a.gpu else None
+    if not what_if and not a.host:
+        names = [f[:-5] for f in os.listdir(os.path.join(hosts.HOME, "hosts")) if f.endswith(".json")] if os.path.isdir(os.path.join(hosts.HOME, "hosts")) else []
+        if len(names) != 1:
+            raise SystemExit("which machine? --host <name> (llmbox host list), or describe one: --gpu 'RTX 4090' --ram-gb 64 --ram-bw 60")
+        a.host = names[0]
+    raise SystemExit(pick.run(a.host, a.use, what_if))
+
+
 def cmd_submit(a: argparse.Namespace) -> None:
     from . import submit
     raise SystemExit(submit.run(a.results, a.host, a.server or submit.DEFAULT_SERVER, a.dry_run))
@@ -646,7 +660,7 @@ def cmd_site(a) -> None:
 
 # `llmbox --help` lists the commands by what you want to do, most used first
 COMMAND_GROUPS = [
-    ("Pick and run a model on your box", ["host", "scout", "fit", "recipe", "install", "tune", "optimize"]),
+    ("Pick and run a model on your box", ["host", "pick", "scout", "fit", "recipe", "install", "tune", "optimize"]),
     ("Measure it", ["bench", "queue", "speed", "probe", "loops", "traces"]),
     ("Share and compare", ["submit", "serve"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
@@ -821,6 +835,17 @@ def main(argv: list[str] | None = None) -> None:
     rg.add_argument("--reader", nargs="?", const="http://gpu-box:8080", default=None,
                     help="also grade the explanations again with the reader model at this endpoint (default: the box)")
     rg.set_defaults(fn=cmd_regrade)
+
+    pk = command("pick", "what to run on this machine: every measured model fitted to it, ranked by score, the fastest of the best")
+    pk.add_argument("--host", help="registered machine (default: the only one)")
+    pk.add_argument("--use", choices=["all", "coding", "agents", "ask", "docs"], default="all", help="rank by the score for this use")
+    pk.add_argument("--gpu", help="what-if: a graphics card by name instead of a registered host (e.g. 'RTX 4090')")
+    pk.add_argument("--vram-gb", type=float, help="what-if: its memory if the name is not known")
+    pk.add_argument("--ram-gb", type=float, default=64.0, help="what-if: system RAM")
+    pk.add_argument("--ram-bw", type=float, default=60.0, help="what-if: RAM read speed GB/s (DDR4 ~40, DDR5 ~60-80)")
+    pk.add_argument("--pull", action="store_true", help="fetch the site's recipes first (done once automatically)")
+    pk.add_argument("--url", help="the site to pull from")
+    pk.set_defaults(fn=cmd_pick)
 
     sb = command("submit", "send your speed measurements to the shared results (anonymous; --dry-run shows exactly what is sent)")
     sb.add_argument("results", nargs="*", help="result files (default: every speed / optimize record not sent yet)")

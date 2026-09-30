@@ -79,8 +79,13 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
             w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data, cs.get(rid)))
     w("compare.html", compare_app(compare_data(rs, clouds, ranks, local, look, data, rel)))
     from .. import registry
-    from .words import model_name, variant
-    written += registry.export(host, order, out_dir, {r["id"]: f'{model_name(r)} {variant(r["id"], r.get("file"))}' for r in rs})   # recipes/: what `llmbox recipe pull` installs
+    from .words import GROUPS, _wavg, model_name, variant
+    def _meta(r):   # what llmbox pick shows: % of Opus with its 95% range, and per use
+        k = (r.get("vs_ref") or 0) / r["capability"] if r.get("capability") else 0
+        return {"name": f'{model_name(r)} {variant(r["id"], r.get("file"))}', "score": r.get("vs_ref"),
+                "range": [round(r["ci"][0] * k, 1), round(r["ci"][1] * k, 1)] if r.get("ci") and k else None,
+                "uses": {n: round(v, 1) for n, bs in GROUPS if (v := _wavg(r.get("blocks_vs_ref"), bs)) is not None}}
+    written += registry.export(host, order, out_dir, {r["id"]: _meta(r) for r in rs})   # recipes/: what `llmbox recipe pull` installs
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
     w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
     try:
