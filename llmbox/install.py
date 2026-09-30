@@ -44,6 +44,15 @@ def _remote_size(h, path: str) -> int:
         return -1
 
 
+def server_for(prof: dict, engine: str) -> str | None:
+    """The newest llama-server of this engine among the binaries `host add` found (ik_llama.cpp by its folder name)."""
+    import re
+    ik = engine == "ik_llama.cpp"
+    rts = [x for x in prof["hw"].get("runtimes") or [] if x.get("path") and ("ik_llama" in x["path"]) == ik]
+    build = lambda x: int((re.search(r"build (\d+)", x.get("version") or "") or [0, 0])[1])
+    return max(rts, key=build)["path"] if rts else None
+
+
 def plan(rid: str, src: str, target: str, force: bool = False, unload: bool = False) -> tuple[dict, list[Step], object]:
     """The fitted recipe and the steps with their current state on the host (read-only probes)."""
     from . import hf
@@ -58,8 +67,14 @@ def plan(rid: str, src: str, target: str, force: bool = False, unload: bool = Fa
     if not f.fits:
         steps.append(Step("fit", "blocked", f"does not fit: {f.reason}; " + "; ".join(f.alternatives)))
         return r, steps, h
-    fitted = r if same else F.apply(r, f, models_dir=prof["hw"].get("models_dir_guess"))
-    steps.append(Step("fit", "done", f"context {f.ctx // 1024}k, ~{f.tps:.0f} tok/s predicted ({f.calibration.source})"))
+    server = None if same else server_for(prof, r["runtime"].get("engine") or "llama.cpp")
+    if not same and not server:
+        steps.append(Step("fit", "blocked", f"no {r['runtime'].get('engine') or 'llama.cpp'} build found on {target} "
+                          f"(`llmbox host add {target}` lists the llama-server binaries it finds); build it, then re-run"))
+        return r, steps, h
+    fitted = r if same else F.apply(r, f, models_dir=prof["hw"].get("models_dir_guess"), server=server)
+    steps.append(Step("fit", "done", f"context {f.ctx // 1024}k, ~{f.tps:.0f} tok/s predicted ({f.calibration.source})"
+                      + (f"; server {server}" if server else "")))
 
     busy = hosts.free_up(h) if unload else h.agent("busy", timeout=60)   # --unload: an idle loaded model may go
     idle = not busy.get("busy")

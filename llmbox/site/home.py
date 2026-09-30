@@ -201,7 +201,7 @@ _NEWS_LABEL = {"new_model": "NEW MODEL", "new_files": "NEW FILES", "repo_update"
 
 def _news_panel(ranked: set) -> str:
     """What's new out there (llmbox/watch.py, a daily look): new models, new files of measured ones, runtime releases."""
-    from ..import watch as W
+    from .. import watch as W
     evs = W.events(8)
     try:
         checked = json.load(open(W.STATE)).get("checked", "")

@@ -23,7 +23,7 @@ _DRY = {"--dry-multiplier", "--dry-base", "--dry-allowed-length", "--dry-penalty
 def portable_args(r: dict) -> tuple[list[str], list[str]]:
     """The recipe's llama-server flags as anyone can run them: the model by file name, without what only the reference
     box or llmbox's patched build needs. Returns (args, what was left out)."""
-    from ..import recipe as rc
+    from .. import recipe as rc
     a = rc.server_args(r)
     out, left = [], []
     i = 0
@@ -111,7 +111,7 @@ def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool |
     think = ", ".join(f"{k} = {json.dumps(v)}" for k, v in kw.items())
     max_tok = smp.get("max_tokens", 32768)
     try:
-        from ..import fit as _F
+        from .. import fit as _F
         moe = _F.shape_for(r).is_moe
     except Exception:
         moe = False

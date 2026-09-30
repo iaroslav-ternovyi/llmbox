@@ -21,7 +21,7 @@ from .words import _kind, BLOCKS, family, set_variants
 
 
 def build(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick") -> list[str]:
-    from ..import suite as _s
+    from .. import suite as _s
     suite_version = suite_version or _s.VERSION
     """The whole site: home, a page per recipe, per run, hardware per recipe, compare per pair of measured recipes."""
     out_dir = os.path.expanduser(out_dir)
@@ -52,7 +52,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     look = {r["id"]: (family((data["recipes"].get(r["id"]) or {}).get("arch"))[1], _kind(r.get("hf_repo"))) for r in rs}
     ref_hw = data["ref"]
     ref_box = f'{ref_hw["gpu"]} + {round(ref_hw["ram"] / 1024)} GB RAM'
-    from ..import bench
+    from .. import bench
     suite_files = [(pth, x) for pth, x in report.results.files(host) if x.get("kind") == "suite"]
     rel = {}
     for rid in order:
@@ -76,6 +76,9 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
         if rid in data["recipes"]:
             w(f"hardware-{rid}.html", hardware_page(rid, rec, data["recipes"][rid], data))
     w("compare.html", compare_app(compare_data(rs, clouds, ranks, local, look, data, rel)))
+    from .. import registry
+    from .words import model_name, variant
+    written += registry.export(host, order, out_dir, {r["id"]: f'{model_name(r)} {variant(r["id"], r.get("file"))}' for r in rs})   # recipes/: what `llmbox recipe pull` installs
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
     w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
     try:

@@ -95,7 +95,9 @@ class Calibration:
 
 def calibration(r: dict, shape: E.ModelShape, ref_host: str) -> Calibration:
     """Ratio measured / predicted on the box where this recipe was measured (newest result with a speed figure)."""
-    from . import hosts, report, results
+    from . import hosts, registry, report, results
+    if ref_host == registry.REGISTRY or r.get("reference"):   # a published recipe: its reference measurement travels with it
+        return registry.calibration(r, shape)
     recs = [x for x in results.load_all(ref_host) if (x.get("recipe") or {}).get("id") == r["id"]
             and ((x.get("summary") or {}).get("speed") or {}).get("decode_tps")]
     if not recs:
@@ -149,6 +151,8 @@ def fit(r: dict, shape: E.ModelShape, hw: E.HostSpec, cores: int | None = None, 
     want = r["placement"]["ctx"] or shape.context_length or 32768
     top = min(ctx or want, shape.context_length or ctx or want)
     threads = cores or (r["runtime"]["threads"] if same_host else 0)   # the recipe's thread count is its own box's
+    if cores and cores >= 6 and shape.is_moe and not same_host:
+        threads = cores - 1   # experts on the CPU: leave the thread that drives the card a core (8-core box, K2 2026-09-30: 8 threads -10%, 7 = 4 on decode, faster prompts)
     base = dict(want_ctx=want, threads=threads, cpu_affinity=r["runtime"]["cpu_affinity"] if same_host else "",
                 calibration=cal, deep_k=cal.deep_k)
     chosen = None

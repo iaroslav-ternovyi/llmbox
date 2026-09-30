@@ -68,7 +68,7 @@ def cmd_fit(a: argparse.Namespace) -> None:
     import re as _re
     from . import estimate as E, fit as F, recipe as rc
     r = rc.load(a.src, a.recipe)
-    src_prof = hosts.load(a.src) if os.path.exists(hosts.path(a.src)) else None
+    src_prof = hosts.load(a.src) if os.path.exists(hosts.path(a.src)) else None   # none for the registry: its [reference] calibrates
     prof, cores = None, None
     if a.gpu:
         vram = int(a.vram_gb * 1024) if a.vram_gb else hosts.gpu_vram(a.gpu)
@@ -84,7 +84,7 @@ def cmd_fit(a: argparse.Namespace) -> None:
         cores = a.cores or cpu.get("cores") or cpu.get("threads")
     same = prof is not None and prof["name"] == a.src
     shape = F.shape_for(r, host=hosts.host_of(src_prof) if src_prof else None)
-    cal = F.calibration(r, shape, a.src) if src_prof else F.Calibration()
+    cal = F.calibration(r, shape, a.src) if src_prof or r.get("reference") else F.Calibration()
     f = F.fit(r, shape, hw, cores=cores, cal=cal, ctx=_ctx_arg(a.ctx), same_host=same)
     if a.json:
         json.dump({"recipe": a.recipe, "target": target, "fits": f.fits, "ctx": f.ctx, "want_ctx": f.want_ctx, "ubatch": f.ubatch,
@@ -549,6 +549,11 @@ def cmd_recipe(a) -> None:
             open(out, "w").write(text)
             print(f"wrote {out}")
         return
+    if a.action == "pull":
+        from . import registry
+        got = registry.pull(a.url or registry.DEFAULT_URL, only=a.ids or None)
+        print(f"install one: llmbox install {got[0] if got else '<id>'} --from registry --host <your host>")
+        return
     if a.action == "list":
         for rid in rc.ids(a.host):
             r = rc.load(a.host, rid)
@@ -794,13 +799,14 @@ def main(argv: list[str] | None = None) -> None:
                     help="also grade the explanations again with the reader model at this endpoint (default: the box)")
     rg.set_defaults(fn=cmd_regrade)
 
-    rc_ = command("recipe", "recipes: list / show / render a launcher / check the host runs what the recipe says")
-    rc_.add_argument("action", choices=["list", "show", "render", "check", "new"])
+    rc_ = command("recipe", "recipes: list / show / render a launcher / check the host runs what the recipe says / pull the site's")
+    rc_.add_argument("action", choices=["list", "show", "render", "check", "new", "pull"])
     rc_.add_argument("ids", nargs="*", help="recipe ids; for `new`: the Hugging Face repo")
     rc_.add_argument("--host", default="box")
     rc_.add_argument("--file", help="new: use this GGUF file (substring) instead of picking one")
     rc_.add_argument("--id", dest="rid", help="new: recipe id (default: from the repo name)")
     rc_.add_argument("--write", action="store_true", help="new: save the draft under the host's recipes")
+    rc_.add_argument("--url", help="pull: the site to take the published recipes from (default $LLMBOX_SITE or the local site)")
     rc_.set_defaults(fn=cmd_recipe)
 
     tr = command("traces", "budget / loop audit of a run's saved thinking (~/.llmbox/traces/<run>)")

@@ -39,7 +39,7 @@ TIPS = {
 
 def share(b: str) -> float:
     """A block's share of the site's total: the current suite weights over the blocks the ranked suite has."""
-    from ..import suite
+    from .. import suite
     return suite.WEIGHTS[b] / sum(suite.WEIGHTS[x] for x in BLOCKS)
 
 
@@ -129,7 +129,7 @@ def _kind(repo: str | None) -> str:
     if not repo:
         return "release"
     try:
-        from ..import candidates as C
+        from .. import candidates as C
         return C.lineage(repo).get("kind") or "release"
     except Exception:
         return "release"
@@ -178,7 +178,7 @@ PRESETS = [("All work", {b: round(share(b) * 100) for b in BLOCKS})] + [(n, {b: 
 
 def _wavg(blocks: dict | None, bs: list[str]) -> float | None:
     """The weighted mean of these blocks (the suite weights) over the ones present."""
-    from ..import suite
+    from .. import suite
     xs = [(blocks[b], suite.WEIGHTS[b]) for b in bs if blocks and blocks.get(b) is not None]
     return sum(v * w for v, w in xs) / sum(w for _, w in xs) if xs else None
 
@@ -220,7 +220,7 @@ def task_name(item_id: str) -> str:
 
 def _lineage(repo: str | None) -> dict:
     try:
-        from ..import candidates as C
+        from .. import candidates as C
         return C.lineage(repo) if repo else {}
     except Exception:
         return {}

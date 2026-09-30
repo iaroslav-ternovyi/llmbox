@@ -15,15 +15,15 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
     when the 4-bit file does not fit), its predicted speed, and its score - measured here when it was, otherwise the
     range expected from public benchmarks. Measured models are listed with their result, not hidden."""
     import datetime as _dt
-    from ..import watch as W
+    from .. import watch as W
     first_seen = W.first_seen()
     week_ago = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
-    from ..import candidates as C, estimate as E, fit as F, recipe as rc
+    from .. import candidates as C, estimate as E, fit as F, recipe as rc
     cs = C.load()
     if not cs:
         return None
     cutoff = (_dt.date.today() - _dt.timedelta(days=C.RECENT_DAYS)).isoformat()
-    from ..import eci
+    from .. import eci
     table = eci.load()
     ref_cap = next((r["capability"] / (r["vs_ref"] / 100) for r in rs if r.get("vs_ref")), None)
     by_base: dict = {}

@@ -31,7 +31,7 @@ def _optimize_table(opts: dict, ranked: set | None = None) -> str:
 def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None = None, ref_row: dict | None = None,
                 rs: list[dict] | None = None, look: dict | None = None) -> str:
     """How the numbers are made. The figures (weights, task counts, versions, depths) come from the code."""
-    from ..import suite
+    from .. import suite
     per = {}
     for b, _k, lvl in suite.QUICK_ITEMS:
         per.setdefault(b, []).append(lvl)
