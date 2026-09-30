@@ -4,7 +4,7 @@ from __future__ import annotations
 from .components import _fp_html, _marker
 from .layout import _page
 from .stats import _axis_of, _range_pct, surely_better
-from .words import _GRADING, _name_of, esc, GROUPS, model_name, NOT_MEASURED, share, TIPS
+from .words import _GRADING, _name_of, esc, GROUPS, INSTALL, model_name, NOT_MEASURED, share, TIPS
 
 
 def _optimize_table(opts: dict, ranked: set | None = None) -> str:
@@ -56,7 +56,8 @@ def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None =
         example = (f"<div class='exs'><div><div class='sc'>Not measurably apart</div>{line(a)}{line(b)}</div>"
                    + (f"<div><div class='sc'>Measurably apart</div>{line(a)}{line(c)}</div>" if c else "") + "</div>")
     toc = [("short", "In 30 seconds"), ("score", "The score"), ("tasks", "The tasks"), ("not", "What is not measured"), ("sure", "How sure the numbers are"),
-           ("speed", "Speed"), ("settings", "What the settings do"), ("differ", "Why other rankings differ"), ("records", "What a run records"), ("versions", "Versions")]
+           ("speed", "Speed"), ("settings", "What the settings do"), ("people", "Your computer"), ("trust", "How people's results are checked"),
+           ("differ", "Why other rankings differ"), ("records", "What a run records"), ("versions", "Versions")]
     body = f'''
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / how scores work</div><h1>How the numbers are made</h1>
  <p class="q" style="margin-top:6px">Suite v{esc(suite.VERSION)} · content hash {esc(suite.content_hash())}</p></div></section>
@@ -66,7 +67,8 @@ def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None =
 <li><b>Real work, graded by programs.</b> {n} tasks from coding, tool use, questions about your own machine, documents and writing; hidden tests and checkers grade them, no model grades another.</li>
 <li><b>Fresh tasks every run.</b> Tasks are generated from a seed, so a model cannot have seen the answers.</li>
 <li><b>% of Claude Opus 5.5.</b> The score is the share of what a frontier model gets on the same tasks, with a 95% range; overlapping ranges mean "not measurably apart yet".</li>
-<li><b>Speed on a real PC.</b> Timed on the reference PC with the settings shown on each model page, and predicted for yours from the model file and your memory speeds.</li></ul></section>
+<li><b>Speed on a real PC.</b> Timed on the reference PC with the settings shown on each model page, and predicted for yours from the model file and your memory speeds.</li>
+<li><b>Measured by people too.</b> Anyone can run the same test on their own computer; the server grades every answer again, and the site shows the speeds by kind of hardware.</li></ul></section>
 
 <h2 id="score">The score</h2>
 <p>Every model gets the same {n} tasks. A program grades each one from 0 to 100; no model grades another. The blocks are
@@ -115,6 +117,33 @@ against the same prediction on its own box. When most of a model moves onto a bi
 and the page says <i>rough</i>.</p>
 
 {_optimize_table(opts or {}, ranked)}
+
+<h2 id="people">Your computer</h2>
+<p>The site's settings for a model install on any machine with llama.cpp and an NVIDIA card (Macs and AMD are coming): llmbox fits them
+to your card and memory, then one command measures the model and sends the result.</p>
+<pre class="cmd">{esc(INSTALL)}
+llmbox host add me                                   # your card, CPU, RAM and its measured speed
+llmbox pick                                          # what fits here, how good, how fast; the pick
+llmbox install &lt;model&gt; --from registry --host me --apply
+llmbox test &lt;model&gt; --host me                        # speed, the 40-minute quality test, the upload</pre>
+<p>Speeds are grouped by kind of hardware: the same graphics card (chip and memory) and system RAM of about the same speed, since a
+mixture-of-experts model reads part of itself from RAM. A group shows the median machine, each machine counted once, and the spread once
+five machines are in it. <code>llmbox run &lt;model&gt;</code> serves the model for everyday use without anything else installed.</p>
+
+<h2 id="trust">How people's results are checked</h2>
+<p>Nothing a computer sends is taken at its word.</p>
+<ul>
+<li><b>The answers are graded again by the server</b>, with the same graders, inside a sandbox (no network, nothing of the server
+visible): the answers are code that runs. The server's grade replaces the one sent. A run with more than a fifth of its answers graded
+differently is rejected.</li>
+<li><b>The tasks come from a seed the server hands out</b> for each test, so they cannot be prepared in advance.</li>
+<li><b>The same model file with the same settings must score the same</b> on any machine. A run whose range does not meet the model's
+range (answers from a stronger model, or a broken setup) is kept aside, out of the score. Verified answers that agree join the model's
+score, and every run narrows its range for everyone.</li>
+<li><b>Speed cannot be checked</b>, so it is shown as the median of a group, and a figure more than twice the prediction is left out until
+a second machine confirms it.</li>
+<li><b>Nothing names you or the machine</b>: paths lose the home folder, user and host names are removed, and a random id per install
+counts machines. <code>llmbox submit --dry-run</code> prints exactly what would be sent.</li></ul>
 
 <h2 id="differ">Why other rankings differ</h2>
 <p>Public leaderboards mostly run full-precision models on public question sets. Here the same model is the 4-bit (or smaller) file people

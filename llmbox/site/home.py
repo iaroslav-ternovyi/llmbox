@@ -166,7 +166,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     body = f"""
 <h1 class="q1">What should I run on my box?</h1>
 <p class="lede">AI models you can run on your own computer, graded on real work (coding, tools, documents, writing) and timed on a real PC.
-Pick your graphics card or Mac: the table shows what fits, how fast it answers and how close it gets to Claude. Every model page has the file to download and settings to copy.</p>
+Pick your graphics card or Mac: the table shows what fits, how fast it answers and how close it gets to Claude. Every model page has the file to download and settings to copy. <a href="method.html#people">Measure your own computer →</a></p>
 {NEWBIE}
 <section class="boxbar" id="box"><span class="sc">Your box</span>
  <select id="gpu" aria-label="GPU or Mac"><option value="">the reference PC ({esc(ref_box)})</option></select>
