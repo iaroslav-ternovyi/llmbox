@@ -60,6 +60,7 @@ def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, de
         _save_trace(trace_dir, it.id, thinking, res)
     return {"id": it.id, "block": it.block, "kind": it.kind, "lang": it.lang, "score": round(score, 4), "error": err,
             **({"pending": it.meta["deferred"]} if it.meta.get("deferred") and not err else {}),
+            **({"recovered": res["recovered"]} if res.get("recovered") else {}),   # answers taken from the reasoning field (client.recover_answer)
             "seconds": res["seconds"], "steps": res.get("steps"), "finish_reason": res.get("finish_reason"),
             "usage": res.get("usage"), "timings": res.get("timings"), "final": res.get("final") or "",
             "final_tail": (res.get("final") or "")[-300:], "reasoning_tail": _reasoning_tail(res), "expected": it.meta.get("expected"),

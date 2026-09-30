@@ -24,6 +24,22 @@ def _post(url: str, body: dict, api_key: str | None, timeout: int) -> dict:
         raise ChatError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:400]}") from None
 
 
+# end-of-thinking tags a server's reasoning parser can miss when the model writes them as plain text: the answer then
+# stays inside reasoning_content and content comes back empty (K2-Horizon at reasoning_effort medium on ik_llama.cpp
+# closes with </ifm|think_fast>; 3 of 9 answers on 2026-09-30)
+END_TAGS = ("</ifm|think_faster>", "</ifm|think_fast>", "</ifm|think>", "</think>")
+
+
+def recover_answer(content: str | None, reasoning: str | None) -> tuple[str, str, bool]:
+    """(content, reasoning, recovered): when content is empty and the reasoning holds the model's own end-of-thinking
+    tag, the text after the last such tag is the answer."""
+    if (content or "").strip() or not reasoning:
+        return content or "", reasoning or "", False
+    i, tag = max((reasoning.rfind(t), t) for t in END_TAGS)
+    ans = reasoning[i + len(tag):].strip() if i >= 0 else ""
+    return (ans, reasoning[:i], True) if ans else (content or "", reasoning, False)
+
+
 def run_chat(base_url: str, model: str, messages: list[dict], tools: list[dict] | None = None, tool_impl=None,
              max_tokens: int = 8192, max_steps: int = 16, api_key: str | None = None, timeout: int = 1800,
              extra: dict | None = None, deadline_s: float | None = None, followups: list[str] | None = None) -> dict:
@@ -34,7 +50,7 @@ def run_chat(base_url: str, model: str, messages: list[dict], tools: list[dict] 
     pending = list(followups or [])   # later user turns of a multi-turn session, sent after each final answer
     calls, timings, usage = [], [], {"prompt_tokens": 0, "completion_tokens": 0}
     t0 = time.time()
-    final, finish = "", None
+    final, finish, recovered = "", None, 0
     for _step in range(max_steps):
         if deadline_s and time.time() - t0 > deadline_s:
             finish = "deadline"
@@ -68,9 +84,12 @@ def run_chat(base_url: str, model: str, messages: list[dict], tools: list[dict] 
                                                      "draft_n", "draft_n_accepted")},
                             "ctx": u.get("prompt_tokens")})   # context depth of this request (whole prompt, cached or not)
         tcs = msg.get("tool_calls") or []
-        assistant = {"role": "assistant", "content": msg.get("content") or ""}
-        if msg.get("reasoning_content"):
-            assistant["reasoning_content"] = msg["reasoning_content"]
+        content, reasoning, rec = recover_answer(msg.get("content"), msg.get("reasoning_content"))
+        recovered += rec
+        msg = dict(msg, content=content, reasoning_content=reasoning)
+        assistant = {"role": "assistant", "content": content}
+        if reasoning:
+            assistant["reasoning_content"] = reasoning
         if tcs:
             assistant["tool_calls"] = tcs
         msgs.append(assistant)
@@ -93,4 +112,5 @@ def run_chat(base_url: str, model: str, messages: list[dict], tools: list[dict] 
             calls.append({"name": fn.get("name"), "args": args, "result": result})
             msgs.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": json.dumps(result, ensure_ascii=False)})
     return {"final": final, "finish_reason": finish, "messages": msgs, "tool_calls": calls, "timings": timings,
-            "usage": usage, "seconds": round(time.time() - t0, 2), "steps": len([m for m in msgs if m["role"] == "assistant"])}
+            "usage": usage, "seconds": round(time.time() - t0, 2), "steps": len([m for m in msgs if m["role"] == "assistant"]),
+            "recovered": recovered}
