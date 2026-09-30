@@ -63,6 +63,9 @@ assert len(filed) == 2, [r.get("id") for r in filed]
 assert all(r["submission"]["client"] != b["client"] for r in filed)   # the install id is hashed
 assert filed[0]["host"]["class"].startswith("rtx-5070-12g|"), filed[0]["host"]["class"]
 
+import gzip  # noqa: E402
+bomb = gzip.compress(b"[" + b"0," * (110 * 2**20) + b"0]")   # ~0.3 MB that unpacks to 220 MB
+assert intake.receive(bomb, "9.9.9.9")[0] == 413, "a gzip bomb was unpacked"
 server.PER_HOUR = 2
 try:
     submit.send(b, url)

@@ -30,12 +30,14 @@ import sqlite3
 import threading
 import time
 import uuid
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import hwclass, results
 from .hosts import HOME
 
 MAX_BODY = 20 * 2**20
+MAX_UNPACKED = 200 * 2**20    # a gzip body may not unpack to more (a small bomb would otherwise fill the memory)
 PER_HOUR = 30                 # submissions per install id and per address
 COMMUNITY = "community"
 DB_SCHEMA = """CREATE TABLE IF NOT EXISTS submissions (
@@ -66,8 +68,13 @@ class Intake:
 
     def receive(self, raw: bytes, addr: str) -> tuple[int, dict]:
         try:
-            b = json.loads(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
-        except (OSError, ValueError, EOFError):
+            if raw[:2] == b"\x1f\x8b":
+                d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                raw = d.decompress(raw, MAX_UNPACKED)
+                if d.unconsumed_tail:
+                    return 413, {"error": f"the bundle unpacks to more than {MAX_UNPACKED // 2**20} MB"}
+            b = json.loads(raw)
+        except (OSError, ValueError, EOFError, zlib.error):
             return 400, {"error": "not a gzip JSON bundle"}
         if not isinstance(b, dict) or b.get("schema") != "llmbox.submission/1" or not isinstance(b.get("records"), list):
             return 400, {"error": "unknown bundle schema (update llmbox)"}
@@ -272,7 +279,8 @@ def handler(intake: Intake):
                 return self._json(404, {"error": "not found"})
             if not 0 < n <= MAX_BODY:
                 return self._json(413, {"error": f"body must be 1 byte to {MAX_BODY // 2**20} MB"})
-            addr = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or self.client_address[0]
+            # behind Caddy: the last X-Forwarded-For entry is the one Caddy added (a client can send its own first ones)
+            addr = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip() or self.client_address[0]
             code, obj = intake.receive(self.rfile.read(n), addr)
             self._json(code, obj)
 
