@@ -118,7 +118,12 @@ function render() {
     row.querySelector(".sco").innerHTML = scoreCell(p, ax);
     row.classList.remove("nofit");
     if (p.cloud) continue;   // no box to predict for
-    if (sh && hwNow && !sameClass(hwNow)) {
+    const mm = hwNow && !sameClass(hwNow) && measuredFor(p.id, hwNow);
+    if (mm) {   // people measured this model on machines of this class: their median, not a prediction
+      p.t2 = mm[0]; p.td = mm[1]; p.pred = false;
+      row.querySelector(".spd").innerHTML = `<b>${fmt(mm[0])}</b><small>${mm[1] ? fmt(mm[1]) + " long · " : ""}${mm[2]} machine${mm[2] > 1 ? "s" : ""}</small>`;
+      row.querySelector(".fit").innerHTML = sh ? `✓ ${kfmt(forBox(sh, hwNow).ctx)}` : "✓";
+    } else if (sh && hwNow && !sameClass(hwNow)) {
       const f = forBox(sh, hwNow); p.t2 = f.t2; p.td = f.td; p.pred = true;
       row.querySelector(".spd").innerHTML = f.fits ? `<b class="pred">~${fmt(f.t2)}</b><small>~${fmt(f.td)} long</small>` : "—";
       row.querySelector(".fit").innerHTML = f.fits ? `✓ ${kfmt(f.ctx)}` : `<span class="no">✗ too big</span>`;

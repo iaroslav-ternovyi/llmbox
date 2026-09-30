@@ -32,3 +32,15 @@ function savedBox(DATA) {
     const g = DATA.gpus.find(x => x[0] === s.gpu); if (!g) return null;
     return boxFrom(g, parseInt(s.ram), parseFloat(s.bwn) || parseFloat(s.bw)); } catch (e) { return null; }
 }
+function classOf(hw) {   // the hardware class of a picked box, as llmbox/hwclass.py keys people's measurements (not Macs yet)
+  const g = DATA.gpuClass && DATA.gpuClass[hw.name];
+  if (!g || hw.mac) return null;
+  const e = DATA.ramEdges; let lo = 0, b = null;
+  for (const x of e) { if (hw.rambw < x) { b = lo ? `ram-${lo}-${x}` : `ram-under-${x}`; break; } lo = x; }
+  return `${g}|${b || `ram-${lo}-plus`}|cuda`;
+}
+function measuredFor(rid, hw) {   // [t2, deep, machines, people] people measured on this box's class, or null
+  const k = hw && classOf(hw), c = k && DATA.cm && DATA.cm[rid];
+  return c && c[k] ? c[k] : null;
+}
+

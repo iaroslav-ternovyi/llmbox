@@ -242,6 +242,16 @@ def _runs_panel(runs: list[dict], ref: dict | None, counted: dict) -> str:
             'Answers to tasks that changed since a run are left out.</p></section>')
 
 
+def _people_line(cls: list | None) -> str:
+    """How many people's machines measured the model (llmbox submit), besides the reference PC."""
+    others = [c for c in cls or [] if not c.get("ref")] + [dict(c, machines=c["machines"] - 1) for c in cls or [] if c.get("ref") and c["machines"] > 1]
+    n = sum(c["machines"] for c in others)
+    if not n:
+        return ""
+    kinds = len({c["class"] for c in others})
+    return f" People measured it on {n} more machine{'s' if n > 1 else ''} ({kinds} kind{'s' if kinds > 1 else ''} of hardware)."
+
+
 def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
     """A model: the verdict (score, speed and fit on your box, reliability), where it ranks, what it is good at, speed as
     the context grows, how to run it, the settings and why, the runs behind the numbers."""
@@ -298,7 +308,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
  {_groups_legend(ref=bool(ref))}<p class="q">Click a line to see the tasks it lost and why.</p></section>
 <section class="panel pad"><div class="lbl">Speed as the context grows</div>
  <p class="yb" id="yourbox" hidden></p>{_depth_bars([(rid, sp.get("by_depth") or {})])}
- <p class="q" style="margin-top:16px">Measured on the reference PC ({esc(ref_box)}). <a href="hardware-{esc(rid)}.html">Speed on {len(GPUS)} other graphics cards and Macs →</a></p></section>
+ <p class="q" style="margin-top:16px">Measured on the reference PC ({esc(ref_box)}).{_people_line(ctx.get("community"))} <a href="hardware-{esc(rid)}.html">Speed on {len(GPUS)} other graphics cards and Macs →</a></p></section>
 <div id="run"></div>{_run_panel(rid, rec, ctx["model_now"], ctx["on_hf"])}
 {_settings_panel(rcp, ctx["opt"])}
 {_runs_panel(ctx["runs"], ref, ctx["counted"])}'''

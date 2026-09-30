@@ -72,7 +72,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
         w(f"recipe-{rid}.html", recipe_page(rid, rec, ref, {
             "rs": rs, "clouds": clouds, "ranks": ranks, "med": med, "look": look, "shape": data["recipes"].get(rid), "ref_hw": ref_hw, "ref_box": ref_box,
             "pool_rows": pool, "flags": fl, "runs": runs, "counted": counted, "solved_h": sum(x["summary"].get("solved") or 0 for x in runs) / hours if hours else 0,
-            "opt": opts.get(rid), "model_now": now, "on_hf": avail, "cmp": _cmp_href(rid, rival) if rival else "#"}))
+            "opt": opts.get(rid), "model_now": now, "on_hf": avail, "cmp": _cmp_href(rid, rival) if rival else "#", "community": cs.get(rid)}))
         for x in runs:
             w(f"run-{x['id'][:8]}.html", run_page(rid, x, ref, fl[x.get("created")]))
         if rid in data["recipes"]:

@@ -57,15 +57,16 @@ RAM_KINDS = [("DDR4-3200", 40), ("DDR5-5600", 60), ("DDR5-6400", 75), ("DDR5-800
 def shape_data(local: list[dict], host: str = "box") -> dict:
     """Per recipe: the GGUF shape numbers estimate.plan() uses, plus the calibration measured / predicted on the
     reference box (llmbox.fit, the same numbers `llmbox fit` prints)."""
-    from .. import fit as F, hosts, recipe as rc
+    from .. import fit as F, hosts, hwclass, recipe as rc
     prof = hosts.load(host)
     ref_hw = hosts.spec(prof)
-    out = {}
+    out, files = {}, {}
     for r in local:
         try:
             rec = rc.load(host, r["id"])
         except (OSError, ValueError):
             continue
+        files[r["id"]] = os.path.basename(rec["model"].get("file") or rec["model"].get("path") or "")
         sh = F.shape_for(rec, host=hosts.host_of(prof))
         cal = F.calibration(rec, sh, host)
         kv, ctx = rec["placement"]["kv_type"], rec["placement"]["ctx"] or sh.context_length
@@ -77,7 +78,12 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
                         "active": sh.active_params}
     return {"recipes": out, "ref": {"gpu": prof["hw"]["gpus"][0]["name"].replace("NVIDIA GeForce ", "") if prof["hw"]["gpus"] else "",
                                     "vram": ref_hw.vram_mib, "ram": ref_hw.ram_mib, "rambw": ref_hw.ram_bw_gbs, "vrambw": ref_hw.vram_bw_gbs},
-            "gpus": GPUS, "ramKinds": RAM_KINDS}
+            "gpus": GPUS, "ramKinds": RAM_KINDS,
+            # speeds people measured, per recipe and hardware class: [t2, deep, machines, people] (community_speeds)
+            "cm": {rid: {c["class"]: [c["t2"], c["t80"] or c["t32"], c["machines"], c["people"]] for c in cls}
+                   for rid, cls in community_speeds(files, host).items()},
+            "gpuClass": {g[0]: hwclass.key(g[0], g[1]).split("|")[0] for g in GPUS if g[3:4] != ("mac",)},
+            "ramEdges": list(hwclass.RAM_EDGES)}
 
 
 def load_records(host: str, suite_version: str, tier: str) -> dict:
