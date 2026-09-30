@@ -26,6 +26,20 @@ On the machine that runs models (or anywhere, with `--ssh` to it):
 curl -fsSL https://llmbox.pages.dev/install.sh | sh    # installs llmbox, then the guided start (or: pip install git+https://github.com/iaroslav-ternovyi/llmbox, then llmbox)
 ```
 
+What it looks like (an RTX 5070 box with 64 GB of DDR5):
+
+```
+$ llmbox
+This computer: RTX 5070 12 GB · RAM 45–65 GB/s · 61 GB RAM
+
+Best for it: Cyber-Tiel-Coder-35B-A3B UD-Q4_K_XL
+  88% of Claude Opus on real work (95% range 83-91) · ~55 tokens/s, ~52 with 32k of context (measured on machines like this one) · up to 256k context
+  why: the best score among the models that fit
+  download: 22.7 GB into ~/models
+
+Install and start it? [Y/n/l]
+```
+
 The guided start (`llmbox`, no arguments) looks at this computer, gets llama.cpp built for its card if it is missing (the
 official release build, sha256-checked), shows the best model for it with the numbers and the reason, and after one yes
 downloads it, fits the settings, optionally times it against machines like it, and leaves it running with its address.

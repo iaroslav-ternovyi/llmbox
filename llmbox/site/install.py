@@ -22,6 +22,16 @@ def install_page() -> str:
  gets llama.cpp built for your graphics card if it is missing, shows the best model for it with the numbers and why,
  and after one yes downloads it, fits the settings, times it (3 minutes, optional) and leaves it running with the address
  to put in your app. Every question has a default; nothing is sent without its own yes.</p>
+<pre class="cmd">$ llmbox
+This computer: RTX 5070 12 GB · RAM 45–65 GB/s · 61 GB RAM
+
+Best for it: Cyber-Tiel-Coder-35B-A3B UD-Q4_K_XL
+  88% of Claude Opus on real work (95% range 83-91) · ~55 tokens/s, ~52 with 32k of context · up to 256k context
+  why: the best score among the models that fit
+  download: 22.7 GB into ~/models
+
+Install and start it? [Y/n/l]</pre>
+<p class="q">Afterwards:</p>
 <pre class="cmd">llmbox                 # the guided start
 llmbox doctor          # is this computer ready? each problem with its fix
 llmbox test &lt;model&gt;    # 3 min speed + 10 min quality, where you stand against machines like yours (--full: 40 min)
