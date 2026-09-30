@@ -63,3 +63,29 @@ def account_page(api: str) -> str:
  The server keeps your GitHub id and name, never a GitHub token.</p></section>'''
     return _page("llmbox · account", "", body, ("pages.css", "method.css"), ("account.js",), data={"api": api},
                  about="Sign in to llmbox with GitHub: your profile page, its visibility, and deleting your data.")
+
+
+def privacy_page() -> str:
+    body = '''
+<section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / privacy</div><h1>Privacy</h1>
+ <p class="q" style="margin-top:6px">What llmbox and this site keep, why, and how to have it deleted.</p></div></section>
+<section class="panel pad"><div class="lbl">This site</div><ul class="plain">
+ <li>No cookies, no analytics, no trackers. The box you pick and your sign-in are kept in your own browser (localStorage) only.</li>
+ <li>The graphics card preselected on the home page comes from what your browser reports; it is matched in the page and not sent anywhere.</li></ul></section>
+<section class="panel pad"><div class="lbl">The llmbox program</div><ul class="plain">
+ <li>It keeps everything in <code>~/.llmbox</code> on your computer and sends nothing unless you run <code>llmbox test</code> or
+ <code>llmbox submit</code> and answer yes. <code>llmbox submit --dry-run</code> prints exactly what would be sent.</li>
+ <li>What is sent: the hardware (graphics card, CPU, RAM and its speed, OS, driver), the model file and settings, the speed
+ figures and, for a quality test, the model's answers. Paths lose your home folder; user and host names are removed. A random
+ id per install counts machines.</li></ul></section>
+<section class="panel pad"><div class="lbl">Accounts</div><ul class="plain">
+ <li>Signing in with GitHub is optional. The server keeps your GitHub user id and name, a hash of each llmbox key it issued,
+ and what you sent. It never keeps a GitHub token.</li>
+ <li>Your profile page shows a handle, not your GitHub name, unless you choose to show it.</li>
+ <li>The address a request comes from is kept only as a one-way hash, for rate limits.</li></ul></section>
+<section class="panel pad"><div class="lbl">Deleting it</div><ul class="plain">
+ <li><code>llmbox forget</code>, or DELETE on the <a href="account.html">account page</a>, deletes the account and every result it sent,
+ at once. Anonymous results can be deleted on request with their submission id (<code>~/.llmbox/submitted.json</code>).</li>
+ <li>Questions and requests: <a href="https://github.com/iaroslav-ternovyi/llmbox/issues">github.com/iaroslav-ternovyi/llmbox/issues</a>.</li></ul></section>'''
+    return _page("llmbox · privacy", "", body, ("pages.css", "method.css"),
+                 about="What llmbox and its site keep, why, and how to have it deleted: no cookies or trackers, uploads only on a yes, accounts deletable at once.")

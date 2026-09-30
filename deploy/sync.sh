@@ -12,6 +12,10 @@ mkdir -p "$L/results/community"
 rsync -au "$VPS:.llmbox/results/community/" "$L/results/community/"
 rsync -au "$L/results/community/" "$VPS:.llmbox/results/community/"
 mkdir -p "$L/intake" && rsync -a "$VPS:.llmbox/intake/users.json" "$L/intake/users.json" 2>/dev/null || true   # names on profile pages
+# a consistent copy of the accounts database (sqlite's own backup, safe while the intake writes), kept here as the backup
+ssh "$VPS" 'python3 -c "import sqlite3,os; d=os.path.expanduser(\"~/.llmbox/intake\"); sqlite3.connect(d+\"/intake.db\").backup(sqlite3.connect(d+\"/backup.db\"))"' \
+  && mkdir -p "$L/intake-backup" && rsync -a "$VPS:.llmbox/intake/backup.db" "$L/intake-backup/intake-$(date +%Y%m%d).db" \
+  && find "$L/intake-backup" -name 'intake-*.db' -mtime +30 -delete
 # what the site is built from; the server never writes these (no --delete on results/: community lives there)
 ssh "$VPS" 'mkdir -p ~/.llmbox/results ~/.llmbox/recipes ~/.llmbox/hosts'
 for d in results/box results/cloud; do rsync -a --delete "$L/$d/" "$VPS:.llmbox/$d/"; done
