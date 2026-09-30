@@ -61,7 +61,8 @@ options.
 | `candidates.py`, `watch.py`, `eci.py` | New models on Hugging Face, daily watch, expected scores from public benchmarks |
 | `site/` | The static site. `words`: names and texts. `stats`: ties and places. `components`: shared pieces. `data`: records and pools. `layout`: the page frame. One module per page, plus `build`. Styles and scripts are in `site/assets/`. |
 
-Tests are plain scripts: `python3 tests/test_site.py`, `python3 tests/test_levels_stable.py` and the others in `tests/`.
+Tests: `python3 tests/run_all.py` runs all 17 in parallel (~1.5 min), `--quick` skips the two slow ones. Each is also a
+plain script (`python3 tests/test_site.py`).
 
 ## Docs
 
