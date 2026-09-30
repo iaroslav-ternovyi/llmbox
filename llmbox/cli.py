@@ -301,6 +301,28 @@ def cmd_loops(a: argparse.Namespace) -> None:
     print("summary:", json.dumps(loops.summarize(results)))
 
 
+def cmd_submit(a: argparse.Namespace) -> None:
+    from . import submit
+    raise SystemExit(submit.run(a.results, a.host, a.server or submit.DEFAULT_SERVER, a.dry_run))
+
+
+def cmd_serve(a: argparse.Namespace) -> None:
+    from . import server
+    if a.ingest_once:
+        ids = server.Intake(a.data).ingest()
+        print(f"{len(ids)} submission(s) checked")
+        if ids and a.rebuild:
+            _rebuild_site(a.rebuild)
+        return
+    server.serve(a.data, port=a.port, bind=a.bind, on_accept=(lambda ids: _rebuild_site(a.rebuild)) if a.rebuild else None)
+
+
+def _rebuild_site(out: str) -> None:
+    from . import site
+    site.build(out)
+    print(f"site rebuilt in {out}")
+
+
 def cmd_speed(a: argparse.Namespace) -> None:
     from . import speed
     rec = speed.measure(a.host, a.recipe, overrides=a.set, depths=a.depth, unload=a.unload)
@@ -626,6 +648,7 @@ def cmd_site(a) -> None:
 COMMAND_GROUPS = [
     ("Pick and run a model on your box", ["host", "scout", "fit", "recipe", "install", "tune", "optimize"]),
     ("Measure it", ["bench", "queue", "speed", "probe", "loops", "traces"]),
+    ("Share and compare", ["submit", "serve"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
     ("Develop the test", ["validate", "snapshot"]),
 ]
@@ -798,6 +821,21 @@ def main(argv: list[str] | None = None) -> None:
     rg.add_argument("--reader", nargs="?", const="http://gpu-box:8080", default=None,
                     help="also grade the explanations again with the reader model at this endpoint (default: the box)")
     rg.set_defaults(fn=cmd_regrade)
+
+    sb = command("submit", "send your speed measurements to the shared results (anonymous; --dry-run shows exactly what is sent)")
+    sb.add_argument("results", nargs="*", help="result files (default: every speed / optimize record not sent yet)")
+    sb.add_argument("--host", help="only this host's records")
+    sb.add_argument("--server", help="intake address (default $LLMBOX_SERVER or the local intake)")
+    sb.add_argument("--dry-run", action="store_true", help="print the bundle, send nothing")
+    sb.set_defaults(fn=cmd_submit)
+
+    sv = command("serve", "the intake for submitted measurements: HTTP API + checks; accepted records become the site's community results")
+    sv.add_argument("--data", default=os.path.join(hosts.HOME, "intake"), help="where bundles and the intake database live")
+    sv.add_argument("--port", type=int, default=8767)
+    sv.add_argument("--bind", default="127.0.0.1")
+    sv.add_argument("--rebuild", metavar="SITE_DIR", help="rebuild the site into SITE_DIR after accepting submissions")
+    sv.add_argument("--ingest-once", action="store_true", help="check waiting submissions once and exit")
+    sv.set_defaults(fn=cmd_serve)
 
     rc_ = command("recipe", "recipes: list / show / render a launcher / check the host runs what the recipe says / pull the site's")
     rc_.add_argument("action", choices=["list", "show", "render", "check", "new", "pull"])

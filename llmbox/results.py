@@ -42,6 +42,13 @@ def save(host: str, rec: dict) -> str:
     os.makedirs(d, exist_ok=True)
     name = f"{rec['created'][:19].replace(':', '')}-{rec['kind']}-{(rec.get('recipe') or {}).get('id', 'x')}.json"
     path = os.path.join(d, name)
+    if os.path.exists(path):   # another record of the same second and recipe (two people's submissions): keep both
+        try:
+            other = json.load(open(path)).get("id")
+        except ValueError:
+            other = None
+        if other != rec.get("id"):
+            path = path[:-5] + f"-{str(rec.get('id'))[:8]}.json"
     json.dump(rec, open(path, "w"), indent=1)
     try:   # into the results database right away (readers would take it in on their next look anyway)
         from . import db
