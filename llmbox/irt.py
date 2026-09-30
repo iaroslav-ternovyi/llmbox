@@ -102,7 +102,10 @@ def timed_out(row: dict) -> bool:
     """No answer within the task's time limit (30 minutes, agentic 15): the model's own failure, a 0 like a wrong answer.
     Decided 2026-09-30 (a model at high reasoning effort never finished a long document and could not be ranked). Other
     errors - a crashed or restarting server - say nothing about the model and stay out."""
-    return "timed out" in str(row.get("error") or "").lower()
+    e = str(row.get("error") or "").lower()
+    # a read that timed out on a live server; not a box that went down (bench.REBOOTED_SINCE rewrites those) and not a
+    # connection that never opened (urlopen error: the server was unreachable)
+    return "timed out" in e and "restarted" not in e and "urlopen error" not in e
 
 
 def real_zero(row: dict) -> bool:

@@ -13,6 +13,8 @@ assert t and t["score"] == 0.0 and t["error"] is None and t["zero"] == "time", t
 c = irt.counted(dict(row, error="request (95012 tokens) exceeds the available context size (65536 tokens)"))
 assert c and c["zero"] == "context", c
 assert irt.counted(dict(row, error="HTTP Error 502: Bad Gateway")) is None
+assert irt.counted(dict(row, error="the box restarted during the task (booted 2026-09-30 12:07 UTC)")) is None
+assert irt.counted(dict(row, error="<urlopen error timed out>")) is None   # the server was unreachable
 assert irt.counted(dict(row, error=None, pending=True)) is None
 ok = irt.counted(dict(row, error=None, score=0.8))
 assert ok and ok["score"] == 0.8 and "zero" not in ok

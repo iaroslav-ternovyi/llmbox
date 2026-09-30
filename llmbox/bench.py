@@ -32,6 +32,11 @@ TRACES = os.path.join(os.path.expanduser("~"), ".llmbox", "traces")
 BUDGET_MSG = "I have reasoned enough"
 
 
+# set by `llmbox bench` when it knows the host: (task start, epoch s) -> the host's boot time if it booted after that,
+# else None. A task that timed out because the box went down (2026-09-30: two hard resets mid-task) is not the model's 0.
+REBOOTED_SINCE = None
+
+
 def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, deadline_scale: float = 1.0,
              trace_dir: str | None = None) -> dict:
     """base_url is an OpenAI-compatible endpoint, or "claude-code[:effort]" for a frontier reference run through the
@@ -55,6 +60,9 @@ def run_item(base_url: str, model: str, it: Item, api_key: str | None = None, de
             raise   # the subscription ran out: stop the run (resume it with the same --jsonl after the reset), score nothing
         res, score, err = {"timings": [], "usage": {}, "seconds": round(time.time() - t0, 1), "finish_reason": None,
                            "steps": 0, "final": ""}, 0.0, str(e)[:300]
+        boot = REBOOTED_SINCE(t0) if REBOOTED_SINCE and "timed out" in err.lower() else None
+        if boot:   # the box restarted during the task: a failed measurement, left out of the score (irt.counted)
+            err = f"the box restarted during the task (booted {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(boot))})"
     thinking = _thinking(res)
     if trace_dir and thinking:
         _save_trace(trace_dir, it.id, thinking, res)

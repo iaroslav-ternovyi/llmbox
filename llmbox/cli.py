@@ -334,6 +334,8 @@ def cmd_bench(a: argparse.Namespace) -> None:
         st = (cap.get("start") or {})
         print(f"  settings captured: build {((st.get('props') or {}).get('build_info'))}, {len(st.get('argv') or [])} argv items, "
               f"telemetry {'on' if (cap.get('telemetry') or {}).get('pid') else 'off'}" + (f"  ({'; '.join(cap['errors'])})" if cap.get("errors") else ""), flush=True)
+    if cap is not None and cap.get("h") is not None:   # a timeout while the box rebooted is not the model's 0
+        bench.REBOOTED_SINCE = lambda t0, h=cap["h"]: (lambda b: b if b and b > t0 else None)(runinfo.boot_time(h))
     if a.adaptive:
         from . import irt, suite as _suite
         bank = irt.load(a.bank) if a.bank else irt.bank_for(_suite.content_hash())   # a released version shares its dev tasks' bank (irt.SAME_TASKS)

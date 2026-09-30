@@ -33,6 +33,15 @@ def _settings(h, served: str) -> dict:
     return st
 
 
+def boot_time(h) -> float | None:
+    """When the host last booted (epoch seconds), or None when it cannot be asked."""
+    try:
+        p = h.run("awk '/^btime/{print $2}' /proc/stat", timeout=30)
+        return float(p.stdout.strip()) if p.returncode == 0 and p.stdout.strip() else None
+    except Exception:
+        return None
+
+
 def begin(host_name: str, base_url: str, served: str, api_key: str | None = None) -> dict:
     ctx: dict = {"host_name": host_name, "served": served, "errors": []}
     try:
