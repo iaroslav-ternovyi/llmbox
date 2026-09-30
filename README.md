@@ -90,3 +90,7 @@ plain script (`python3 tests/test_site.py`).
 - [docs/usage-research.md](docs/usage-research.md): what predicts everyday usefulness (sources).
 - The site's own [method page](http://127.0.0.1:8766/method.html) explains the numbers for visitors. It is served
   locally by the `com.llmbox.site` launch agent.
+
+## License
+
+Apache-2.0 (LICENSE).

@@ -3,6 +3,10 @@ name = "llmbox"
 version = "0.1.0"
 description = "Get the most quality x speed out of local LLMs on your hardware: scout, tune, benchmark, compare."
 requires-python = ">=3.12"   # f-strings reuse their quote character (PEP 701)
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+readme = "README.md"
+keywords = ["llm", "llama.cpp", "benchmark", "local-llm", "gguf"]
 dependencies = []
 
 [project.scripts]
