@@ -128,6 +128,9 @@ temperature, power and memory every five seconds. The settings are compared with
 recipe's score; differences in sampling, template, KV cache or model file make it a different recipe that needs its own score.
 Replies are capped at 32k tokens with room kept for the answer after the thinking; a reply cut there, or thinking that repeats itself
 (detected from the text, not from its length), is flagged on the run page and still counts as it was graded.</p>
+<p>Every task has a time limit: 30 minutes, 15 for agentic coding. A model that has not answered by then scores 0 on that task, as it
+would for a wrong answer: someone waiting half an hour for a reply has not been helped. The same goes for a document that does not fit the
+model's context. Only failures that are not the model's (a crashed or restarting server) leave a task out.</p>
 
 <h2 id="versions">Versions</h2>
 <p>Scores compare only within one suite version. The content hash identifies the exact tasks and graders. Answers to tasks that did not

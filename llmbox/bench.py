@@ -497,8 +497,8 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
             out.flush()
         per_fam[fam] = per_fam.get(fam, 0) + 1
         counts[blk] = counts.get(blk, 0) + 1
-        if not row.get("error") and not row.get("pending") and fam not in prov:   # explain: scored by the reader after the loop
-            obs.append((fam, max(0.0, min(1.0, float(row["score"])))))
+        if (irt.real_zero(row) or not row.get("error")) and not row.get("pending") and fam not in prov:   # explain: scored by the reader after the loop
+            obs.append((fam, 0.0 if irt.real_zero(row) else max(0.0, min(1.0, float(row["score"])))))
         ratios = [r["seconds"] / bank.seconds[r["family"]] for r in rows if bank.seconds.get(r["family"]) and not r.get("error") and r["seconds"] > 0]
         slowness = statistics.median(ratios) if ratios else 1.0
         est = irt.block_estimate(bank, obs, prior)

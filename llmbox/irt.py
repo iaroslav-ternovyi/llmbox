@@ -68,7 +68,8 @@ def responses(content_hash: str | list | None = None, hosts_: tuple = ("box", "c
                 continue
             m = (r.get("recipe") or {}).get("id") or "?"
             for x in r.get("rows", []):
-                if x.get("pending") or x.get("error"):
+                x = counted(x)
+                if x is None:
                     continue
                 out.append(Resp(m, family_of(x["id"]), x["id"], max(0.0, min(1.0, float(x["score"]))), float(x["seconds"]),
                                 int(x.get("max_reply_tokens") or 0)))
@@ -95,6 +96,25 @@ def _regrade(fam: str, row: dict, cache: dict) -> float | None:
 def too_long(row: dict) -> bool:
     e = str(row.get("error") or "")
     return "exceeds the available context" in e or "context size" in e.lower() and "exceed" in e.lower()
+
+
+def timed_out(row: dict) -> bool:
+    """No answer within the task's time limit (30 minutes, agentic 15): the model's own failure, a 0 like a wrong answer.
+    Decided 2026-09-30 (a model at high reasoning effort never finished a long document and could not be ranked). Other
+    errors - a crashed or restarting server - say nothing about the model and stay out."""
+    return "timed out" in str(row.get("error") or "").lower()
+
+
+def real_zero(row: dict) -> bool:
+    """An error that is the model's result, scored 0: the task does not fit its context, or it ran out of time."""
+    return too_long(row) or timed_out(row)
+
+
+def counted(row: dict) -> dict | None:
+    """The row as it counts for a score: a real zero as 0, None for rows that do not count (pending, other errors)."""
+    if real_zero(row):
+        return dict(row, score=0.0, error=None, zero="time" if timed_out(row) else "context")
+    return None if row.get("pending") or row.get("error") else row
 
 
 def pool(hosts_: tuple = ("box", "cloud")) -> dict:
@@ -128,8 +148,8 @@ def pool(hosts_: tuple = ("box", "cloud")) -> dict:
         rows = out.setdefault((rid, h), {})
         for x in r.get("rows", []):
             fam = family_of(x["id"])
-            if too_long(x):   # the task does not fit the model's context: a real 0, not a failed measurement
-                x = dict(x, score=0.0, error=None)
+            if real_zero(x):   # it does not fit the model's context, or it ran out of time: a real 0, not a failed measurement
+                x = counted(x)
             if x.get("pending") or x.get("error") or not now.get(fam) or old[ch].get(fam) != now[fam]:
                 continue
             if ch != cur and fam.split(".")[0] in TEXT_GRADED and x.get("final") is not None:
@@ -458,9 +478,9 @@ def bank_for(content_hash: str | None) -> Bank | None:
 
 def score_rows(bank: Bank, rows: list[dict], prior: tuple | None = None) -> dict:
     """The IRT estimate from a run's graded rows (any tier): capability with its 95% interval and the block scores.
-    Rows of families the bank does not know, pending rows and errors are left out."""
-    obs = [(family_of(r["id"]), max(0.0, min(1.0, float(r["score"])))) for r in rows
-           if not r.get("pending") and not r.get("error") and family_of(r["id"]) in bank.a]
+    Rows of families the bank does not know, pending rows and errors that are not real zeros (counted) are left out."""
+    rows = [c for c in map(counted, rows) if c is not None]
+    obs = [(family_of(r["id"]), max(0.0, min(1.0, float(r["score"])))) for r in rows if family_of(r["id"]) in bank.a]
     est = block_estimate(bank, obs, prior)
     return {"capability": round(est["capability"], 1), "ci95": [round(est["lo"], 1), round(est["hi"], 1)],
             "blocks": {b: round(100 * v["score"], 1) for b, v in est["blocks"].items()}, "theta": round(est["theta"], 3),

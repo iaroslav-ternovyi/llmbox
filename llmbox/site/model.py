@@ -260,7 +260,8 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
     for x in sorted(pool, key=lambda x: x["score"]):
         if x["score"] < 0.99:
             f = fx(x)
-            why = "thinking looped" if f.get("loop") else "ran out of thinking room" if f.get("cut") else "wrong answer" if x["score"] < 0.01 else "partly right"
+            why = ("no answer within the time limit" if x.get("zero") == "time" else "does not fit its context" if x.get("zero") == "context"
+                   else "thinking looped" if f.get("loop") else "ran out of thinking room" if f.get("cut") else "wrong answer" if x["score"] < 0.01 else "partly right")
             lost.setdefault(x["block"], []).append(f"{esc(task_name(x['id']))} <span class='faint'>· {x['score'] * 100:.0f} · {why}</span>")
     pl, lo, hi, _ = ranks[rid]
     vs = row.get("vs_ref")
