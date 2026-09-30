@@ -33,7 +33,6 @@ SRC = os.path.join(HERE, "knowledge_src.txt")
 BANK = os.path.join(HERE, "knowledge_bank.json")
 PER_ITEM = 8
 IDK = 1 / 3
-HOST = "user@gpu-box"
 
 RULES = ("I'll act on your answers, so don't guess. If you are not sure, answer UNKNOWN. If the function, option, command, "
          "code or product asked about does not exist, answer NONEXISTENT.")
@@ -926,7 +925,10 @@ def _write(b: dict, path: str) -> None:
         f.write("\n]}\n")
 
 
-def build(host: str = HOST, out_path: str = BANK, log=print) -> dict:
+def build(host: str | None = None, out_path: str = BANK, log=print) -> dict:
+    if host is None:
+        from ..hosts import box_ssh
+        host = box_ssh()
     entries = parse_src()
     log(f"{len(entries)} source questions; running them ...")
     qs = _build_python([e for e in entries if e["src"] == "python"], host, log)

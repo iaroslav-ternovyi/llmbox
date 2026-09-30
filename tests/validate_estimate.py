@@ -1,4 +1,4 @@
-"""Prediction vs measurement on gpu-box: every new calibration must keep all models within ~15%.
+"""Prediction vs measurement on the reference box: every new calibration must keep all models within ~15%.
 
 Measured = llama-server decode tok/s at shallow depth, speculative decoding OFF, 1 slot, the context and KV type
 of the production launcher (agent-bench notes, 2026-09-24/25).
@@ -13,7 +13,8 @@ from llmbox import estimate as E  # noqa: E402
 from llmbox.gguf import GGUFHeader, Tensor  # noqa: E402
 from llmbox.host import Host  # noqa: E402
 
-M = "/home/user/models/"
+from llmbox.hosts import box_ssh, load  # noqa: E402
+M = os.environ.get("LLMBOX_MODELS_DIR") or load("box")["hw"]["models_dir_guess"].rstrip("/") + "/"
 CASES = [  # label, gguf path (first split part), ctx, kv type, ubatch, measured tok/s
     ("Tiel UD-Q4_K_XL", M + "tiel-coder/Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL.gguf", 262144, "f16", 2048, 59.0),
     ("Occamy Q4_K_M", M + "occamy/occamy-1.0-Q4_K_M-mtp-graft.gguf", 262144, "q8_0", 2048, 77.0),
@@ -39,7 +40,7 @@ def header(host: Host, path: str) -> GGUFHeader:
 
 
 def main() -> int:
-    host = Host("box", ssh="user@gpu-box")
+    host = Host("box", ssh=box_ssh())
     worst = 0.0
     for label, path, ctx, kvt, ub, meas in CASES:
         paths = [path] + ([path.replace("00001-of-00002", "00002-of-00002")] if "00001-of-" in path else [])

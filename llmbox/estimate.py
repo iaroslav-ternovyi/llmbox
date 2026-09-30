@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from .gguf import GGUFHeader
 
-# Measured on gpu-box (RTX 5070 + DDR5, llama.cpp b11161). Efficiency = achieved / nominal bandwidth during decode.
+# Measured on the reference box (RTX 5070 + DDR5, llama.cpp b11161). Efficiency = achieved / nominal bandwidth during decode.
 RAM_EFFICIENCY = 0.80
 VRAM_EFFICIENCY = 0.75
 OVERHEAD_MS_PER_LAYER = 0.025      # kernel launches / sync per transformer layer (fit on 6 models, 2026-09-25)

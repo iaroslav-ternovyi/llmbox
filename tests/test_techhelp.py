@@ -69,7 +69,7 @@ for j, it in enumerate(ucases):
 cases_ = cases_ + ucases
 script.append("rm -rf $D; echo chmod-binary $C")
 try:
-    out = subprocess.run(["ssh", "-o", "ConnectTimeout=10", "user@gpu-box", "bash -s"], input="\n".join(script),
+    out = subprocess.run(["ssh", "-o", "ConnectTimeout=10", __import__("llmbox.hosts", fromlist=["box_ssh"]).box_ssh(), "bash -s"], input="\n".join(script),
                          capture_output=True, text=True, timeout=120).stdout
     where = "GNU chmod on the Linux box"
 except Exception:

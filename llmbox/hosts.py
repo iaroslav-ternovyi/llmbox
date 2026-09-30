@@ -44,6 +44,34 @@ def gpu_bw(name: str) -> float | None:
     return float(v) if v else None
 
 
+def endpoint(name: str | None = None, agent: bool = False) -> str:
+    """Where a host serves its models (OpenAI-compatible; agent=True: the Anthropic-compatible agent proxy):
+    $LLMBOX_ENDPOINT / $LLMBOX_AGENT_ENDPOINT, else the profile's "endpoint" / "agent_endpoint", else llama-swap's port on
+    the host's ssh address (this machine: localhost). No name: the only registered host."""
+    env = os.environ.get("LLMBOX_AGENT_ENDPOINT" if agent else "LLMBOX_ENDPOINT")
+    if env:
+        return env
+    if not name:
+        d = os.path.join(HOME, "hosts")
+        names = sorted(f[:-5] for f in os.listdir(d) if f.endswith(".json")) if os.path.isdir(d) else []
+        name = names[0] if len(names) == 1 else None
+    prof = load(name) if name and os.path.exists(path(name)) else {}
+    if prof.get("agent_endpoint" if agent else "endpoint"):
+        return prof["agent_endpoint" if agent else "endpoint"]
+    port = 8081 if agent else int((((prof.get("hw") or {}).get("llama_swap") or {}).get("url") or "http://x:8080").rsplit(":", 1)[1])
+    addr = (prof.get("ssh") or "localhost").split("@")[-1]
+    return f"http://{addr}:{port}"
+
+
+def box_ssh(name: str = "box") -> str:
+    """The ssh address of the reference box, for the developer tools and tests that check tasks on real programs there:
+    $LLMBOX_BOX_SSH, else the registered host's."""
+    s = os.environ.get("LLMBOX_BOX_SSH") or (load(name).get("ssh") if os.path.exists(path(name)) else None)
+    if not s:
+        raise SystemExit(f"no ssh address for {name}: `llmbox host add {name} --ssh user@host` or set LLMBOX_BOX_SSH")
+    return s
+
+
 def path(name: str) -> str:
     return os.path.join(HOME, "hosts", f"{name}.json")
 

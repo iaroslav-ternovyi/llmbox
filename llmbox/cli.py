@@ -743,13 +743,13 @@ def main(argv: list[str] | None = None) -> None:
     op.add_argument("recipes", nargs="+")
     op.add_argument("--host", default="box")
     op.add_argument("--retune", action="store_true", help="tune again even if the recipe was tuned before")
-    op.add_argument("--endpoint", default="http://192.0.2.10:8080")
+    op.add_argument("--endpoint", help="the host's model server (default: from its profile, see hosts.endpoint)")
     op.set_defaults(fn=cmd_optimize)
     pp = command("probe", "re-measure only the 1-stream speed of a served recipe (e.g. after tune)")
     pp.add_argument("model", help="llama-swap id")
     pp.add_argument("--host", default="box")
     pp.add_argument("--recipe", help="recipe id (default: the model id)")
-    pp.add_argument("--endpoint", default="http://192.0.2.10:8080")
+    pp.add_argument("--endpoint", help="the host's model server (default: from its profile, see hosts.endpoint)")
     pp.set_defaults(fn=cmd_probe)
     ir = command("irt", "task-family calibration (IRT) for adaptive runs: calibrate / report / simulate")
     ir.add_argument("action", choices=["calibrate", "report", "simulate", "rescore"])
@@ -763,7 +763,7 @@ def main(argv: list[str] | None = None) -> None:
     lp.add_argument("--transcripts", default="~/agent-bench-runs/claude-config/projects")
     lp.add_argument("--min-tokens", type=int, default=15000)
     lp.add_argument("--cases", default=os.path.expanduser("~/.cache/llmbox/loop-cases.json"))
-    lp.add_argument("--endpoint", default="http://192.0.2.10:8081", help="Anthropic-compatible endpoint (agent-proxy)")
+    lp.add_argument("--endpoint", help="Anthropic-compatible endpoint (agent-proxy; default: the host profile's agent_endpoint)")
     lp.add_argument("--model", help="served model id (llama-swap)")
     lp.add_argument("--label", help="name for this configuration in the results")
     lp.add_argument("--limit", type=int, default=8, help="number of contexts (one per task, shortest first)")
@@ -783,7 +783,7 @@ def main(argv: list[str] | None = None) -> None:
 
     b = command("bench", "run the standard suite against a served model (OpenAI-compatible endpoint)")
     b.add_argument("model", help="model id at the endpoint (e.g. a llama-swap id)")
-    b.add_argument("--endpoint", default="http://192.0.2.10:8080",
+    b.add_argument("--endpoint", default=None,
                    help="OpenAI-compatible base URL, or claude-code[:effort] for a frontier reference via the Claude subscription")
     b.add_argument("--tier", default="quick", choices=["quick", "medium", "deep", "ladder"])
     b.add_argument("--seed", type=int, default=0, help="item set; a new seed gives fresh items of equal difficulty")
@@ -832,7 +832,7 @@ def main(argv: list[str] | None = None) -> None:
     rg = command("regrade", "re-score text-graded items of saved results with the current graders")
     rg.add_argument("results", nargs="+", help="result json files (~/.llmbox/results/<host>/*.json)")
     rg.add_argument("--dry-run", action="store_true")
-    rg.add_argument("--reader", nargs="?", const="http://gpu-box:8080", default=None,
+    rg.add_argument("--reader", nargs="?", const="", default=None,
                     help="also grade the explanations again with the reader model at this endpoint (default: the box)")
     rg.set_defaults(fn=cmd_regrade)
 
@@ -898,6 +898,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.epilog = "\n\n".join(f"{g}:\n" + "\n".join(f"  {c:14s} {helps[c]}" for c in cs if c in helps) for g, cs in COMMAND_GROUPS) + \
         "\n\nllmbox <command> --help for its options. Data lives in ~/.llmbox (results, recipes, queue, site)."
     a = ap.parse_args(argv)
+    if hasattr(a, "endpoint") and not a.endpoint:   # the host's own model server (its profile), not a fixed address
+        a.endpoint = hosts.endpoint(getattr(a, "host", None), agent=a.cmd == "loops")
+    if getattr(a, "reader", None) == "":   # --reader without a URL: the box's own server
+        a.reader = hosts.endpoint(getattr(a, "host", None) or "box")
     a.fn(a)
 
 

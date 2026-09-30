@@ -4,7 +4,7 @@
   items     levels 1-10 x N seeds: deterministic, the oracle scores 1, an empty or wrong answer ~0, the answer written in
             other common shapes (a preamble, padding, code fences, a markdown table, bold headers) still 1
   order     every SQL query gives the same rows with PRAGMA reverse_unordered_selects on and off (its ORDER BY is total)
-  versions  the same scripts, queries and snippets on the Linux box (ssh gpu-box 'python3 -': SQLite 3.46, CPython
+  versions  the same scripts, queries and snippets on the Linux box (ssh <the box> 'python3 -': SQLite 3.46, CPython
             3.14) and on every other CPython 3.12+ found here must give the same answers as the generator's (the Mac:
             SQLite 3.53, CPython 3.12); without the box that part is skipped and says so
   grading   the cell and answer rules on hand-made cases
@@ -25,7 +25,8 @@ from llmbox import validate as V  # noqa: E402
 from llmbox.suite import knowledge as K, knowledge_regex as R, techhelp_sql as S  # noqa: E402
 
 SEEDS = int(sys.argv[sys.argv.index("--seeds") + 1]) if "--seeds" in sys.argv else 50
-HOST = "gpu-box"
+from llmbox.hosts import box_ssh  # noqa: E402
+HOST = box_ssh()
 failed = 0
 
 

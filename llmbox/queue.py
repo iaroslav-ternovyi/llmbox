@@ -145,7 +145,7 @@ def _other_bench_running() -> bool:
     return any(int(line.split()[0]) != os.getpid() for line in out.splitlines() if line.strip())
 
 
-DENSE_POWER_LIMIT_W = 180   # gpu-box: four Xid 79 crashes, all with a dense model near 250 W (2026-09-14..26)
+DENSE_POWER_LIMIT_W = 180   # the reference box: four Xid 79 crashes, all with a dense model near 250 W (2026-09-14..26)
 
 
 def power_hold(job: sqlite3.Row) -> str | None:

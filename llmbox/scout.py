@@ -65,5 +65,5 @@ def render(repo: str, rows: list[Row], hw: E.HostSpec, depth: int = 50_000) -> s
     out += ["",
             "ctx     = largest context whose decode stays within 5% of the 32k config (more KV = fewer experts on the GPU)",
             f"tok/s   = predicted decode, speculative decoding OFF;  @depth = at {depth:,} tokens;  @native = same depth, full native context allocated",
-            "accuracy: calibrated on 6 models / 3 architectures, error <= 10% on gpu-box"]
+            "accuracy: calibrated on 6 models / 3 architectures, error <= 10% on the reference box"]
     return "\n".join(out)

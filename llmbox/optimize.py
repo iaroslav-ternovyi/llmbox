@@ -66,7 +66,7 @@ def compare(host: str, rid: str, out=print, repeats: int = 3) -> dict:
     return rec
 
 
-def run(host: str, rid: str, retune: bool = False, out=print, endpoint: str = "http://192.0.2.10:8080") -> dict:
+def run(host: str, rid: str, retune: bool = False, out=print, endpoint: str | None = None) -> dict:
     prof = hosts.load(host)
     h = hosts.host_of(prof)
     busy = hosts.free_up(h)
@@ -88,7 +88,7 @@ def run(host: str, rid: str, retune: bool = False, out=print, endpoint: str = "h
         rec = compare(host, rid, out=out)
     # the ranking's speed: the served recipe through the same probe as every other model
     from . import bench, runinfo
-    ep = endpoint
+    ep = endpoint or hosts.endpoint(host)
     cap = runinfo.begin(host, ep, rid)
     sp = bench.speed_probe(ep, rid)
     info = runinfo.end(cap, rc.load(host, rid))

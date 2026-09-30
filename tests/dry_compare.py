@@ -31,7 +31,7 @@ def pairs(a: list[str]) -> dict:
 
 def main() -> int:
     rid, existing = sys.argv[1], sys.argv[2]
-    h = Host(sys.argv[3] if len(sys.argv) > 3 else "box", ssh="user@gpu-box")
+    h = Host(sys.argv[3] if len(sys.argv) > 3 else "box", ssh=__import__("llmbox.hosts", fromlist=["box_ssh"]).box_ssh())
     gen = dry(h, recipe.launcher(recipe.load("box", rid)))
     old = dry(h, h.run(f"cat {existing}").stdout)
     g, o = pairs(gen), pairs(old)

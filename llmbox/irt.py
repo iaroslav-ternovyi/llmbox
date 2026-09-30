@@ -455,7 +455,8 @@ def simulate(bank: Bank, truth: dict, true_seconds: dict, prior: tuple = PRIOR, 
 # runs by `llmbox regrade --reader`, or only the version string changing
 SAME_TASKS = {"e9f84b50bd85": "8168e071e372",    # v0.10-dev7 (billing questions did not state the uptime; regraded)
               "8713ad469067": "8168e071e372",    # v0.10-dev7.1-7.3 -> v0.10 (the version string only)
-              "19bbcf6ca73c": "53fbc86d524d"}    # v0.11 = v0.11-dev4 (the version string only)
+              "19bbcf6ca73c": "53fbc86d524d",    # v0.11 = v0.11-dev4 (the version string only)
+              "ce3a44eef667": "53fbc86d524d"}    # v0.11: knowledge.build takes the box's ssh from its profile (no task changed)
 
 
 # released suite contents (canonical hash -> version): runs of an older tag with the same tasks count as that release
