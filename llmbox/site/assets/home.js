@@ -106,6 +106,29 @@ function scoreCell(p, ax) {   // a dot at the score, a line over its 95% range; 
   return `<div class="fp" title="95% range ${Math.round(lo)}–${Math.round(hi)}%"><div class="trk">${g}<i style="left:${ax.X(lo)}%;width:${ax.X(hi) - ax.X(lo)}%;background:${c}"></i>` +
     `<b style="left:${ax.X(p.vs)}%;background:${c}"></b>${p.vs < ax.min ? `<em>◂ ${Math.round(p.vs)}%</em>` : ""}</div><span class="num">${Math.round(p.vs)}%</span></div>`;
 }
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function drawPick(pts) {   // the answer first: the best model for the picked box, and the one line that installs it
+  const ok = pts.filter(p => !p.cloud && p.t2 && p.vs != null);
+  if (!ok.length) { $("#pick").innerHTML = `<p class="q">No measured model fits this box.</p>`; return; }
+  const rng = p => { const k = p.vs / p.cap; return [p.ci[0] * k, Math.min(100, p.ci[1] * k)]; };
+  // as llmbox pick: the best score, unless a model not measurably apart from it, at most 5 points below, is 1.3x as fast
+  const top = ok.reduce((a, b) => (b.vs > a.vs ? b : a));
+  const long = p => Math.min(p.t2, p.td || p.t2);
+  const quick = ok.filter(p => p !== top && rng(p)[1] >= rng(top)[0] && p.vs >= top.vs - 5 && long(p) >= 1.3 * long(top));
+  const best = quick.length ? quick.reduce((a, b) => (long(b) > long(a) ? b : a)) : top;
+  const why = best === top ? "the best score among the models that fit" :
+    `${Math.round(top.vs - best.vs)} points below the best score, not measurably apart from it, and ${(long(best) / long(top)).toFixed(1)}× as fast here`;
+  const cmd = `curl -fsSL ${DATA.site}/install.sh | sh -s -- ${best.id}`;
+  const use = document.querySelector(".seg button.on");
+  $("#pick").innerHTML = `<div class="pk"><div><span class="sc">Best for this box${preset ? " · " + esc(use ? use.textContent.toLowerCase() : "") : ""}</span>` +
+    `<h2><a href="recipe-${best.id}.html">${esc(best.model || best.name)}</a> <small>${esc(best.quant || "")}</small></h2>` +
+    `<p><b>${Math.round(best.vs)}%</b> of Claude Opus · <b>${best.pred ? "~" : ""}${Math.round(best.t2)}</b> tokens/s` +
+    (best.td ? `, ${Math.round(best.td)} with a long document` : "") +
+    ` · ${why}</p></div>` +
+    `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
+    `<p class="q">installs llmbox and this model, with the settings measured here fitted to your computer, then starts it (Linux + NVIDIA; <a href="install.html">more</a>)</p></div></div>`;
+  $("#pickcpy").onclick = () => navigator.clipboard && navigator.clipboard.writeText(cmd).then(() => { $("#pickcpy").textContent = "COPIED"; setTimeout(() => $("#pickcpy").textContent = "COPY", 1500); });
+}
 function render() {
   const w = DATA.presets[preset], refW = weighted(DATA.refBlocks, w);
   const pts = DATA.points.map(p => Object.assign({}, p, preset ? { vs: 100 * weighted(p.blocks, w) / refW, cap: weighted(p.blocks, w), ci: [p.ci[0] / p.cap * weighted(p.blocks, w), p.ci[1] / p.cap * weighted(p.blocks, w)] } : {}));
@@ -146,6 +169,7 @@ function render() {
     row.querySelector(".rk").textContent = preset ? i + 1 : p.rank[0];
     row.classList.toggle("gs", byScore && prevG !== null && p.rank[3] !== prevG); prevG = p.rank[3];
     tb.appendChild(row); tb.appendChild(document.querySelector(`tr.prof[data-for="${p.id}"]`)); });
+  drawPick(pts);
   $("#scatter").innerHTML = scatter(pts);
   hoverScatter(pts);
 }

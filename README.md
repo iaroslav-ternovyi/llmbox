@@ -23,16 +23,23 @@ ik_llama.cpp behind [llama-swap](https://github.com/mostlygeek/llama-swap).
 On the machine that runs models (or anywhere, with `--ssh` to it):
 
 ```bash
-pip install git+https://github.com/iaroslav-ternovyi/llmbox     # Python 3.12+, no other dependencies
-llmbox host add me                       # this machine: GPU, RAM, measured RAM speed, llama-server builds found
-llmbox pick                              # every measured model fitted to it: fits?, how fast, how good; the pick
-llmbox install qwen36-al --from registry --host me --apply   # download, fit, launcher (and a llama-swap entry if you use it)
-llmbox run qwen36-al --host me           # serve it (OpenAI-compatible) until Ctrl-C; no llama-swap needed
-llmbox tune qwen36-al --host me          # optional: measure the speed knobs on this machine, keep what wins
-llmbox login                             # GitHub (a code to enter at github.com): your results get a profile page, and
-                                         # your quality runs count toward the scores; `llmbox forget` deletes it all
-llmbox test qwen36-al --host me          # speed, the 40-minute quality test, and the upload (the server
-                                         # re-grades every answer; `llmbox submit --dry-run` shows what is sent)
+curl -fsSL https://llmbox.pages.dev/install.sh | sh    # installs llmbox, then the guided start (or: pip install git+https://github.com/iaroslav-ternovyi/llmbox, then llmbox)
+```
+
+The guided start (`llmbox`, no arguments) looks at this computer, gets llama.cpp built for its card if it is missing (the
+official release build, sha256-checked), shows the best model for it with the numbers and the reason, and after one yes
+downloads it, fits the settings, optionally times it against machines like it, and leaves it running with its address.
+Then, as you need them:
+
+```bash
+llmbox doctor                            # is this computer ready? each problem with the command that fixes it
+llmbox pick                              # every measured model fitted to this computer, and the pick
+llmbox start <model>                     # the guided start for a model of your choice
+llmbox test <model>                      # 3 min speed + 10 min quality: where you stand against machines like yours
+                                         # and against the model's score; sent only on a yes (--full: 40 min)
+llmbox run <model> -d / llmbox stop      # serve a model in the background / stop it
+llmbox login                             # GitHub: a profile page, and your quality runs count toward the scores
+llmbox tune <model>                      # measure the speed knobs on this machine, keep what wins
 ```
 
 `llmbox pick --gpu "RTX 4090" --ram-gb 64 --ram-bw 60` answers for a machine you do not have yet.
@@ -78,6 +85,7 @@ options.
 | `queue.py`, `runinfo.py`, `pending.py` | The job queue, what a run records, explanations graded after cloud runs |
 | `results.py`, `db.py`, `verify.py` | Result files, the results database, re-grading a run from its answers |
 | `candidates.py`, `watch.py`, `eci.py` | New models on Hugging Face, daily watch, expected scores from public benchmarks |
+| `wizard.py`, `doctor.py`, `engine.py` | The guided start, the readiness check, the official llama.cpp build for this computer |
 | `serving.py` | A model served by llmbox itself (`run`, and `test` for its run): no llama-swap needed |
 | `registry.py`, `pick.py` | The published recipes (export with the site, pull anywhere), the ranking fitted to a machine |
 | `hwclass.py`, `submit.py`, `server.py` | Hardware classes, sending measurements, the intake that takes them in |

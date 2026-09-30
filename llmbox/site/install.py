@@ -17,16 +17,19 @@ def install_page() -> str:
  <div class="copy"><pre class="cmd" id="one">{esc(one)}</pre><button class="btn cpy" type="button" data-copy="one">COPY</button></div>
  <p class="q">It makes a private Python environment in <code>~/.llmbox/venv</code> and puts the <code>llmbox</code> command in
  <code>~/.local/bin</code>: no sudo, nothing runs in the background. Or, with Python 3.12+: <code>pip install git+{esc(REPO)}</code>.</p></section>
-<section class="panel pad"><div class="lbl">Then</div>
-<pre class="cmd">llmbox host add me                                   # your card, CPU, RAM and its speed
-llmbox pick                                          # what fits, how good, how fast: the pick for this computer
-llmbox install &lt;model&gt; --from registry --host me --apply   # download and fit the settings to your hardware
-llmbox run &lt;model&gt; --host me                         # use it: an OpenAI-compatible server until Ctrl-C
-llmbox login                                         # optional: GitHub, for your profile page
-llmbox test &lt;model&gt; --host me                        # measure it (speed + 40-minute quality test) and send it</pre></section>
+<section class="panel pad"><div class="lbl">Then it asks</div>
+ <p>The installer goes straight on to the guided start (or run <code>llmbox</code> any time): it looks at your computer,
+ gets llama.cpp built for your graphics card if it is missing, shows the best model for it with the numbers and why,
+ and after one yes downloads it, fits the settings, times it (3 minutes, optional) and leaves it running with the address
+ to put in your app. Every question has a default; nothing is sent without its own yes.</p>
+<pre class="cmd">llmbox                 # the guided start
+llmbox doctor          # is this computer ready? each problem with its fix
+llmbox test &lt;model&gt;    # 3 min speed + 10 min quality, where you stand against machines like yours (--full: 40 min)
+llmbox stop            # stop what llmbox started
+llmbox login           # optional: GitHub, for your profile page and for your quality runs to count</pre></section>
 <section class="panel pad"><div class="lbl">What it needs</div><ul class="plain">
- <li><b>Linux with an NVIDIA card</b> (or Windows with WSL2), and <a href="https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md">llama.cpp</a>
- built with CUDA (<code>llmbox host add</code> finds it in <code>~/*/build/bin</code> or on the PATH).</li>
+ <li><b>Linux with an NVIDIA card</b> (or Windows with WSL2) and its driver. llama.cpp comes with it: the official build for
+ your card and driver, checked against its published sha256 (your own build is used if you have one).</li>
  <li><b>Mac:</b> <code>llmbox pick</code> tells what fits and roughly how fast; running and measuring models on a Mac is coming.</li>
  <li>Python 3.12 or newer and git.</li></ul></section>
 <section class="panel pad"><div class="lbl">Your data</div><ul class="plain">

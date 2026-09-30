@@ -25,6 +25,21 @@ def index() -> dict:
     return json.load(open(p))
 
 
+FASTER, CLOSE = 1.3, 5.0   # the pick trades score for speed only for a model this much faster and this close to the best
+
+
+def choose(ok: list[dict]) -> tuple[dict, str]:
+    """The recommendation among the models that fit (best score first) and why: the best score, unless a model not
+    measurably apart from it and at most CLOSE points below runs at least FASTER times as fast 32k into a session."""
+    top = ok[0]
+    long = lambda x: min(x["t2"], x["td"] or x["t2"])
+    quick = [x for x in ok[1:] if x.get("tied") and x["use_score"] >= top["use_score"] - CLOSE and long(x) >= FASTER * long(top)]
+    if quick:
+        b = max(quick, key=long)
+        return b, f"{top['use_score'] - b['use_score']:.0f} points below the best score, not measurably apart from it, and {long(b) / long(top):.1f}x as fast here"
+    return top, "the best score among the models that fit"
+
+
 def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = None, mac: bool = False) -> list[dict]:
     """cls: this machine's hardware class (llmbox/hwclass.py): where people measured a model on the same class, their
     median replaces the prediction (measured=machines)."""
@@ -84,12 +99,10 @@ def run(host: str | None, use: str, what_if: tuple | None = None, out=print) -> 
         rg = f" ({x['range'][0]:.0f}-{x['range'][1]:.0f})" if x.get("range") and USES[use] is None else ""
         mark = "m" if x.get("measured") else "~"
         out(f"{'*' if x.get('tied') else ' '} {x['name'][:52]:52s} {x['use_score']:5.1f}{rg:>8s} {mark}{x['t2']:5.0f} {x['td'] or 0:5.0f} {x['ctx'] // 1024:5d}k")
-    tied = [x for x in ok if x.get("tied")]
-    if tied:
-        best = max(tied, key=lambda x: min(x["t2"], x["td"] or x["t2"]))   # an agent's context fills up: the slower figure counts
-        out(f"\n* not measurably apart from the best score; the fastest of them, 32k into a session too: {best['name']} "
-            f"({best['t2']:.0f} tok/s, {best['td'] or best['t2']:.0f} at 32k)")
-        out(f"  llmbox install {best['id']} --from registry --host {host} --apply")
+    if ok:
+        best, why = choose(ok)
+        out(f"\n* not measurably apart from the best score.  The pick: {best['name']} ({best['t2']:.0f} tok/s, {best['td'] or best['t2']:.0f} at 32k) - {why}")
+        out(f"  llmbox start {best['id']}")
     skip = [x for x in rows if not x["fits"]]
     if skip:
         out(f"\ndo not fit: " + ", ".join(f"{x['name']} ({x.get('size_gb') or '?'} GB)" for x in skip))

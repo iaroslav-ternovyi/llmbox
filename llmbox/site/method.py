@@ -119,13 +119,11 @@ and the page says <i>rough</i>.</p>
 {_optimize_table(opts or {}, ranked)}
 
 <h2 id="people">Your computer</h2>
-<p>The site's settings for a model install on any machine with llama.cpp and an NVIDIA card (Macs and AMD are coming): llmbox fits them
-to your card and memory, then one command measures the model and sends the result.</p>
+<p>One line installs llmbox and asks the rest: it finds your card and memory, gets llama.cpp for it, picks the best model for
+your computer, installs it with the settings measured here fitted to your hardware, and starts it (Linux with an NVIDIA card;
+Macs get the pick, running on a Mac is coming). <code>llmbox test</code> then measures it and, on a yes, sends the result.</p>
 <pre class="cmd">{esc(INSTALL)}
-llmbox host add me                                   # your card, CPU, RAM and its measured speed
-llmbox pick                                          # what fits here, how good, how fast; the pick
-llmbox install &lt;model&gt; --from registry --host me --apply
-llmbox test &lt;model&gt; --host me                        # speed, the 40-minute quality test, the upload</pre>
+llmbox test &lt;model&gt;          # 3 min speed + 10 min quality, where you stand (--full: 40 min)</pre>
 <p>Speeds are grouped by kind of hardware: the same graphics card (chip and memory) and system RAM of about the same speed, since a
 mixture-of-experts model reads part of itself from RAM. A group shows the median machine, each machine counted once, and the spread once
 five machines are in it. <code>llmbox run &lt;model&gt;</code> serves the model for everyday use without anything else installed.</p>

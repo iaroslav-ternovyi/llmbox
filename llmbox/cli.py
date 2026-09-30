@@ -319,7 +319,8 @@ def cmd_pick(a: argparse.Namespace) -> None:
 
 
 def cmd_test(a: argparse.Namespace) -> None:
-    """The whole measurement of a model on this machine: speed, the 40-minute quality test, then the upload."""
+    """The measurement of a model on this machine: speed, a quality test (10 minutes, or 40 with --full), where it stands
+    against machines like it and against the model's published score, then - on a yes - the upload."""
     import random
     from . import irt, recipe as rc, submit, suite
     host = a.host or _only_host()
@@ -344,20 +345,22 @@ def cmd_test(a: argparse.Namespace) -> None:
     t0 = _t.time()
     print(f"1/3 speed of {a.recipe} on {host}", flush=True)
     main(["speed", a.recipe, "--host", host, "--depth", "32000", "--depth", "80000", "--unload"])
-    print(f"\n2/3 quality: adaptive test, {a.budget:g} minutes", flush=True)
+    budget = a.budget or (40 if a.full else 10)
+    print(f"\n2/3 quality: adaptive test, {budget:g} minutes" + ("" if a.full else " (--full: 40 minutes, a narrower range)"), flush=True)
     from . import serving
     with serving.served(host, a.recipe) as url:   # llmbox serves the recipe itself: no llama-swap needed
         print(f"  serving {a.recipe} at {url}", flush=True)
-        main(["bench", a.recipe, "--host", host, "--recipe", a.recipe, "--endpoint", url, "--adaptive", "--budget", str(a.budget),
+        main(["bench", a.recipe, "--host", host, "--recipe", a.recipe, "--endpoint", url, "--adaptive", "--budget", str(budget),
               "--target", "2.5", "--seed", str(seed), "--speed-probe"])
-    if a.no_submit:
-        print("\n3/3 not sent (--no-submit): `llmbox submit` sends it later")
-        return
-    print("\n3/3 upload", flush=True)
     from . import results
-    mine = [p for p, r in results.files(host) if os.path.getmtime(p) >= t0 and r.get("kind") in submit.KINDS
+    mine = [(p, r) for p, r in results.files(host) if os.path.getmtime(p) >= t0 and r.get("kind") in submit.KINDS
             and (r.get("recipe") or {}).get("id") == a.recipe]   # this test's records only, not the machine's history
-    submit.run(mine, host, server, dry_run=False)
+    print("\n3/3 where this stands", flush=True)
+    _standing(host, a.recipe, [r for _p, r in mine])
+    if a.no_submit:
+        print("not sent (--no-submit): `llmbox submit` sends it later")
+        return
+    submit.ask_and_send([p for p, _r in mine], host, server, yes=a.yes)
 
 
 def cmd_run(a: argparse.Namespace) -> None:
@@ -382,6 +385,11 @@ def cmd_run(a: argparse.Namespace) -> None:
         print("stopped")
 
 
+def cmd_doctor(a: argparse.Namespace) -> None:
+    from . import doctor
+    raise SystemExit(doctor.run(a.host))
+
+
 def cmd_start(a: argparse.Namespace) -> None:
     from . import wizard
     raise SystemExit(wizard.main(yes=a.yes, model=a.model, host=a.host, plan_only=a.plan))
@@ -395,6 +403,29 @@ def cmd_stop(a: argparse.Namespace) -> None:
         print(f"stopped {s['rid']} on {s['host']}")
     if not gone:
         print("nothing llmbox started is running")
+
+
+def _standing(host: str, rid: str, recs: list[dict]) -> None:
+    """This machine against machines like it (the registry's per-class medians), and this run's quality against the
+    model's published score: the same file and settings should score the same, so a clear miss means a setup problem."""
+    from . import hwclass, pick, results as res
+    e = next((x for x in pick.index()["recipes"] if x["id"] == rid), {}) if os.path.exists(
+        os.path.join(hosts.HOME, "recipes", "registry", "index.json")) else {}
+    cls = hwclass.of_host(res.host_fingerprint(hosts.load(host)))
+    sp = next((r["speed"] for r in recs if r.get("kind") == "speed" and (r.get("speed") or {}).get("decode_tps")), None)
+    same = (e.get("measured") or {}).get(cls)
+    if sp:
+        print(f"  speed: {sp['decode_tps']:.0f} tokens/s" + (f"; machines like it ({hwclass.label(cls)}): median {same[0]:.0f} of {same[3]}"
+                                                            if same else "; the first of its kind here - nobody has sent this hardware yet"))
+    q = next((r for r in recs if r.get("kind") == "suite"), None)
+    if q and e.get("range"):
+        s = q["summary"]
+        lo, hi = s.get("capability_ci95") or [None, None]
+        k = e["score"] / e["cap"] if e.get("cap") else 1.0   # capability scale -> the site's % of Claude Opus
+        ok = lo is not None and hi is not None and lo * k <= e["range"][1] and hi * k >= e["range"][0]
+        print(f"  quality: this run {s.get('capability', 0) * k:.0f}% of Claude Opus (range {lo * k:.0f}-{hi * k:.0f}) vs the model's {e['score']:.0f}% "
+              f"({e['range'][0]:.0f}-{e['range'][1]:.0f}): " + ("consistent - your setup gives the published quality" if ok else
+                                                                "NOT consistent - check the settings (llmbox recipe check) and the llama.cpp build"))
 
 
 def _only_host() -> str:
@@ -731,7 +762,7 @@ def cmd_recipe(a) -> None:
     if a.action == "pull":
         from . import registry
         got = registry.pull(a.url or registry.DEFAULT_URL, only=a.ids or None)
-        print(f"install one: llmbox install {got[0] if got else '<id>'} --from registry --host <your host>")
+        print("next: llmbox pick (what fits here), or llmbox start (the best one, installed and running)")
         return
     if a.action == "list":
         for rid in rc.ids(a.host):
@@ -803,7 +834,7 @@ def cmd_site(a) -> None:
 
 # `llmbox --help` lists the commands by what you want to do, most used first
 COMMAND_GROUPS = [
-    ("Pick and run a model on your box", ["start", "host", "pick", "scout", "fit", "recipe", "install", "run", "stop", "tune", "optimize"]),
+    ("Pick and run a model on your box", ["start", "doctor", "host", "pick", "scout", "fit", "recipe", "install", "run", "stop", "tune", "optimize"]),
     ("Measure it", ["test", "bench", "queue", "speed", "probe", "loops", "traces"]),
     ("Share and compare", ["login", "whoami", "profile", "submit", "logout", "forget", "serve"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
@@ -1009,6 +1040,9 @@ def main(argv: list[str] | None = None) -> None:
     st_.add_argument("--host", help="a registered machine (default: this computer)")
     st_.add_argument("--plan", action="store_true", help="only show the plan")
     st_.set_defaults(fn=cmd_start)
+    dr = command("doctor", "is this computer ready? each problem with the command that fixes it")
+    dr.add_argument("--host", help="a registered machine (default: this computer)")
+    dr.set_defaults(fn=cmd_doctor)
     so = command("stop", "stop models llmbox serves in the background (all, or the ones named)")
     so.add_argument("recipes", nargs="*")
     so.set_defaults(fn=cmd_stop)
@@ -1016,7 +1050,9 @@ def main(argv: list[str] | None = None) -> None:
     te = command("test", "measure a model on this machine and send it: speed, the 40-minute quality test, the upload")
     te.add_argument("recipe", help="an installed recipe (llmbox install <id> --from registry ...)")
     te.add_argument("--host", help="this machine's name (default: the only one registered)")
-    te.add_argument("--budget", type=float, default=40, help="minutes for the quality test (default 40)")
+    te.add_argument("--full", action="store_true", help="the 40-minute quality test (default: 10 minutes)")
+    te.add_argument("--budget", type=float, help="minutes for the quality test (overrides --full)")
+    te.add_argument("--yes", "-y", action="store_true", help="no questions (it then sends nothing: sending needs its own yes)")
     te.add_argument("--server", help="intake address (default $LLMBOX_SERVER)")
     te.add_argument("--no-submit", action="store_true", help="measure only; `llmbox submit` sends it later")
     te.set_defaults(fn=cmd_test)

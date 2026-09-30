@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SLOW = {"test_levels_stable.py", "test_techhelp.py"}
 # these read ~/.llmbox (the reference box's results, recipes, calibrated bank) or reach the box over ssh
 NEEDS_DATA = {"test_accounts.py", "test_adaptive_blocks.py", "test_community.py", "test_fit.py", "test_pick.py", "test_real_engines.py",
-              "test_registry.py", "test_site.py", "test_submit.py", "test_submit_quality.py"}
+              "test_registry.py", "test_site.py", "test_submit.py", "test_submit_quality.py", "test_wizard.py"}
 
 
 def run(name: str) -> tuple[str, int, float, str]:

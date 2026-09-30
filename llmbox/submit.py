@@ -131,6 +131,25 @@ def send(b: dict, server: str = DEFAULT_SERVER, timeout: int = 120) -> dict:
         raise SystemExit(f"{server}: not reachable ({e.reason})")
 
 
+def ask_and_send(paths: list[str], host: str, server: str, yes: bool = False, out=print) -> bool:
+    """On a terminal: send these records? y / n / s (show exactly what is sent, then ask again). --yes never sends:
+    sending needs its own yes."""
+    import sys
+    if yes or not sys.stdin.isatty():
+        out("not sent (answer yes on a terminal, or `llmbox submit` later)")
+        return False
+    while True:
+        a = (input("Send it, so the site shows this hardware and counts the answers? (anonymous unless you signed in; "
+                   "s = show exactly what is sent) [Y/n/s] ").strip().lower()[:1] or "y")
+        if a == "s":
+            run(paths, host, server, dry_run=True, out=out)
+        elif a in "yn":
+            break
+    if a == "y":
+        run(paths, host, server, dry_run=False, out=out)
+    return a == "y"
+
+
 def run(paths: list[str], host: str | None, server: str, dry_run: bool, out=print) -> int:
     todo = [(p, json.load(open(p))) for p in paths] if paths else pending(host)
     todo = [(p, r) for p, r in todo if r.get("kind") in KINDS]

@@ -10,7 +10,7 @@ from .components import _marker, _pct, _profile, _spd, _stands_out
 from .data import optimize_records, queue_state, shape_data
 from .layout import _page
 from .stats import rank_ranges
-from .words import _ago, _kind, _size, BLOCKS, esc, FAMILIES, family, LABEL, model_name, PRESETS, SHORT, variant
+from .words import _ago, _kind, _size, BLOCKS, esc, FAMILIES, family, LABEL, model_name, PRESETS, SHORT, variant, SITE_URL
 
 
 def _scatter(local: list[dict]) -> str:
@@ -162,7 +162,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     qline = _queue_line(q)
     feed = _feed(host, q, local, clouds, suite_version, tier)
     presets = "".join(f'<button class="{"on" if i == 0 else ""}" data-p="{i}" title="{esc(" · ".join(f"{LABEL[b].lower()} {v}" for b, v in w.items()))}">{esc(n)}</button>' for i, (n, w) in enumerate(PRESETS))
-    data = _chart_data(sd, local, clouds, ref, ranks, names0)
+    data = dict(_chart_data(sd, local, clouds, ref, ranks, names0), site=SITE_URL)
     body = f"""
 <h1 class="q1">What should I run on my box?</h1>
 <p class="lede">AI models you can run on your own computer, graded on real work (coding, tools, documents, writing) and timed on a real PC.
@@ -174,6 +174,7 @@ Pick your graphics card or Mac: the table shows what fits, how fast it answers a
  <span class="bl" id="bwl">speed</span><select id="bw" aria-label="RAM speed"></select>
  <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
  <span id="boxnote" class="q">speeds measured on this box</span><span id="fitsum" class="q"></span></section>
+<section class="panel pickp" id="pick" aria-live="polite"></section>
 <section class="panel chart hero"><h2 class="ch2">Smarter or faster: what runs best on your box</h2>
  <div id="scatter">{_scatter(local)}</div>
  <p class="cap">Each point is a model with the settings it was measured with. Higher = closer to Claude Opus 5.5 on the same tasks;

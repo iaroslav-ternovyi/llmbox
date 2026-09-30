@@ -82,8 +82,7 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
     if not ok:
         out("None of the measured models fits this computer's memory yet.")
         return 1
-    tied = [x for x in ok if x.get("tied")] or ok[:1]
-    best = next((x for x in ok if x["id"] == model), None) if model else max(tied, key=lambda x: min(x["t2"], x["td"] or x["t2"]))
+    best, why = (next((x for x in ok if x["id"] == model), None), "the model you asked for") if model else pick.choose(ok)
     if model and not best:
         out(f"{model}: not among the models that fit here; `llmbox pick` lists them")
         return 1
@@ -93,8 +92,7 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
         out(f"\nBest for it: {x['name']}")
         out(f"  {x['score']:.0f}% of Claude Opus on real work" + (f" (95% range {x['range'][0]:.0f}-{x['range'][1]:.0f})" if x.get("range") else "")
             + f" · ~{x['t2']:.0f} tokens/s, ~{x['td'] or x['t2']:.0f} with 32k of context ({how}) · up to {x['ctx'] // 1024}k context")
-        if not model and len(tied) > 1:
-            out(f"  why: {len(tied)} models are not measurably apart from the best score; this one stays fastest here")
+        out(f"  why: {why if x is best else 'your choice'}")
         out(f"  download: {x.get('size_gb') or '?'} GB into {prof['hw'].get('models_dir_guess') or '~/models'}" + (" · Mac: speeds are rough" if mac else ""))
     plan(best)
     if plan_only or not engine:

@@ -1,0 +1,25 @@
+"""The guided start (llmbox/wizard.py) as far as its plan, for the box, and the recommendation rule (pick.choose): the
+best score, unless a model not measurably apart from it, at most 5 points below, runs 1.3x as fast 32k into a session.
+Run: python3 tests/test_wizard.py   (needs the box's profile and `llmbox recipe pull`)"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from llmbox import pick, wizard  # noqa: E402
+
+lines = []
+assert wizard.main(host="box", plan_only=True, out=lines.append) == 0
+text = "\n".join(lines)
+assert text.startswith("This computer: RTX 5070 12 GB") and "Best for it:" in text and "why:" in text and "tokens/s" in text, text
+
+x = lambda i, s, t2, td, tied=True: {"id": i, "use_score": s, "t2": t2, "td": td, "tied": tied}
+best, why = pick.choose([x("a", 88, 55, 52), x("b", 87, 60, 58), x("c", 84, 90, 80)])
+assert best["id"] == "c" and "1.5x" in why, (best, why)          # 4 points below, 1.5x as fast: the trade is worth it
+best, _ = pick.choose([x("a", 88, 55, 52), x("b", 80, 120, 110)])
+assert best["id"] == "a", "8 points below is too far to trade for speed"
+best, _ = pick.choose([x("a", 88, 55, 52), x("b", 86, 70, 60)])
+assert best["id"] == "a", "15% faster is not enough to give up score"
+best, _ = pick.choose([x("a", 88, 55, 52), x("b", 86, 90, 80, tied=False)])
+assert best["id"] == "a", "measurably below the best: never the pick"
+print(lines[2] if len(lines) > 2 else text)
+print("all passed")

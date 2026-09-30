@@ -1,0 +1,64 @@
+"""`llmbox doctor`: is this computer ready, and if not, the one command that fixes each problem (clig.dev: errors
+that say what to do next)."""
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+import urllib.request
+
+from . import hosts, registry, submit
+
+
+def checks(host: str | None = None) -> list[tuple[bool | None, str, str]]:
+    """(ok / not ok / just so you know, what, the fix)."""
+    out: list = []
+    v = sys.version_info
+    out.append((v >= (3, 12), f"Python {v.major}.{v.minor}", "llmbox needs 3.12+: sudo apt install python3.12 python3.12-venv, or brew install python@3.12"))
+    names = hosts.names()
+    name = host or next((n for n in names if not hosts.load(n).get("ssh")), None) or (names[0] if len(names) == 1 else None)
+    if not name:
+        out.append((False, "this computer is not registered", "llmbox host add me   (or just: llmbox)"))
+        return out
+    prof = hosts.load(name)
+    hw = prof["hw"]
+    g = (hw.get("gpus") or [{}])[0]
+    if not hw.get("gpus"):
+        out.append((None, "no graphics card found: models run on the CPU (slow)", "an NVIDIA card needs its driver: sudo ubuntu-drivers install, then reboot"))
+    elif g.get("vendor") == "nvidia":
+        cuda = hw.get("cuda_driver")
+        if not cuda:   # a profile from before llmbox read it
+            out.append((None, f"{g['name']}, driver {g.get('driver', '?')}", f"llmbox host add {name}   (re-reads the driver's CUDA version)"))
+        else:
+            ok = tuple(int(x) for x in cuda.split(".")[:2]) >= (12, 8)
+            out.append((ok, f"{g['name']}, driver {g.get('driver', '?')} (CUDA {cuda})",
+                        "a driver with CUDA 12.8+ (570 or newer): sudo ubuntu-drivers install, then reboot"))
+    elif g.get("vendor") == "apple":
+        out.append((None, f"{g['name']} with {hw['ram_mib'] // 1024} GB: llmbox picks for Macs; running models on a Mac is coming", "-"))
+    rts = hw.get("runtimes") or []
+    out.append((bool(rts), f"llama.cpp: {rts[-1]['path']}" if rts else "llama.cpp: not found",
+                "llmbox start installs the official build for this computer (or: build it, then llmbox host add " + name + ")"))
+    bw = (prof.get("ram_bw") or {}).get("ram_read_gbs")
+    out.append((bool(bw), f"memory speed: {bw} GB/s ({(prof.get('ram_bw') or {}).get('source')})" if bw else "memory speed: unknown",
+                f"llmbox host add {name}   (measures it; the machine should be idle)"))
+    free = hw.get("disk_free_gib") or 0
+    out.append((free >= 30, f"disk: {free:.0f} GB free", "models take 5-60 GB each: free some space in your home folder"))
+    for what, url in (("the site (model list)", registry.DEFAULT_URL.rstrip("/") + "/recipes/index.json"), ("the results server", submit.DEFAULT_SERVER.rstrip("/") + "/api/v1/health")):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "llmbox"}), timeout=10):
+                out.append((True, f"reaches {what}", ""))
+        except OSError as e:
+            out.append((None, f"cannot reach {what} ({str(e)[:60]})", "check the network; everything else still works offline"))
+    if shutil.which("llmbox") is None and os.path.exists(os.path.expanduser("~/.local/bin/llmbox")):
+        out.append((False, "the llmbox command is not on your PATH", 'echo \'export PATH="$HOME/.local/bin:$PATH"\' >> ~/.bashrc && . ~/.bashrc'))
+    return out
+
+
+def run(host: str | None = None, out=print) -> int:
+    bad = 0
+    for ok, what, fix in checks(host):
+        mark = {True: "ok ", False: "✗  ", None: "·  "}[ok]
+        out(f"{mark} {what}" + (f"\n     fix: {fix}" if ok is False or (ok is None and fix not in ("", "-")) else ""))
+        bad += ok is False
+    out("\nready: `llmbox` picks, installs and starts the best model for this computer" if not bad else f"\n{bad} thing{'s' if bad > 1 else ''} to fix first")
+    return 1 if bad else 0
