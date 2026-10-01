@@ -1,0 +1,25 @@
+name: Bug
+description: Something in llmbox or on the site does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "`llmbox bug` fills this in for you (versions and the last error). Nothing is sent until you press Submit."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, what you got.
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: "`llmbox --version`, OS, graphics card and driver (`llmbox doctor` prints them)."
+  - type: textarea
+    id: error
+    attributes:
+      label: Last error
+      description: From ~/.llmbox/last-error.txt, if there is one.
+      render: text

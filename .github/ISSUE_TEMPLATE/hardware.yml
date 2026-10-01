@@ -1,0 +1,24 @@
+name: New hardware
+description: llmbox on a machine it has not seen yet (AMD, Mac, Windows/WSL2, several GPUs) - what worked and what did not
+labels: [hardware]
+body:
+  - type: input
+    id: machine
+    attributes:
+      label: The machine
+      description: Graphics card(s) or Mac chip, RAM, OS (e.g. "RX 7900 XTX, 64 GB, Ubuntu 24.04")
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: llmbox doctor
+      description: Its output.
+      render: text
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened
+      description: Did the guided start (`llmbox`) install and run a model? The speed it measured, and how it compares with the site's prediction.
+    validations:
+      required: true
