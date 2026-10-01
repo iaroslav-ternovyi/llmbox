@@ -49,7 +49,8 @@ MACS = [("Mac M1", 0, 68, "mac", 16), ("Mac M1 Pro", 0, 200, "mac", 32), ("Mac M
         ("Mac M5 Max 32-core GPU", 0, 460, "mac", 128), ("Mac M5 Max 40-core GPU", 0, 614, "mac", 128)]
 
 
-GPUS = [(n, v, b, gpu_generation(n)) for n, v, b in GPUS] + MACS   # NVIDIA: the generation factor plan.js reads as g[3]
+# the generation factor plan.js reads: NVIDIA g[3], Mac g[5] (g[3] is "mac" there)
+GPUS = [(n, v, b, gpu_generation(n)) for n, v, b in GPUS] + [m + (gpu_generation(m[0]),) for m in MACS]
 
 
 RAM_KINDS = [("DDR4-3200", 40), ("DDR5-5600", 60), ("DDR5-6400", 75), ("DDR5-8000", 88)]

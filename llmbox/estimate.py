@@ -22,15 +22,22 @@ RAM_EFFICIENCY = 0.80
 # hide the fixed part; tests/test_public_speeds.py holds the runs and checks the error per card.
 #   CUDA dense: llama 7B Q4_0 on six Ada/Blackwell cards (llama.cpp discussion #15013)
 #   CUDA MoE: gpt-oss 20B on six Ada/Blackwell cards (#15396): routing and expert kernels cost more per layer
-#   Metal: community M4 Pro / M5 Max runs of 35B-A3B MoE models (llm-bench.io, 2026-09)
-DECODE = {("cuda", False): (0.90, 0.035), ("cuda", True): (0.72, 0.060), ("metal", False): (0.80, 0.10), ("metal", True): (0.80, 0.10)}
+#   Metal dense: llama 7B Q4_0 on nineteen M1-M5 chips (#4167); Metal MoE: community M4 Pro / M5 Max runs of 35B-A3B MoE
+#   models (llm-bench.io, 2026-09)
+DECODE = {("cuda", False): (0.90, 0.035), ("cuda", True): (0.72, 0.060), ("metal", False): (0.90, 0.14), ("metal", True): (0.80, 0.10)}
 # older NVIDIA generations reach less of their bandwidth (same tables: Ampere ~0.88, Turing ~0.85, Pascal ~0.6)
 GPU_GENERATION = (("RTX 50", 1.0), ("RTX 40", 1.0), ("RTX PRO", 1.0), ("RTX 30", 0.88), ("RTX A", 0.88), ("A100", 0.88), ("A40", 0.88),
                   ("RTX 20", 0.85), ("TITAN RTX", 0.85), ("T4", 0.85), ("GTX 16", 0.75), ("GTX 10", 0.6), ("TITAN X", 0.6))
 
 
+# Apple (#4167): an Ultra (two chips joined) reaches less of its bandwidth, the M5 generation more
+APPLE_GENERATION = (("ULTRA", 0.82), ("M5", 1.3))
+
+
 def gpu_generation(name: str) -> float:
     n = (name or "").upper().replace("NVIDIA ", "").replace("GEFORCE ", "")
+    if re.match(r"^(APPLE |MAC )?M\d", n):
+        return next((f for k, f in APPLE_GENERATION if k in n), 1.0)
     return next((f for k, f in GPU_GENERATION if k in n), 1.0)
 GPU_RESERVE_MIB = 700              # driver + display + fit-target margin
 COMPUTE_BUFFER_MIB = {512: 900, 1024: 1300, 2048: 2100}  # by -ub, measured-ish for 35B-A3B class

@@ -10,7 +10,7 @@ function plan(sh, hw, ctx, depth, buf = 2100, cpuK = 1, gpuK = 1) {   // buf: co
   // the card side as llmbox/estimate.py DECODE (efficiency, fixed ms per layer), fitted to public llama-bench runs: CUDA dense
   // 90% + 0.035 ms, CUDA MoE 72% + 0.06 ms; Metal 80% + 0.1 ms (community M4 Pro / M5 Max runs of 35B-A3B MoE models).
   // hw.gen: older NVIDIA generations reach less of their bandwidth (estimate.gpu_generation)
-  const [eff, ovh] = hw.mac ? [0.8, 0.1] : sh.moe ? [0.72, 0.06] : [0.9, 0.035];
+  const [eff, ovh] = hw.mac ? (sh.moe ? [0.8, 0.1] : [0.9, 0.14]) : sh.moe ? [0.72, 0.06] : [0.9, 0.035];
   const tps = d => 1 / (cpuK * perCpu / (hw.rambw * 1e9 * 0.8 * sh.cpuEff) + gpuK * (perGpu + sh.kvB * d + (sh.swaB || 0) * (d ? Math.min(sh.swaW, d) : sh.swaW)) / (hw.vrambw * 1e9 * eff * (hw.gen || 1))
                         + sh.layers * ovh / 1000);
   return { fits, gf, ramUsed, buf, vram: Math.min(hw.vram, gpuFixed + (sh.moe ? sh.exp * gf * mib : sh.embed * mib)), t2: tps(2000), td: tps(Math.min(depth, ctx)) };
@@ -30,7 +30,7 @@ function forBox(sh, hw) {   // as llmbox fit: the recipe's context if it fits, e
 }
 function boxFrom(g, ramGB, rambw) {   // a picker entry and the RAM fields -> what plan() needs
   if (g[3] === "mac") { const mem = Math.min(ramGB, g[4]) * 1024;   // macOS lets the GPU use ~2/3 (small Macs) to 3/4 of unified memory
-    return { name: g[0], gpu: g[0], mac: true, mem, vram: mem * (mem >= 36864 ? 0.75 : 0.67), vrambw: g[2], ram: 0, rambw: g[2] }; }
+    return { name: g[0], gpu: g[0], mac: true, mem, vram: mem * (mem >= 36864 ? 0.75 : 0.67), vrambw: g[2], ram: 0, rambw: g[2], gen: g[5] || 1 }; }
   return { name: g[0], gpu: g[0].replace(/ \d+ GB$/, ""), vram: g[1], vrambw: g[2], ram: ramGB * 1024, rambw, gen: g[3] || 1 };
 }
 function boxLabel(b) { return b.mac ? `${b.name} · ${Math.round(b.mem / 1024)} GB unified · ${b.rambw} GB/s` : `${b.name} · ${Math.round(b.ram / 1024)} GB · ${b.rambw} GB/s`; }
