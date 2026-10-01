@@ -118,6 +118,10 @@ and 4% for mixture-of-experts ones, the worst 15%), nineteen Apple chips and eig
 Macs and AMD cards are checked the same way on dense models (2% median error); a mixture-of-experts model on them has no public table yet,
 and the page says <i>rough</i>.</p>
 
+<p>The numbers behind every ranking, for anyone to recompute or cite: <a href="data/models.csv">models.csv</a> ·
+<a href="data/speeds.csv">speeds.csv</a> · <a href="data/models.json">models.json</a> · the model settings in
+<a href="recipes/index.json">recipes/</a>. Licence: <a href="data/LICENSE.txt">CC BY 4.0</a>, credit "llmbox".</p>
+
 {_optimize_table(opts or {}, ranked)}
 
 <h2 id="people">Your computer</h2>

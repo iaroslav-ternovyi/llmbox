@@ -8,7 +8,9 @@ every page has its own inline DATA script."""
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
+import io
 import json
 import os
 import re
@@ -77,6 +79,56 @@ def head(html: str, name: str, site: str, api: str) -> str:
     return html.replace("<head>", f'<head><meta http-equiv="Content-Security-Policy" content="{_csp(html, api)}">', 1)
 
 
+DATA_LICENSE = """llmbox data: model scores, ranges and speeds - {site}/data/
+License: Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Credit: "llmbox ({site})". Built {built}; how the numbers are made: {site}/method
+
+models.csv   a row per model and settings (recipe): its score as % of Claude Opus 5.5 with the 95% range, the score per
+             use, the model file (Hugging Face repo, sha256), and its speed on the reference PC
+speeds.csv   measurements per model and hardware class (the reference PC is one machine among them): median tokens/s in a
+             short chat, 32k and 80k tokens into a session, and how many machines
+models.json  the same as models.csv, as the site's model list carries it (recipes/index.json has the settings too)
+"""
+
+
+def data_export(out_dir: str, site: str) -> list[str]:
+    """data/: the numbers behind the ranking for anyone to recompute or cite (CC BY 4.0), from the published model list."""
+    p = os.path.join(out_dir, "recipes", "index.json")
+    if not os.path.exists(p):
+        return []
+    idx = json.load(open(p))
+    d = os.path.join(out_dir, "data")
+    os.makedirs(d, exist_ok=True)
+    uses = sorted({u for e in idx["recipes"] for u in (e.get("uses") or {})})
+    m = io.StringIO()
+    w = csv.writer(m)
+    w.writerow(["id", "model", "score_pct_of_opus", "range_low", "range_high"] + [f"use_{u}" for u in uses]
+               + ["hf_repo", "file", "sha256", "engine", "ref_gpu", "ref_ram_read_gbs", "ref_tokens_per_s", "ref_tokens_per_s_deep",
+                  "ref_deep_k_tokens", "ref_measured"])
+    rows = []
+    for e in sorted(idx["recipes"], key=lambda e: -(e.get("score") or 0)):
+        ref = e.get("reference") or {}
+        rng = e.get("range") or [None, None]
+        w.writerow([e["id"], e.get("name"), e.get("score"), rng[0], rng[1]] + [(e.get("uses") or {}).get(u) for u in uses]
+                   + [e.get("hf_repo"), e.get("file"), e.get("sha256"), e.get("engine"), (ref.get("gpu") or "").replace("NVIDIA GeForce ", ""),
+                      ref.get("ram_bw_gbs"), ref.get("decode_tps"), ref.get("deep_tps"), ref.get("deep_k"), ref.get("measured")])
+        rows.append({k: e.get(k) for k in ("id", "name", "score", "range", "uses", "hf_repo", "file", "sha256", "engine", "reference", "measured")})
+    s = io.StringIO()
+    ws = csv.writer(s)
+    ws.writerow(["id", "hardware_class", "median_tokens_per_s", "median_tokens_per_s_at_32k", "median_tokens_per_s_at_80k", "machines"])
+    for e in idx["recipes"]:
+        for cls, v in sorted((e.get("measured") or {}).items()):
+            ws.writerow([e["id"], cls] + list(v[:4]))   # build.py: [t2, t32, t80, machines]
+    files = {"models.csv": m.getvalue(), "speeds.csv": s.getvalue(),
+             "models.json": json.dumps({"license": "CC BY 4.0", "credit": f"llmbox ({site})", "built": idx.get("built"), "models": rows}, indent=1),
+             "LICENSE.txt": DATA_LICENSE.format(site=site, built=idx.get("built"))}
+    out = []
+    for n, text in files.items():
+        open(os.path.join(d, n), "w", encoding="utf-8").write(text)
+        out.append(os.path.join(d, n))
+    return out
+
+
 def finish(out_dir: str, written: list[str]) -> list[str]:
     """Complete every written page's head; write sitemap.xml, robots.txt and _headers. Returns the files it wrote."""
     site, api = _site(), _server()
@@ -100,9 +152,15 @@ def finish(out_dir: str, written: list[str]) -> list[str]:
                           "/*.css\n  Cache-Control: public, max-age=31536000, immutable\n"
                           "/*.js\n  Cache-Control: public, max-age=31536000, immutable\n"
                           "/install.sh\n  Content-Type: text/plain; charset=utf-8\n  Cache-Control: public, max-age=300\n")}
+    # security.txt (RFC 9116): where to report a vulnerability - GitHub's private reporting
+    files[".well-known/security.txt"] = ("Contact: https://github.com/iaroslav-ternovyi/llmbox/security/advisories/new\n"
+                                         f"Expires: {time.strftime('%Y-%m-%dT00:00:00Z', time.gmtime(time.time() + 300 * 86400))}\n"
+                                         f"Preferred-Languages: en, ru, uk, it\nCanonical: {site}/.well-known/security.txt\n"
+                                         "Policy: https://github.com/iaroslav-ternovyi/llmbox/blob/main/SECURITY.md\n")
     out = []
     for n, text in files.items():
         p = os.path.join(out_dir, n)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
         open(p, "w", encoding="utf-8").write(text)
         out.append(p)
-    return out
+    return out + data_export(out_dir, site)
