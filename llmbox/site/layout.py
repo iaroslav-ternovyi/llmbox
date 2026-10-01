@@ -69,5 +69,5 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
             f'<nav class="tabs" aria-label="sections">{nav}</nav><a class="boxchip" id="boxchip" href="index.html#box" title="the box speeds and fit are shown for; change it on the home page">'
             f'Your box <b>reference PC</b></a><a class="getbtn" href="install.html">GET LLMBOX</a>'
             f'<a class="signin" id="signin" href="account.html">SIGN IN</a></header><main id="main">{body}</main>'
-            f'<footer><span>Every number comes from a saved run. The score does not depend on the box; speed does. <a href="method.html">How scores work →</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/iaroslav-ternovyi/llmbox">GitHub</a></span>'
+            f'<footer><span>Every number comes from a saved run. The score does not depend on the box; speed does. <a href="method.html">How scores work →</a> · <a href="privacy.html">Privacy</a> · <a href="terms.html">Terms</a> · <a href="https://github.com/iaroslav-ternovyi/llmbox">GitHub</a></span>'
             f'<span>generated {time.strftime("%b %d, %Y %H:%M")}</span></footer></div>{scripts}</body></html>')

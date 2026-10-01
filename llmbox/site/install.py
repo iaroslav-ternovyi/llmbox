@@ -123,3 +123,25 @@ def privacy_page() -> str:
  <a href="https://www.aepd.es">AEPD</a>.</li></ul></section>'''
     return _page("llmbox · privacy", "", body, ("pages.css", "method.css"),
                  about="What llmbox and its site keep, why, for how long and who else handles it: no cookies, counting without ids, uploads only on a yes, accounts deletable at once.")
+
+
+def terms_page() -> str:
+    body = '''
+<section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / terms</div><h1>Terms</h1>
+ <p class="q" style="margin-top:6px">Short, because llmbox is free and open source.</p></div></section>
+<section class="panel pad"><div class="lbl">The program and the site</div><ul class="plain">
+ <li>llmbox is open source under the <a href="https://github.com/iaroslav-ternovyi/llmbox/blob/main/LICENSE">Apache License 2.0</a>.
+ It comes without any warranty: scores and speeds are measurements and predictions, not promises, and running large models
+ works your hardware hard. You use it at your own risk.</li>
+ <li>The models llmbox downloads are not ours: each comes from Hugging Face under its own licence, which applies to your use of it.</li>
+ <li>NVIDIA, GeForce, AMD, Radeon, Ryzen, Apple, Mac and the names of models are their owners' trademarks, used here only to say
+ which hardware or model a number belongs to. llmbox is not affiliated with any of them.</li></ul></section>
+<section class="panel pad"><div class="lbl">What you send</div><ul class="plain">
+ <li>By sending results you allow llmbox to publish them on this site and in its <a href="data/LICENSE.txt">data download</a>
+ under Creative Commons Attribution 4.0, under your handle or without a name. You can delete them at any time
+ (<a href="privacy.html">how</a>); copies others already downloaded stay theirs under that licence.</li>
+ <li>Send only results of runs you made. Results that look wrong are held back or marked, not deleted silently, and a
+ machine or account that sends made-up results can be blocked.</li></ul></section>'''
+    return _page("llmbox · terms", "", body, ("pages.css", "method.css"),
+                 about="llmbox's terms: open source without warranty, models under their own licences, results published under CC BY 4.0 and deletable.")
+
