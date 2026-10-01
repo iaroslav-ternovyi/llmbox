@@ -15,6 +15,12 @@ For people running models:
 - `llmbox run -d` and `llmbox stop` run models in the background.
 - `llmbox pick` works for any machine (`--gpu 'RTX 4090'`) and shows measured speeds from people with the same
   hardware.
+- The installer puts `~/.local/bin` on the PATH itself, the way uv and rustup do: one marked line in the shell's startup
+  file. `LLMBOX_NO_MODIFY_PATH=1` opts out.
+- `llmbox update` and a second run of the installer really update. Before, pip kept the old code because the version
+  number had not changed.
+- On PyPI the package will be `llmbox-bench` (`llmbox` there is another project); the command stays `llmbox`. Until the
+  first release, installs come from GitHub.
 
 For the site:
 - The home page opens with "best for this box", with one line to copy. The browser's own report of the graphics card
