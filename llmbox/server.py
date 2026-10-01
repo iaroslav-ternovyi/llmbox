@@ -358,8 +358,8 @@ class Intake:
         """Where a received submission stands: how many are checked before it, and roughly when the site shows it (a
         quality run is re-graded in the sandbox, a few minutes each; the site is published at most every PUBLISH_EVERY_S)."""
         with self._db() as c:
-            r = c.execute("SELECT received FROM submissions WHERE id = ?", (sid,)).fetchone()
-            ahead = c.execute("SELECT count(*) FROM submissions WHERE status = 'received' AND received < ?", (r[0],)).fetchone()[0] if r else 0
+            r = c.execute("SELECT rowid FROM submissions WHERE id = ?", (sid,)).fetchone()   # arrival order (timestamps are to the second)
+            ahead = c.execute("SELECT count(*) FROM submissions WHERE status = 'received' AND rowid < ?", (r[0],)).fetchone()[0] if r else 0
         return {"ahead": ahead, "site_within_min": 4 * (ahead + 1) + PUBLISH_EVERY_S // 60}
 
     def status(self, sid: str) -> dict | None:
