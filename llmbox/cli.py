@@ -432,6 +432,16 @@ def _standing(host: str, rid: str, recs: list[dict]) -> None:
     if sp:
         print(f"  speed: {sp['decode_tps']:.0f} tokens/s" + (f"; machines like it ({hwclass.label(cls)}): median {same[0]:.0f} of {same[3]}"
                                                             if same else "; the first of its kind here - nobody has sent this hardware yet"))
+        expected = same[0] if same else None
+        if not expected:   # nobody measured this class yet: the prediction for this machine
+            prof = hosts.load(host)
+            cpu = prof["hw"].get("cpu") or {}
+            row = next((x for x in pick.rank(hosts.spec(prof), cpu.get("cores") or cpu.get("threads"), "all", cls, cls.startswith("apple-"),
+                                             pick.engines_of(prof)) if x["id"] == rid), {})
+            expected = row.get("t2")
+        slow = pick.slow_note(sp["decode_tps"], expected)
+        if slow:
+            print(slow)
     q = next((r for r in recs if r.get("kind") == "suite"), None)
     if q and any(x.get("pending") for x in q.get("rows") or []):
         print("  (its explanations are graded by the server's reader model once sent: the score here leaves them out)")
@@ -850,7 +860,7 @@ def cmd_site(a) -> None:
 
 # `llmbox --help` lists the commands by what you want to do, most used first
 COMMAND_GROUPS = [
-    ("Pick and run a model on your box", ["start", "doctor", "update", "host", "pick", "scout", "fit", "recipe", "install", "run", "stop", "tune", "optimize"]),
+    ("Pick and run a model on your box", ["start", "doctor", "update", "bug", "host", "pick", "scout", "fit", "recipe", "install", "run", "stop", "tune", "optimize"]),
     ("Measure it", ["test", "bench", "queue", "speed", "probe", "loops", "traces"]),
     ("Share and compare", ["login", "whoami", "profile", "submit", "logout", "forget", "serve"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
@@ -1058,6 +1068,8 @@ def main(argv: list[str] | None = None) -> None:
     st_.set_defaults(fn=cmd_start)
     up_ = command("update", "the newest llmbox and list of models")
     up_.set_defaults(fn=cmd_update)
+    bg = command("bug", "report a problem: opens a GitHub issue filled in with the last error and this computer's versions - you see it before sending")
+    bg.set_defaults(fn=lambda a: __import__("llmbox.bugreport", fromlist=["x"]).report())
     dr = command("doctor", "is this computer ready? each problem with the command that fixes it")
     dr.add_argument("--host", help="a registered machine (default: this computer)")
     dr.set_defaults(fn=cmd_doctor)
@@ -1138,15 +1150,21 @@ def main(argv: list[str] | None = None) -> None:
     assert not missing, f"commands without a group in COMMAND_GROUPS: {missing}"
     ap.epilog = "\n\n".join(f"{g}:\n" + "\n".join(f"  {c:14s} {helps[c]}" for c in cs if c in helps) for g, cs in COMMAND_GROUPS) + \
         "\n\nllmbox <command> --help for its options. Data lives in ~/.llmbox (results, recipes, queue, site)."
-    if not (argv if argv is not None else sys.argv[1:]):   # plain `llmbox`: the guided start
-        from . import wizard
-        raise SystemExit(wizard.main())
-    a = ap.parse_args(argv)
-    if hasattr(a, "endpoint") and not a.endpoint:   # the host's own model server (its profile), not a fixed address
-        a.endpoint = hosts.endpoint(getattr(a, "host", None), agent=a.cmd == "loops")
-    if getattr(a, "reader", None) == "":   # --reader without a URL: the box's own server
-        a.reader = hosts.endpoint(getattr(a, "host", None) or "box")
-    a.fn(a)
+    try:
+        if not (argv if argv is not None else sys.argv[1:]):   # plain `llmbox`: the guided start
+            from . import wizard
+            raise SystemExit(wizard.main())
+        a = ap.parse_args(argv)
+        if hasattr(a, "endpoint") and not a.endpoint:   # the host's own model server (its profile), not a fixed address
+            a.endpoint = hosts.endpoint(getattr(a, "host", None), agent=a.cmd == "loops")
+        if getattr(a, "reader", None) == "":   # --reader without a URL: the box's own server
+            a.reader = hosts.endpoint(getattr(a, "host", None) or "box")
+        a.fn(a)
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as e:   # a bug: a short message, the details kept for `llmbox bug` (nothing is sent by itself)
+        from . import bugreport
+        raise SystemExit(bugreport.crashed(e, argv if argv is not None else sys.argv[1:]))
 
 
 if __name__ == "__main__":

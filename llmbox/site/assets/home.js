@@ -119,7 +119,7 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
   const best = quick.length ? quick.reduce((a, b) => (long(b) > long(a) ? b : a)) : top;
   const why = best === top ? "the best score among the models that fit" :
     `${Math.round(top.vs - best.vs)} points below the best score, not measurably apart from it, and ${(long(best) / long(top)).toFixed(1)}× as fast here`;
-  const cmd = `curl -fsSL ${DATA.site}/install.sh | sh -s -- ${best.id}`;
+  const cmd = `curl --proto '=https' --tlsv1.2 -fsSL ${DATA.site}/install.sh | sh -s -- ${best.id}`;   // words.CURL
   const use = document.querySelector(".seg button.on");
   $("#pick").innerHTML = `<div class="pk"><div><span class="sc">Best for this box${preset ? " · " + esc(use ? use.textContent.toLowerCase() : "") : ""}</span>` +
     `<h2><a href="recipe-${best.id}.html">${esc(best.model || best.name)}</a> <small>${esc(best.quant || "")}</small></h2>` +

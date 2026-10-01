@@ -9,6 +9,10 @@ from __future__ import annotations
 import struct
 import urllib.request
 from dataclasses import dataclass, field
+try:
+    from . import UA
+except ImportError:   # shipped to a host as a single file next to the agent (llmbox/host.py)
+    UA = "llmbox"
 
 GGUF_MAGIC = b"GGUF"
 _SCALARS = {  # gguf value type -> struct format
@@ -58,7 +62,7 @@ def file_fetcher(path: str):
 
 def http_fetcher(url: str, token: str | None = None):
     def fetch(offset: int, length: int) -> bytes:
-        req = urllib.request.Request(url, headers={"Range": f"bytes={offset}-{offset + length - 1}", "User-Agent": "llmbox"})
+        req = urllib.request.Request(url, headers={"Range": f"bytes={offset}-{offset + length - 1}", "User-Agent": UA})
         if token:
             req.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(req, timeout=60) as r:

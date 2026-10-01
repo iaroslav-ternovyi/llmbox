@@ -9,6 +9,7 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from . import gguf
+from . import UA
 
 HF = "https://huggingface.co"
 _SPLIT = re.compile(r"^(?P<base>.+)-(?P<i>\d{5})-of-(?P<n>\d{5})\.gguf$")
@@ -27,7 +28,7 @@ def _token() -> str | None:
 
 
 def _get_json(url: str):
-    req = urllib.request.Request(url, headers={"User-Agent": "llmbox"})
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
     tok = _token()
     if tok:
         req.add_header("Authorization", f"Bearer {tok}")
@@ -110,7 +111,7 @@ def read_headers(f: GGUFFile, keep: frozenset = frozenset()) -> list[gguf.GGUFHe
 
 def model_card(repo: str) -> str:
     """README text of the repo (vendor settings are extracted from it by a human or an LLM, not parsed)."""
-    req = urllib.request.Request(f"{HF}/{repo}/raw/main/README.md", headers={"User-Agent": "llmbox"})
+    req = urllib.request.Request(f"{HF}/{repo}/raw/main/README.md", headers={"User-Agent": UA})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             return r.read().decode("utf-8", "replace")

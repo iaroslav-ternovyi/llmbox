@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 from .layout import _page
-from .words import esc, SITE_URL
+from .words import CURL, esc, SITE_URL
 
 REPO = "https://github.com/iaroslav-ternovyi/llmbox"
 
 
 def install_page() -> str:
-    one = f"curl -fsSL {SITE_URL}/install.sh | sh"
+    one = f"{CURL} {SITE_URL}/install.sh | sh"
     body = f'''
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / get llmbox</div><h1>Get llmbox</h1>
  <p class="q" style="margin-top:6px">One program: it picks the model that fits your computer, installs it with the settings measured here,

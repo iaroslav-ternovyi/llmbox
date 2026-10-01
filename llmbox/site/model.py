@@ -9,7 +9,7 @@ from .components import _cmp_href, _depth_bars, _fp_html, _groups_html, _groups_
 from .data import GPUS
 from .layout import _page
 from .stats import _axis_of, _range_pct
-from .words import _ago, _human, _lineage, _name_of, _quant, _size, esc, model_name, task_name, variant, SITE_URL
+from .words import _ago, _human, _lineage, _name_of, _quant, _size, CURL, esc, model_name, task_name, variant, SITE_URL
 
 
 # flags only the reference box needs (its port manager, RAM budget, core count, load mode)
@@ -150,7 +150,7 @@ def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool |
             + "".join(f'<button type="button" class="{"on" if i == 0 else ""}" data-t="{k}">{t}</button>' for i, (k, t) in
                       enumerate([("one", "One line"), ("srv", "llama-server"), ("win", "Windows"), ("swap", "llama-swap"), ("lms", "LM Studio"), ("oll", "Ollama")]))
             + "</div>"
-            + tab("one", f"curl -fsSL {SITE_URL}/install.sh | sh -s -- {rid}",
+            + tab("one", f"{CURL} {SITE_URL}/install.sh | sh -s -- {rid}",
                   ("The shortest way (Linux + NVIDIA): installs llmbox and llama.cpp, fits these settings to your computer, downloads the model, "
                    "and starts it - it asks before each step and before sending anything." if (r.get("runtime") or {}).get("engine", "llama.cpp") == "llama.cpp" else
                    f"This model runs on {(r.get('runtime') or {}).get('engine')}, which has no release builds for llmbox to install: build it "

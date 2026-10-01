@@ -11,6 +11,7 @@ import json
 import re
 import shlex
 import urllib.request
+from . import UA
 
 RELEASES = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=12"
 DIR = "$HOME/.llmbox/engines"   # in the host's shell
@@ -37,7 +38,7 @@ def asset_pattern(prof: dict) -> tuple[str, str]:
 
 def latest(pattern: str) -> dict:
     """The newest release asset matching the pattern: {tag, name, url, sha256, size}."""
-    req = urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json", "User-Agent": "llmbox"})
+    req = urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json", "User-Agent": UA})
     with urllib.request.urlopen(req, timeout=60) as r:
         rels = json.loads(r.read())
     for rel in rels:

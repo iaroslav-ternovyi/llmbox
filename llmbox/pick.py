@@ -127,3 +127,13 @@ def run(host: str | None, use: str, what_if: tuple | None = None, out=print) -> 
     out(f"\nm = measured on machines like this one ({hwclass.label(cls) if cls else '?'}; {n} of the models), ~ = predicted "
         "from the model's shape and this machine's memory speeds. `llmbox test <id>` measures one and sends it")
     return 0
+
+
+def slow_note(measured: float, expected: float | None) -> str | None:
+    """A run far below what its hardware does (under 40%): llama.cpp most likely ran on the CPU (a build without GPU
+    support, a driver problem, the card busy with something else) - the commonest complaint about local benchmarks
+    (LocalScore's, 2025), so it is said out loud instead of being reported as this computer's speed."""
+    if expected and measured and measured < 0.4 * expected:
+        return (f"  ! {measured:.0f} tokens/s is far below the ~{expected:.0f} this hardware does: the model is probably running on "
+                "the CPU (a llama.cpp build without GPU support, a driver problem, or the card busy) - `llmbox doctor` checks")
+    return None

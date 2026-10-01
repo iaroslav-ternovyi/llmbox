@@ -58,6 +58,18 @@ def _machine_line(prof: dict) -> str:
     return label if fp.get("apple_gpu_cores") is not None else f"{label} · {prof['hw']['ram_mib'] / 1024:.0f} GB RAM"   # a Mac's label has its memory
 
 
+def _newer(out) -> None:
+    """The model list names the llmbox version the site was built with: say so when this one is older."""
+    from . import __version__, pick
+    try:
+        cur = pick.index().get("llmbox")
+    except SystemExit:
+        return
+    v = lambda s: tuple(int(x) for x in str(s).split(".")[:3] if x.isdigit())
+    if cur and v(cur) > v(__version__):
+        out(f"(llmbox {cur} is out, this is {__version__}: `llmbox update` gets it and the newest model list)")
+
+
 def main(yes: bool = False, model: str | None = None, host: str | None = None, plan_only: bool = False, out=print) -> int:
     prof = _this_host(host, out)
     host = prof["name"]
@@ -79,6 +91,7 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
         if not engine:
             out("Without llama.cpp nothing can run; `llmbox` again when it is installed.")
     _fresh_registry(out)
+    _newer(out)
     cpu = prof["hw"].get("cpu") or {}
     rows = pick.rank(spec, cpu.get("cores") or cpu.get("threads"), "all", cls, mac, pick.engines_of(prof))
     ok = [x for x in rows if x["fits"] and x.get("use_score") is not None]
@@ -149,6 +162,9 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
             same = (next((e for e in pick.index()["recipes"] if e["id"] == rid), {}).get("measured") or {}).get(cls)
             out(f"  {sp['decode_tps']:.0f} tokens/s here" + (f"; machines like it: median {same[0]:.0f} ({same[3]} machine{'s' if same[3] != 1 else ''})"
                                                             if same else "; nobody has sent this hardware yet: yours would be the first"))
+            slow = pick.slow_note(sp["decode_tps"], same[0] if same else best.get("t2"))
+            if slow:
+                out(slow)
             path = next((p for p, r in results.files(host) if r.get("id") == m.get("id")), None)
             a = "n" if yes else None   # --yes takes the defaults, never a send: that needs its own yes
             while a is None:

@@ -97,7 +97,8 @@ def set_variants(host: str, rs: list[dict]) -> None:
 
 
 SITE_URL = "https://llmbox.pages.dev"   # where the public site will live (docs/roadmap.md stage 2)
-INSTALL = f"curl -fsSL {SITE_URL}/install.sh | sh"   # pip install llmbox once it is on PyPI
+CURL = "curl --proto '=https' --tlsv1.2 -fsSL"   # HTTPS only, as rustup's one-liner (no downgrade through a redirect)
+INSTALL = f"{CURL} {SITE_URL}/install.sh | sh"   # pip install llmbox once it is on PyPI
 
 
 def model_name(r: dict) -> str:

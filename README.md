@@ -23,7 +23,7 @@ ik_llama.cpp behind [llama-swap](https://github.com/mostlygeek/llama-swap).
 On the machine that runs models (or anywhere, with `--ssh` to it):
 
 ```bash
-curl -fsSL https://llmbox.pages.dev/install.sh | sh    # installs llmbox, then the guided start (or: pip install git+https://github.com/iaroslav-ternovyi/llmbox, then llmbox)
+curl --proto '=https' --tlsv1.2 -fsSL https://llmbox.pages.dev/install.sh | sh    # installs llmbox, then the guided start (or: pip install git+https://github.com/iaroslav-ternovyi/llmbox, then llmbox)
 ```
 
 What it looks like (an RTX 5070 box with 64 GB of DDR5):

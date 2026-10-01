@@ -20,6 +20,7 @@ import urllib.request
 import zipfile
 
 from .hosts import HOME
+from . import UA
 
 URL = "https://epoch.ai/data/benchmark_data.zip"
 DIR = os.path.join(HOME, "epoch")
@@ -38,7 +39,7 @@ def load() -> dict:
     if not os.path.exists(zp) or time.time() - os.path.getmtime(zp) > TTL:
         try:
             os.makedirs(DIR, exist_ok=True)
-            with urllib.request.urlopen(urllib.request.Request(URL, headers={"User-Agent": "llmbox"}), timeout=60) as r:
+            with urllib.request.urlopen(urllib.request.Request(URL, headers={"User-Agent": UA}), timeout=60) as r:
                 data = r.read()
             open(zp, "wb").write(data)
         except Exception:

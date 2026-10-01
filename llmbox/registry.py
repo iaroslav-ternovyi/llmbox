@@ -23,6 +23,7 @@ from . import hosts, recipe as rc
 
 REGISTRY = "registry"
 from . import public
+from . import UA
 DEFAULT_URL = public.site()   # the site (llmbox/public.py: a public default, $LLMBOX_SITE or ~/.llmbox/config.json)
 SCHEMA = 1
 
@@ -122,7 +123,8 @@ def export(host: str, rids: list[str], out_dir: str, meta: dict | None = None) -
         bank = {"version": suite.VERSION, "hash": ch, "file": f"bank-{ch}.json"}
     ip = os.path.join(d, "index.json")
     intake = os.environ.get("LLMBOX_SERVER") or public._config().get("server") or ""   # clients find the intake here
-    json.dump({"schema": SCHEMA, "built": time.strftime("%Y-%m-%dT%H:%M:%S"), "recipes": index, "suite": bank,
+    from . import __version__
+    json.dump({"schema": SCHEMA, "built": time.strftime("%Y-%m-%dT%H:%M:%S"), "llmbox": __version__, "recipes": index, "suite": bank,
                "intake": intake if intake.startswith("https://") else ""}, open(ip, "w"), indent=1)
     keep = {os.path.basename(x) for x in written} | {"index.json"}   # (an old bank-*.json goes too)
     for sub in (d, os.path.join(d, "shapes")):   # recipes the ranking no longer has
@@ -133,7 +135,7 @@ def export(host: str, rids: list[str], out_dir: str, meta: dict | None = None) -
 
 
 def _get(url: str) -> bytes:
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "llmbox"}), timeout=60) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=60) as r:
         return r.read()
 
 

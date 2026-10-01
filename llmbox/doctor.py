@@ -8,6 +8,7 @@ import sys
 import urllib.request
 
 from . import hosts, registry, submit
+from . import UA
 
 
 def checks(host: str | None = None) -> list[tuple[bool | None, str, str]]:
@@ -63,7 +64,7 @@ def _reach() -> list:
     out: list = []
     for what, url in (("the site (model list)", registry.DEFAULT_URL.rstrip("/") + "/recipes/index.json"), ("the results server", submit.DEFAULT_SERVER.rstrip("/") + "/api/v1/health")):
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "llmbox"}), timeout=10):
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=10):
                 out.append((True, f"reaches {what}", ""))
         except OSError as e:
             out.append((None, f"cannot reach {what} ({str(e)[:60]})", "check the network; everything else still works offline"))

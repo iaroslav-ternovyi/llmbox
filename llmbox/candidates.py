@@ -24,6 +24,7 @@ from . import draft as D
 from . import estimate as E
 from . import hf
 from .hosts import HOME
+from . import UA
 
 API = "https://huggingface.co/api/models"
 CACHE = os.path.join(HOME, "hf")
@@ -39,7 +40,7 @@ def _get(url: str, ttl: int = TTL):
     cp = os.path.join(CACHE, urllib.parse.quote(url, safe="")[:200] + ".json")
     if os.path.exists(cp) and time.time() - os.path.getmtime(cp) < ttl:
         return json.load(open(cp))
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "llmbox"}), timeout=60) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=60) as r:
         d = json.loads(r.read())
     json.dump(d, open(cp, "w"))
     return d
