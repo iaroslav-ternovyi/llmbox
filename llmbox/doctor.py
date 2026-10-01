@@ -29,8 +29,10 @@ def _machine(name: str) -> list:
     prof = hosts.load(name)
     hw = prof["hw"]
     g = (hw.get("gpus") or [{}])[0]
+    drv = ("WSL uses the Windows driver: install or update it in Windows from nvidia.com (580 or newer), then `wsl --shutdown`"
+           if hw.get("wsl") else None)
     if not hw.get("gpus"):
-        out.append((None, "no graphics card found: models run on the CPU (slow)", "an NVIDIA card needs its driver: sudo ubuntu-drivers install, then reboot"))
+        out.append((None, "no graphics card found: models run on the CPU (slow)", drv or "an NVIDIA card needs its driver: sudo ubuntu-drivers install, then reboot"))
     elif g.get("vendor") == "nvidia":
         cuda = hw.get("cuda_driver")
         if not cuda:   # a profile from before llmbox read it
@@ -38,7 +40,7 @@ def _machine(name: str) -> list:
         else:
             ok = tuple(int(x) for x in cuda.split(".")[:2]) >= (12, 8)
             out.append((ok, f"{g['name']}, driver {g.get('driver', '?')} (CUDA {cuda})",
-                        "a driver with CUDA 12.8+ (570 or newer): sudo ubuntu-drivers install, then reboot"))
+                        drv or "a driver with CUDA 12.8+ (570 or newer): sudo ubuntu-drivers install, then reboot"))
     elif g.get("vendor") == "apple":
         out.append((None, f"{g['name']} with {hw['ram_mib'] // 1024} GB: llmbox picks for Macs; running models on a Mac is coming", "-"))
     rts = hw.get("runtimes") or []
@@ -47,6 +49,11 @@ def _machine(name: str) -> list:
     bw = (prof.get("ram_bw") or {}).get("ram_read_gbs")
     out.append((bool(bw), f"memory speed: {bw} GB/s ({(prof.get('ram_bw') or {}).get('source')})" if bw else "memory speed: unknown",
                 f"llmbox host add {name}   (measures it; the machine should be idle)"))
+    win = (hw.get("wsl") or {}).get("windows_ram_mib")
+    if win and hw.get("ram_mib", 0) < 0.85 * win:   # WSL2 gives Linux half the PC's memory unless told otherwise
+        give = max(hw["ram_mib"] // 1024, win // 1024 - 8)
+        out.append((None, f"WSL2 gives Linux {hw['ram_mib'] / 1024:.0f} of this PC's {win / 1024:.0f} GB: bigger models keep part of themselves in RAM",
+                    f"in Windows, %UserProfile%\\.wslconfig: [wsl2] then memory={give}GB; run `wsl --shutdown`, open Ubuntu again, then `llmbox host add {name}`"))
     free = hw.get("disk_free_gib") or 0
     out.append((free >= 30, f"disk: {free:.0f} GB free", "models take 5-60 GB each: free some space in your home folder"))
     return out

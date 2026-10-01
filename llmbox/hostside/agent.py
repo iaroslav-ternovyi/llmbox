@@ -53,7 +53,20 @@ def _physical_cores() -> int | None:
         return None
 
 
+def _wsl() -> dict | None:
+    """Windows' WSL2: its Linux sees only the memory WSL gives it (half the PC's by default). The PC's total, through
+    Windows interop when it is on; None outside WSL."""
+    if "microsoft" not in platform.release().lower() and not os.environ.get("WSL_DISTRO_NAME"):
+        return None
+    if not shutil.which("nvidia-smi") and os.path.exists("/usr/lib/wsl/lib/nvidia-smi"):   # the Windows driver's, not always on PATH
+        os.environ["PATH"] = "/usr/lib/wsl/lib:" + os.environ.get("PATH", "")
+    ps = shutil.which("powershell.exe") or "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+    out = sh(f"'{ps}' -NoProfile -Command '(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory' 2>/dev/null", timeout=20)
+    return {"windows_ram_mib": int(out) // 2**20 if out.strip().isdigit() else None}
+
+
 def hwinfo() -> dict:
+    wsl = _wsl()   # first: it puts the WSL driver's nvidia-smi on PATH
     gpus = []
     q = sh("nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version,pcie.link.gen.max,pcie.link.width.max,"
            "power.limit,power.default_limit --format=csv,noheader,nounits")
@@ -121,6 +134,7 @@ def hwinfo() -> dict:
         "ram_mib": mem.get("MemTotal", 0), "ram_available_mib": mem.get("MemAvailable", 0),
         "gpus": gpus, "runtimes": runtimes, "llama_swap": swap,
         "disk_free_gib": round(du.free / 2**30, 1), "models_dir_guess": os.path.expanduser("~/models"),
+        **({"wsl": wsl} if wsl else {}),
     }
 
 

@@ -46,5 +46,15 @@ first = next(i for i in items if "looked at" in i[1])
 assert first[0] is None and first[2].startswith("llmbox "), first
 assert any("reaches" in i[1] or "cannot reach" in i[1] for i in items), items   # the network checks still run
 
+# doctor under WSL2: the Windows driver advice, and the memory WSL keeps from Linux
+load = hosts.load
+hosts.load = lambda n: {"name": "w", "ram_bw": {"ram_read_gbs": 60, "source": "measured"},
+                        "hw": {"gpus": [{"name": "RTX 4070", "vendor": "nvidia", "driver": "560", "vram_mib": 12282}], "cuda_driver": "12.6",
+                               "ram_mib": 32000, "runtimes": [], "disk_free_gib": 200, "wsl": {"windows_ram_mib": 65400}}}
+items = doctor._machine("w")
+hosts.load = load
+assert any("Windows driver" in i[2] for i in items if i[0] is False), items   # CUDA 12.6: the fix is in Windows, not apt
+assert any("WSL2 gives Linux 31 of this PC's 64 GB" in i[1] and "memory=55GB" in i[2] for i in items), items
+
 print(lines[2] if len(lines) > 2 else text)
 print("all passed")

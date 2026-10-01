@@ -38,8 +38,11 @@ llmbox test &lt;model&gt;    # 3 min speed + 10 min quality, where you stand aga
 llmbox stop            # stop what llmbox started
 llmbox login           # optional: GitHub, for your profile page and for your quality runs to count</pre></section>
 <section class="panel pad"><div class="lbl">What it needs</div><ul class="plain">
- <li><b>Linux with an NVIDIA card</b> (or Windows with WSL2) and its driver. llama.cpp comes with it: the official build for
+ <li><b>Linux with an NVIDIA card</b> and its driver. llama.cpp comes with it: the official build for
  your card and driver, checked against its published sha256 (your own build is used if you have one).</li>
+ <li><b>Windows:</b> in WSL2 with Ubuntu 24.04 (<code>wsl --install -d Ubuntu-24.04</code> in PowerShell), run the line above in its
+ terminal. It uses your Windows NVIDIA driver; <code>llmbox doctor</code> says when WSL gives Linux too little of your memory
+ (half of it unless told otherwise).</li>
  <li><b>Mac:</b> <code>llmbox pick</code> tells what fits and roughly how fast; running and measuring models on a Mac is coming.</li>
  <li>Python 3.12 or newer and git.</li></ul></section>
 <section class="panel pad"><div class="lbl">Your data</div><ul class="plain">
