@@ -389,7 +389,9 @@ def cmd_update(a: argparse.Namespace) -> None:
     venv = os.path.expanduser("~/.llmbox/venv/bin/pip")
     pip = [venv] if os.path.exists(venv) else [sys.executable, "-m", "pip"]
     # the repository until llmbox-bench is on PyPI (taking PyPI first before then would install whoever registers the name)
-    r = subprocess.run(pip + ["install", "-q", "--upgrade", "git+https://github.com/iaroslav-ternovyi/llmbox"])
+    # --force-reinstall: from a repository pip compares version numbers only, and 0.1.0 stays 0.1.0 between commits
+    # (no dependencies, so --no-deps loses nothing)
+    r = subprocess.run(pip + ["install", "-q", "--upgrade", "--force-reinstall", "--no-deps", "git+https://github.com/iaroslav-ternovyi/llmbox"])
     if r.returncode:
         raise SystemExit("the update failed (see above)")
     from . import registry
