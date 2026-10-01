@@ -44,6 +44,18 @@ Three parts (docs/roadmap.md §5, stage 2):
    - Run `deploy/sync.sh` once. The server gets the reference results and publishes the first site.
    - From then on, `~/.llmbox/bin/site-on-done.sh` runs `deploy/sync.sh` after every finished benchmark job.
 
+## Releasing to PyPI
+
+The package is `llmbox-bench` on PyPI (the command stays `llmbox`). Publishing uses Trusted Publishing, so no token is stored:
+
+1. Once, on pypi.org (your account): Publishing → add a pending publisher with project `llmbox-bench`, owner
+   `iaroslav-ternovyi`, repository `llmbox`, workflow `release.yml`, environment `pypi`.
+2. Bump `version` in `pyproject.toml`, then `git tag v0.1.0 && git push --tags`. The release workflow builds the
+   package, checks that its suite is a released one, and publishes it.
+3. After the first release only: switch `llmbox update` (`llmbox/cli.py`) and `install.sh` to `pip install llmbox-bench`
+   with the repository as the fallback. Until then they install from GitHub, because taking PyPI first before the name
+   is ours would install whoever registers it.
+
 ## What goes where
 
 - **Sent to the server:** reference results (box and cloud), recipes, calibration banks, model shapes, thinking traces

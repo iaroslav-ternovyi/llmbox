@@ -18,7 +18,7 @@ V="$HOME/.llmbox/venv"
 echo "installing llmbox with $PY into $V ..."
 "$PY" -m venv "$V" || { echo "no venv module: sudo apt install python3-venv (or python3.12-venv)" >&2; exit 1; }
 "$V/bin/pip" install -q --upgrade pip
-"$V/bin/pip" install -q --upgrade llmbox-bench 2>/dev/null || "$V/bin/pip" install -q --upgrade "git+$REPO"   # PyPI, else the repository
+"$V/bin/pip" install -q --upgrade "git+$REPO"   # the repository until llmbox-bench is on PyPI
 mkdir -p "$HOME/.local/bin"
 ln -sf "$V/bin/llmbox" "$HOME/.local/bin/llmbox"
 echo "installed: $("$V/bin/llmbox" --version)"
