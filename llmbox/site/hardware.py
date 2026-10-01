@@ -22,7 +22,7 @@ def hardware_page(rid: str, rec: dict, shape: dict, data: dict, community: list 
   <label><input type="checkbox" id="fitonly"> only where it fits</label><span class="q" id="hwnote"></span></div>
  <div id="boxes"></div>
  <p class="q hwl">Bar: tokens per second in a short chat; the tick marks the speed with a long document in context. <span class="src">measured</span> = timed on that box ·
- <span class="src">predicted</span> = from memory speeds, checked against the measured box · <span class="src">rough</span> = outside what was measured (Macs, most of the model on a big card).
+ <span class="src">predicted</span> = from memory speeds, checked against the measured box and public llama.cpp runs · <span class="src">rough</span> = a mixture-of-experts model on a Mac or an AMD card, where there are no public runs to check against yet.
  A measured row is the median of the machines in that class (card, RAM speed); each machine counts once.</p></section>
 <section class="panel pad"><div class="lbl">Add your computer</div>
  <p class="q">The first line installs llmbox and this model with the settings measured here, fitted to your hardware, times it and offers to send the time; the second adds the 40-minute quality test. Our server grades every answer again and adds it to the model's score. No account; <code>llmbox submit --dry-run</code> shows exactly what is sent, and nothing in it names you or the machine.</p>

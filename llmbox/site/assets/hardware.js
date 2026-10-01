@@ -4,7 +4,9 @@ const saved = savedBox(DATA);
 const refBox = { name: "the reference PC", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
 const box = saved || refBox;
 const cur = forBox(DATA.sh, box);
-const rough = hw => hw.uni || forBox(DATA.sh, hw).gf > 0.6;   // most experts on the GPU, or unified memory: outside the measured regime
+// the formula is checked against public runs for NVIDIA (dense and MoE), Macs and AMD (dense); mixture-of-experts models
+// on a Mac or an AMD card have no such table yet (tests/test_public_speeds.py)
+const rough = hw => DATA.sh.moe && (hw.uni || hw.amd);
 if (saved) { $("#advbox").textContent = `What would make your box faster · ${boxLabel(box)}`;
   $("#yourbox").innerHTML = cur.fits ? `Your box (${boxLabel(box)}): <b>~${Math.round(cur.t2)} tok/s</b> in a short chat, <b>~${Math.round(cur.td)}</b> with a long document, up to ${Math.round(cur.ctx / 1024)}k context.`
     : `Your box (${boxLabel(box)}): the model does not fit, even with a smaller context.`; }
