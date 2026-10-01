@@ -49,7 +49,7 @@ def run_page(rid: str, rec: dict, ref: dict | None, flags: dict) -> str:
 <section class="panel sum">
  <div><b>{f"{vs:.0f}%" if vs is not None else "—"}</b><span>of Claude Opus 5.5 in this run · range {s["capability_ci95"][0] / s["capability"] * vs if vs else 0:.0f}–{min(100, s["capability_ci95"][1] / s["capability"] * vs) if vs else 0:.0f}</span></div>
  <div><b class="w">{s["solved"]}</b><span>of {s["items"]} tasks solved</span></div>
- <div><b>{sp.get("decode_tps"):.0f}</b><span>tok/s in a short chat{f" · {float(report._deep(sp)):.0f} with a long context" if report._deep(sp) not in ("-", "") else ""}</span></div>
+ <div><b>{f"{sp['decode_tps']:.0f}" if sp.get("decode_tps") else "—"}</b><span>tok/s in a short chat{f" · {float(report._deep(sp)):.0f} with a long context" if report._deep(sp) not in ("-", "") else ""}</span></div>
  <div><b class="w">{f"{2000/bd[0][1]['prefill_tps']:.1f} s" if bd and bd[0][1].get("prefill_tps") else "—"}</b><span>first word at 2k</span></div>
  <div><b class="w">{s["solved_per_hour"]}</b><span>solved tasks per hour</span></div>
  <div><b class="w" style="color:var(--red)">{sum(1 for f in flags.values() if f["cut"]) + sum(1 for f in flags.values() if f["loop"])}</b><span>replies flagged: {sum(1 for f in flags.values() if f["cut"])} out of thinking room, {sum(1 for f in flags.values() if f["loop"])} looped</span></div></section>
