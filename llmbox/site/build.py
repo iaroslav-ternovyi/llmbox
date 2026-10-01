@@ -109,6 +109,8 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     w("404.html", _page("llmbox · page not found", "", '<section class="panel hd"><div><h1>Page not found</h1><p class="q" style="margin-top:8px">'
                         'The model or run may have been renamed. <a href="index.html">The ranking</a> · <a href="new.html">new models</a> · '
                         '<a href="compare.html">compare</a> · <a href="method.html">how scores work</a></p></div></section>', ("pages.css",)))
+    from .publish import finish
+    written += finish(out_dir, written)   # canonical, social preview, CSP per page; sitemap.xml, robots.txt, _headers
     # pages of earlier builds this one did not write (a run that no longer counts, a renamed recipe): only the site's own
     # kinds of file, so a folder with other things in it keeps them
     keep = {os.path.basename(p) for p in written}

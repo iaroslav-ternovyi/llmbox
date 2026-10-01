@@ -634,22 +634,32 @@ def _code_version() -> str:
     return r.stdout.strip()
 
 
-def serve(data: str, port: int = 8767, bind: str = "127.0.0.1", every_s: int = 30, on_accept=None) -> None:
+# a publish (site build + upload) at most this often: a rush of submissions would otherwise publish every 30 s and use
+# up the host's deployment allowance; what arrives in between goes out together
+PUBLISH_EVERY_S = int(os.environ.get("LLMBOX_PUBLISH_EVERY_S", "900"))
+
+
+def serve(data: str, port: int = 8767, bind: str = "127.0.0.1", every_s: int = 30, on_accept=None,
+          publish_every_s: int = PUBLISH_EVERY_S) -> None:
     """Run the intake; a thread ingests new submissions every every_s seconds and calls on_accept(ids) after any, or
-    when <data>/rebuild asks (deploy/sync.sh, an erasure). When the code under it changes (git pull), it exits after the
-    loop so its service manager starts the new code."""
+    when <data>/rebuild asks (deploy/sync.sh, an erasure) - at most once per publish_every_s, with everything since the
+    last call. When the code under it changes (git pull), it exits after the loop so its service manager starts the new code."""
     intake = Intake(data)
     started = _code_version()
 
     def loop():
+        waiting, last = [], 0.0
         while True:
             try:
                 ids = intake.ingest()
                 req = os.path.join(intake.data, "rebuild")
-                if (ids or os.path.exists(req)) and on_accept:
+                if ids or os.path.exists(req):
+                    waiting.append(ids or [])
                     with contextlib.suppress(OSError):
                         os.remove(req)
-                    on_accept(ids)
+                if waiting and on_accept and time.time() - last >= publish_every_s:
+                    on_accept([i for x in waiting for i in x])
+                    waiting, last = [], time.time()
             except Exception as e:   # one bad bundle must not stop the intake
                 print(f"ingest error: {e}", flush=True)
             if started and _code_version() != started:
