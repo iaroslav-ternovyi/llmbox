@@ -18,7 +18,13 @@ import sys
 from .hosts import HOME
 
 SCRIPT = r'''
-import json, sys, time
+import importlib.util, json, os, sys, time
+cur = os.environ.get("LLMBOX_CURRENT_READER")
+if cur:   # the reader is grading machinery, not the suite: the newest one (its fixes) grades every version's tasks
+    import llmbox
+    spec = importlib.util.spec_from_file_location("llmbox.reader", cur)
+    llmbox.reader = sys.modules["llmbox.reader"] = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(llmbox.reader)
 from llmbox import bench, suite
 path, url = sys.argv[1], sys.argv[2]
 rec = json.load(open(path))
@@ -68,6 +74,7 @@ def grade(path: str, progress=print) -> bool:
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", LLMBOX_READER_URL=url or "")
     if code:
         env["PYTHONPATH"] = code
+        env["LLMBOX_CURRENT_READER"] = reader.__file__
     p = subprocess.run([sys.executable, "-c", SCRIPT, path, url or ""], capture_output=True, text=True, env=env,
                        cwd=code or os.path.dirname(os.path.dirname(os.path.abspath(__file__))), timeout=3600)
     for line in (p.stdout + p.stderr).strip().splitlines()[-12:]:

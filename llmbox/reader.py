@@ -71,7 +71,7 @@ def _trace(key: str, res: dict) -> None:
         os.makedirs(TRACES, exist_ok=True)
         think = [m.get("reasoning_content") for m in res.get("messages") or [] if m.get("role") == "assistant" and m.get("reasoning_content")]
         with gzip.open(os.path.join(TRACES, f"{key[:16]}.json.gz"), "wt", encoding="utf-8") as f:
-            json.dump({"reader": READER_ID, "finish": res.get("finish_reason"), "usage": res.get("usage"), "final": res.get("final"),
+            json.dump({"reader": READER_ID, "finish": res.get("finish_reason"), "usage": res.get("usage"), "final": res.get("final"), "retry": res.get("retry"),
                        "reasoning": think}, f, ensure_ascii=False)
     except OSError:
         pass
@@ -88,6 +88,17 @@ def ask(prompt: str) -> str:
         raise RuntimeError("no reader endpoint: run through `llmbox bench` against the box, or set LLMBOX_READER_URL")
     res = client.run_chat(URL, MODEL, [{"role": "user", "content": prompt}], max_tokens=MAX_TOKENS, max_steps=1, timeout=900,
                           extra={"temperature": 0, "top_k": 1, "seed": 1})
+    if not (res["final"] or "").strip() or res.get("finish_reason") == "length":
+        # greedy decoding can loop for good ("747 * 0.15 = 111." until the token limit, 2026-10-01): once more with DRY,
+        # which penalises extending a repeat before the greedy pick - still deterministic, and only after a failure, so
+        # every answer graded so far (and the cache) stays as it was
+        res = client.run_chat(URL, MODEL, [{"role": "user", "content": prompt}], max_tokens=MAX_TOKENS, max_steps=1, timeout=900,
+                              extra={"temperature": 0, "top_k": 1, "seed": 1, "dry_multiplier": 0.8, "dry_base": 1.75,
+                                     "dry_allowed_length": 2, "dry_penalty_last_n": 16384,   # the whole reply (-1 is refused)
+                                     # no sequence breakers: the default ones (newline, "*", ":") cut "747 * 0.15 = 111." into
+                                     # pieces too short to penalise, and an empty list is refused (checked on the box)
+                                     "dry_sequence_breakers": ["\u0000"]})
+        res["retry"] = "dry"
     text = res["final"]
     _trace(key, res)
     if not (text or "").strip() or res.get("finish_reason") == "length":
