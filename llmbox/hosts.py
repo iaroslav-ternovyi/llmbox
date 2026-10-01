@@ -15,7 +15,8 @@ GPU_BW = {
     "RTX 5090": 1792, "RTX 5080": 960, "RTX 5070 Ti": 896, "RTX 5070": 672, "RTX 5060 Ti": 448, "RTX 5060": 448,
     "RTX 4090": 1008, "RTX 4080 SUPER": 736, "RTX 4080": 717, "RTX 4070 Ti SUPER": 672, "RTX 4070 Ti": 504,
     "RTX 4070 SUPER": 504, "RTX 4070": 504, "RTX 4060 Ti": 288, "RTX 4060": 272,
-    "RTX 3090 Ti": 1008, "RTX 3090": 936, "RTX 3080 Ti": 912, "RTX 3080": 760, "RTX 3070": 448, "RTX 3060": 360,
+    "RTX 3090 Ti": 1008, "RTX 3090": 936, "RTX 3080 Ti": 912, "RTX 3080": 760, "RTX 3070 Ti": 608, "RTX 3070": 448,
+    "RTX 3060 Ti": 448, "RTX 3060": 360, "RTX 2080 Ti": 616, "RTX 2080 SUPER": 496, "RTX 2080": 448, "RTX 2070": 448,
     "RTX PRO 6000": 1792, "RTX A6000": 768, "A100": 1935, "H100": 3350, "L40S": 864,
 }
 
@@ -24,7 +25,8 @@ GPU_VRAM_MIB = {
     "RTX 5090": 32607, "RTX 5080": 16303, "RTX 5070 Ti": 16303, "RTX 5070": 12227, "RTX 5060 Ti": 16311,
     "RTX 4090": 24564, "RTX 4080 SUPER": 16376, "RTX 4080": 16376, "RTX 4070 Ti SUPER": 16376, "RTX 4070 Ti": 12282,
     "RTX 4070 SUPER": 12282, "RTX 4070": 12282, "RTX 4060 Ti": 16380, "RTX 3090 Ti": 24576, "RTX 3090": 24576,
-    "RTX 3080 Ti": 12288, "RTX 3060": 12288,
+    "RTX 3080 Ti": 12288, "RTX 3080": 10240, "RTX 3070 Ti": 8192, "RTX 3070": 8192, "RTX 3060 Ti": 8192, "RTX 3060": 12288,
+    "RTX 4060": 8188, "RTX 5060": 8151, "RTX 2080 Ti": 11264, "RTX PRO 6000": 97887,
 }
 
 
@@ -53,8 +55,14 @@ def gpu_vram(name: str) -> int | None:
     return _lookup(GPU_VRAM_MIB, name)
 
 
-def gpu_bw(name: str) -> float | None:
+# cards sold under one name with a different memory bus by size (the driver reports the same name): {name: {GB: GB/s}}
+GPU_BW_BY_SIZE = {"RTX 3080": {12: 912}, "RTX 3060": {8: 240}}
+
+
+def gpu_bw(name: str, vram_mib: float | None = None) -> float | None:
     v = _lookup(GPU_BW, name)
+    if v and vram_mib:
+        v = (_lookup(GPU_BW_BY_SIZE, name) or {}).get(int(round(vram_mib / 1024)), v) if "ti" not in name.lower().split() else v
     return float(v) if v else None
 
 
@@ -141,7 +149,7 @@ def detect(name: str, ssh: str | None, ram_bw: float | None = None, measure: boo
     prof = dict(old, **{   # what the profile had besides detection (endpoints, power limits, notes) stays
         "name": name, "ssh": ssh, "detected_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "hw": info,
         "ram_bw": bw or {"ram_read_gbs": None, "source": "not measured"},
-        "vram_bw_gbs": (bw or {}).get("ram_read_gbs") if gpu and gpu.get("vendor") == "apple" else (gpu_bw(gpu["name"]) if gpu else None)
+        "vram_bw_gbs": (bw or {}).get("ram_read_gbs") if gpu and gpu.get("vendor") == "apple" else (gpu_bw(gpu["name"], gpu.get("vram_mib")) if gpu else None)
                        or old.get("vram_bw_gbs"),
     })
     save(name, prof)

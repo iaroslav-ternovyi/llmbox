@@ -31,11 +31,18 @@ def queue_state() -> list[dict]:
     return out
 
 
-# common GPUs: VRAM (MiB) and memory bandwidth (GB/s), for the "your box" picker
-GPUS = [("RTX 3060 12 GB", 12288, 360), ("RTX 3090 24 GB", 24576, 936), ("RTX 4060 Ti 16 GB", 16380, 288),
-        ("RTX 4070 12 GB", 12282, 504), ("RTX 4070 Ti Super 16 GB", 16376, 672), ("RTX 4080 16 GB", 16376, 717),
-        ("RTX 4090 24 GB", 24564, 1008), ("RTX 5060 Ti 16 GB", 16311, 448), ("RTX 5070 12 GB", 12227, 672),
-        ("RTX 5070 Ti 16 GB", 16303, 896), ("RTX 5080 16 GB", 16303, 960), ("RTX 5090 32 GB", 32607, 1792)]
+# common GPUs: VRAM (MiB) and memory bandwidth (GB/s), for the "your box" picker; by generation, then size. The 8 GB
+# cards are here because mixture-of-experts models keep their experts in RAM: a 35B-A3B runs on them.
+GPUS = [("RTX 2080 Ti 11 GB", 11264, 616),
+        ("RTX 3060 12 GB", 12288, 360), ("RTX 3060 Ti 8 GB", 8192, 448), ("RTX 3070 8 GB", 8192, 448), ("RTX 3070 Ti 8 GB", 8192, 608),
+        ("RTX 3080 10 GB", 10240, 760), ("RTX 3080 12 GB", 12288, 912), ("RTX 3080 Ti 12 GB", 12288, 912), ("RTX 3090 24 GB", 24576, 936),
+        ("RTX 3090 Ti 24 GB", 24576, 1008),
+        ("RTX 4060 8 GB", 8188, 272), ("RTX 4060 Ti 8 GB", 8188, 288), ("RTX 4060 Ti 16 GB", 16380, 288), ("RTX 4070 12 GB", 12282, 504),
+        ("RTX 4070 Super 12 GB", 12282, 504), ("RTX 4070 Ti 12 GB", 12282, 504), ("RTX 4070 Ti Super 16 GB", 16376, 672),
+        ("RTX 4080 16 GB", 16376, 717), ("RTX 4080 Super 16 GB", 16376, 736), ("RTX 4090 24 GB", 24564, 1008),
+        ("RTX 5060 8 GB", 8151, 448), ("RTX 5060 Ti 8 GB", 8151, 448), ("RTX 5060 Ti 16 GB", 16311, 448), ("RTX 5070 12 GB", 12227, 672),
+        ("RTX 5070 Ti 16 GB", 16303, 896), ("RTX 5080 16 GB", 16303, 960), ("RTX 5090 32 GB", 32607, 1792),
+        ("RTX PRO 6000 96 GB", 97887, 1792)]
 
 
 # Apple Silicon: unified memory, so no VRAM/RAM split - (name, 0, memory bandwidth GB/s, "mac", largest memory GB).
