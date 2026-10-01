@@ -103,14 +103,14 @@ def plan(rid: str, src: str, target: str, force: bool = False, unload: bool = Fa
             for p, dst, _w, _h in missing]
         got = sum(max(0, hv) for *_x, hv in missing)
         steps.append(Step("download", "todo" if idle or force else "blocked",
-                          f"{sum(w for _p, _d, w, _h in missing) / 2**30:.1f} GB from {m['hf_repo']}" + (f" ({got / 2**30:.1f} GB already there)" if got > 0 else "")
+                          f"{sum(w for _p, _d, w, _h in missing) / 1e9:.1f} GB from {m['hf_repo']}" + (f" ({got / 1e9:.1f} GB already there)" if got > 0 else "")
                           + ("" if idle or force else " - host busy"), " && ".join(cmds)))
     want_sha = (gf.sha256[0] if gf and len(gf.parts) == 1 else None) or m.get("sha256")
     steps.append(Step("verify", "todo" if want_sha else "skipped", f"sha256 against {want_sha[:16]}…" if want_sha else "no sha256 known for this file"))
 
     # 4-5: launcher and llama-swap entry - only where llama-swap is installed; elsewhere `llmbox run` serves the recipe
     if not (prof["hw"].get("llama_swap") or {}).get("config"):
-        steps.append(Step("serve", "skipped", f"no llama-swap on {target}: `llmbox run {rid}` serves it"))
+        steps.append(Step("serve", "next", f"llmbox serves it itself (`llmbox run {rid}`; no llama-swap needed)"))
         return fitted, steps, h
     cfg = (prof["hw"].get("llama_swap") or {}).get("config") or os.path.expanduser(rc.LLAMA_SWAP_CONFIG)
     lpath = os.path.join(os.path.dirname(cfg), f"start-{rid}.sh")
