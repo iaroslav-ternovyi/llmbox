@@ -2,9 +2,9 @@
 function plan(sh, hw, ctx, depth, buf = 2100, cpuK = 1, gpuK = 1) {   // buf: compute buffer MiB for -ub 2048 / 1024 / 512 = 2100 / 1300 / 900
   const mib = 1 / 1048576, kv = sh.kvB * ctx + sh.rec, gpuFixed = (sh.nonexp + kv) * mib + buf + 700, free = hw.vram - gpuFixed;
   let gf, ramUsed, fits, perCpu, perGpu;
-  if (hw.uni) { const fr = sh.moe ? sh.nUsed / sh.nExp : 1; fits = gpuFixed + ((sh.moe ? sh.exp : 0) + sh.embed) * mib <= hw.vram; gf = 1;
-                ramUsed = 0; perCpu = 0; perGpu = sh.nonexp + (sh.moe ? sh.exp * fr : 0); }   // unified memory: all of it on the GPU
-  else if (!sh.moe) { const need = gpuFixed + sh.embed * mib; fits = need <= hw.vram; gf = 1; ramUsed = sh.embed * mib; perGpu = sh.nonexp; perCpu = 0; }
+  // unified memory (Mac, Ryzen AI Max) as llmbox/hosts.spec has it: the GPU's share is the "VRAM", the rest is "RAM" at the
+  // same speed, where llama.cpp keeps the experts that do not fit the GPU's share (read by the CPU)
+  if (!sh.moe) { const need = gpuFixed + sh.embed * mib; fits = need <= hw.vram; gf = 1; ramUsed = sh.embed * mib; perGpu = sh.nonexp; perCpu = 0; }
   else { gf = Math.max(0, Math.min(1, free / (sh.exp * mib))); const cpuExp = sh.exp * (1 - gf); ramUsed = (cpuExp + sh.embed) * mib;
          fits = free > -1 && ramUsed + 4096 <= hw.ram; const fr = sh.nUsed / sh.nExp; perCpu = cpuExp * fr; perGpu = sh.nonexp + sh.exp * gf * fr; }
   // the card side as llmbox/estimate.py DECODE (efficiency, fixed ms per layer), fitted to public llama-bench runs: CUDA dense
@@ -34,8 +34,9 @@ function gpuKind(g) { return g[3] === "mac" ? "mac" : g[3] === "apu" ? "apu" : g
 function boxFrom(g, ramGB, rambw) {   // a picker entry and the RAM fields -> what plan() needs
   if (g[3] === "mac" || g[3] === "apu") { const mem = Math.min(ramGB, g[4]) * 1024, mac = g[3] === "mac";
     // macOS lets the GPU use ~2/3 (small Macs) to 3/4 of unified memory; a Ryzen AI Max up to 96 of its 128 GB
+    const vram = mem * (mac && mem < 36864 ? 0.67 : 0.75);
     return { name: g[0], gpu: g[0], mac, apu: !mac, uni: true, backend: mac ? "metal" : "vulkan", mem,
-             vram: mem * (mac && mem < 36864 ? 0.67 : 0.75), vrambw: g[2], ram: 0, rambw: g[2], gen: g[5] || 1 }; }
+             vram, vrambw: g[2], ram: mem - vram, rambw: g[2], gen: g[5] || 1 }; }
   return { name: g[0], gpu: g[0].replace(/ \d+ GB$/, ""), vram: g[1], vrambw: g[2], ram: ramGB * 1024, rambw,
            gen: typeof g[3] === "number" ? g[3] : 1, backend: g[4] === "vulkan" ? "vulkan" : "cuda", amd: g[4] === "vulkan" };
 }

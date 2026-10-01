@@ -62,7 +62,8 @@ def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = 
             rows.append(dict(e, fits=False, why=f"cannot read the model: {ex}"))
             continue
         # the reference box's measured/predicted ratio is about an NVIDIA card streaming experts over PCIe: not a Mac's
-        f = F.fit(r, shape, hw, cores=cores, cal=F.Calibration() if mac else registry.calibration(r, shape))
+        ref = registry.calibration(r, shape)   # a Mac keeps only its depth: the box's factors are about its card and RAM
+        f = F.fit(r, shape, hw, cores=cores, cal=F.Calibration(deep_k=ref.deep_k) if mac else ref)
         cal = F.Calibration() if mac else registry.calibration(r, shape, at_k=LONG // 1000)
         # one depth for every model (32k: an agent a few steps in), calibrated with the measured deep ratio
         t32 = cal.tps(shape, hw, LONG, deep=True, ctx=f.ctx, kv_type=r["placement"]["kv_type"], ubatch=f.ubatch) \
