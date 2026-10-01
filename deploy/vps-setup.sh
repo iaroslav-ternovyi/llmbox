@@ -4,6 +4,7 @@
 # It creates the user llmbox, installs Python 3.12, Caddy (HTTPS), bubblewrap (the sandbox) and Node 22 (wrangler), clones llmbox, and starts
 #   llmbox-intake.service   the intake (llmbox serve) on 127.0.0.1:8767; accepted submissions rebuild and publish the site
 #   caddy                   https://<this ip, dashed>.sslip.io -> /api/* of the intake (a certificate without a domain)
+#   goatcounter.service     the site's visit counts (no cookies, no ids) on 127.0.0.1:8081, https://stats.<that host>
 # Secrets (Cloudflare token) go in /etc/llmbox.env by hand afterwards; nothing secret is in this script or the repo.
 # Safe to re-run: every step checks what is there.
 set -euo pipefail
@@ -48,6 +49,17 @@ sudo -u llmbox bash -c "
 "
 touch /etc/llmbox.env && chmod 600 /etc/llmbox.env   # CLOUDFLARE_API_TOKEN=..., CLOUDFLARE_ACCOUNT_ID=... (by hand)
 
+# GoatCounter: a pinned release, checked against the sha256 GitHub publishes for it
+GC_VER=v2.7.0
+GC_SHA=98d221cb9c8ef2bf76d8daa9cca647839f8d8b0bb5bc7400ff9337c5da834511
+if ! /usr/local/bin/goatcounter version 2>/dev/null | grep -q "${GC_VER#v}"; then
+  curl -fsSL -o /tmp/goatcounter.gz "https://github.com/arp242/goatcounter/releases/download/$GC_VER/goatcounter-$GC_VER-linux-amd64.gz"
+  echo "$GC_SHA  /tmp/goatcounter.gz" | sha256sum -c - >/dev/null
+  gunzip -c /tmp/goatcounter.gz > /usr/local/bin/goatcounter && chmod 755 /usr/local/bin/goatcounter && rm -f /tmp/goatcounter.gz
+fi
+id goatcounter >/dev/null 2>&1 || useradd --system --home-dir /var/lib/goatcounter --create-home --shell /usr/sbin/nologin goatcounter
+install -m 644 /home/llmbox/llmbox/deploy/goatcounter.service /etc/systemd/system/goatcounter.service
+
 IP=$(curl -fsS4 https://api.ipify.org)
 HOST="${IP//./-}.sslip.io"
 cat > /etc/caddy/Caddyfile <<EOF
@@ -60,12 +72,24 @@ $HOST {
         respond "llmbox intake: POST /api/v1/runs (llmbox submit). The site is on Cloudflare Pages." 200
     }
 }
+stats.$HOST {
+    encode gzip
+    reverse_proxy 127.0.0.1:8081
+}
 EOF
 install -m 644 /home/llmbox/llmbox/deploy/llmbox-intake.service /etc/systemd/system/llmbox-intake.service
 systemctl daemon-reload
-systemctl enable --now llmbox-intake caddy
+systemctl enable --now llmbox-intake goatcounter caddy
 systemctl reload caddy
 
 ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw --force enable >/dev/null
 echo "intake: https://$HOST/api/v1/health"
-echo "next: put CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in /etc/llmbox.env, then systemctl restart llmbox-intake"
+echo "stats:  https://stats.$HOST"
+echo "next:"
+echo "  1. CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in /etc/llmbox.env"
+echo "  2. the counter's site and your login (asks for a password):"
+echo "       sudo -u goatcounter goatcounter db create site -db sqlite+/var/lib/goatcounter/db.sqlite3 -createdb -vhost stats.$HOST -user.email <you>"
+echo "     then in https://stats.$HOST settings: public dashboard on, data retention 760 days, an API token with 'count'"
+echo "  3. LLMBOX_STATS=https://stats.$HOST in /etc/llmbox.env; in the Pages project: GOATCOUNTER_URL=https://stats.$HOST and"
+echo "     the secret GOATCOUNTER_TOKEN (npx wrangler pages secret put GOATCOUNTER_TOKEN --project-name llmbox)"
+echo "  4. systemctl restart llmbox-intake"

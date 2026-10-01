@@ -1,0 +1,19 @@
+[Unit]
+Description=GoatCounter: the llmbox site's visit counts (no cookies, no ids), https://stats.<host> through Caddy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=goatcounter
+WorkingDirectory=/var/lib/goatcounter
+ExecStart=/usr/local/bin/goatcounter serve -listen 127.0.0.1:8081 -tls http -db sqlite+/var/lib/goatcounter/db.sqlite3 -automigrate
+Restart=always
+RestartSec=5
+MemoryMax=512M
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/goatcounter
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

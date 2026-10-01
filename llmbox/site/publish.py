@@ -16,7 +16,7 @@ import os
 import re
 import time
 
-from ..public import server as _server, site as _site
+from ..public import server as _server, site as _site, stats as _stats
 
 OG_IMAGE = "og.png"   # 1200x630, in assets/
 # pages no search engine should list: a person's profile (people are found by choice, not by search), sign-in, errors
@@ -54,7 +54,7 @@ def _csp(html: str, api: str) -> str:
             f"script-src 'self' {hashes}; "
             f"style-src 'self' 'unsafe-inline' {fonts}; "
             f"font-src 'self'{' https://fonts.gstatic.com' if fonts else ''}; "
-            "img-src 'self' data:; "
+            f"img-src 'self' data: {_stats()}; "   # the visit counter is an image request to our GoatCounter
             f"connect-src 'self' {api}; "
             "base-uri 'self'; form-action 'self'; object-src 'none'").replace("  ", " ")
 
@@ -152,6 +152,8 @@ def finish(out_dir: str, written: list[str]) -> list[str]:
                           "/*.css\n  Cache-Control: public, max-age=31536000, immutable\n"
                           "/*.js\n  Cache-Control: public, max-age=31536000, immutable\n"
                           "/install.sh\n  Content-Type: text/plain; charset=utf-8\n  Cache-Control: public, max-age=300\n")}
+    if _stats():   # deploy/pages/functions counts these two (Cloudflare Pages); every other path stays static and free
+        files["_routes.json"] = json.dumps({"version": 1, "include": ["/install.sh", "/recipes/index.json"], "exclude": []})
     # security.txt (RFC 9116): where to report a vulnerability - GitHub's private reporting
     files[".well-known/security.txt"] = ("Contact: https://github.com/iaroslav-ternovyi/llmbox/security/advisories/new\n"
                                          f"Expires: {time.strftime('%Y-%m-%dT00:00:00Z', time.gmtime(time.time() + 300 * 86400))}\n"

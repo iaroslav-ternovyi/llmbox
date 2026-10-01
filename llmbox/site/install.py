@@ -69,26 +69,57 @@ def account_page(api: str) -> str:
 
 
 def privacy_page() -> str:
-    body = '''
+    from ..public import operator, stats
+    op = operator()
+    who = (f"{esc(op.split('<')[0].strip())}, <a href=\"mailto:{esc(op.split('<')[1].rstrip('>'))}\">{esc(op.split('<')[1].rstrip('>'))}</a>"
+           if "<" in op else '<b class="no">[the operator\'s name and e-mail: to be set before launch]</b>')
+    counter = (f'<li><b>Visit counts</b> with <a href="https://www.goatcounter.com">GoatCounter</a>, run by llmbox itself on its server '
+               f'(<a href="{esc(stats())}">the numbers are public</a>): the page, the page you came from, browser, system, screen size, '
+               "country (worked out from the address, which is not kept), and a few clicks counted in aggregate - the hardware you pick, "
+               "copying the install command, signing in. No cookies, nothing stored in your browser, no id that follows you; nothing at "
+               "all when your browser sends Global Privacy Control or Do Not Track. Kept up to 25 months. Basis: measuring the "
+               "audience of this site, exempt from consent in Spain (AEPD guide on analytics cookies, 2024; LSSI art. 22.2) and "
+               "legitimate interest (GDPR art. 6.1.f).</li>"
+               "<li>Downloads of the installer and model-list fetches by llmbox are counted per day and per llmbox version, "
+               "without the address or any id.</li>") if stats() else "<li>No visit counting.</li>"
+    body = f'''
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / privacy</div><h1>Privacy</h1>
- <p class="q" style="margin-top:6px">What llmbox and this site keep, why, and how to have it deleted.</p></div></section>
+ <p class="q" style="margin-top:6px">What llmbox and this site keep, why, for how long, who else handles it, and how to have it deleted.</p></div></section>
+<section class="panel pad"><div class="lbl">Who</div><ul class="plain">
+ <li>llmbox is run by {who} (the controller under the GDPR). Write there for anything about your data.</li></ul></section>
 <section class="panel pad"><div class="lbl">This site</div><ul class="plain">
- <li>No cookies, no analytics, no trackers. The box you pick and your sign-in are kept in your own browser (localStorage) only.</li>
- <li>The graphics card preselected on the home page comes from what your browser reports; it is matched in the page and not sent anywhere.</li></ul></section>
+ <li>No cookies and no third-party scripts or fonts: everything is served from this site. The box you pick and your
+ sign-in are kept in your own browser (localStorage) only.</li>
+ <li>The graphics card preselected on the home page comes from what your browser reports; it is matched in the page and not sent anywhere.</li>
+ {counter}
+ <li>Errors in this site's scripts may be reported to the server: the message, the page and the build, without the address; kept 30 days.</li></ul></section>
 <section class="panel pad"><div class="lbl">The llmbox program</div><ul class="plain">
- <li>It keeps everything in <code>~/.llmbox</code> on your computer and sends nothing unless you run <code>llmbox test</code> or
- <code>llmbox submit</code> and answer yes. <code>llmbox submit --dry-run</code> prints exactly what would be sent.</li>
- <li>What is sent: the hardware (graphics card, CPU, RAM and its speed, OS, driver), the model file and settings, the speed
- figures and, for a quality test, the model's answers. Paths lose your home folder; user and host names are removed. A random
- id per install counts machines.</li></ul></section>
-<section class="panel pad"><div class="lbl">Accounts</div><ul class="plain">
- <li>Signing in with GitHub is optional. The server keeps your GitHub user id and name, a hash of each llmbox key it issued,
- and what you sent. It never keeps a GitHub token.</li>
- <li>Your profile page shows a handle, not your GitHub name, unless you choose to show it.</li>
- <li>The address a request comes from is kept only as a one-way hash, for rate limits.</li></ul></section>
-<section class="panel pad"><div class="lbl">Deleting it</div><ul class="plain">
- <li><code>llmbox forget</code>, or DELETE on the <a href="account.html">account page</a>, deletes the account and every result it sent,
- at once. Anonymous results can be deleted on request with their submission id (<code>~/.llmbox/submitted.json</code>).</li>
- <li>Questions and requests: <a href="https://github.com/iaroslav-ternovyi/llmbox/issues">github.com/iaroslav-ternovyi/llmbox/issues</a>.</li></ul></section>'''
+ <li>No telemetry. It keeps everything in <code>~/.llmbox</code> on your computer. What it fetches: the model list and settings
+ from this site (saying which llmbox version asks), models from Hugging Face, llama.cpp builds from GitHub.</li>
+ <li>It sends results only when you run <code>llmbox test</code> or <code>llmbox submit</code> and answer yes;
+ <code>llmbox submit --dry-run</code> prints exactly what would go. What is sent: the hardware (graphics card, CPU, RAM and its
+ speed, OS, driver), the model file and settings, the speed figures and, for a quality test, the model's answers. Paths lose
+ your home folder; user and host names are removed. A random id per install counts machines.</li>
+ <li>A crash is kept in <code>~/.llmbox/last-error.txt</code>; <code>llmbox bug</code> opens a GitHub issue you read and send yourself.</li></ul></section>
+<section class="panel pad"><div class="lbl">Accounts and results</div><ul class="plain">
+ <li>Signing in with GitHub is optional and asks GitHub for nothing beyond your public profile. The server keeps your GitHub
+ user id and name, a hash of each llmbox key it issued, and what you sent; never a GitHub token. Basis: providing the
+ account you asked for (GDPR art. 6.1.b).</li>
+ <li>Your profile page shows a handle, not your GitHub name, unless you choose to show it. Results are published on this site
+ and in its <a href="data/LICENSE.txt">data download</a> (CC BY 4.0) under that handle, or without any name when sent anonymously.</li>
+ <li>For rate limits the server keeps a keyed hash of the address a request came from, changed daily and deleted after two days.</li>
+ <li>Kept until you delete them.</li></ul></section>
+<section class="panel pad"><div class="lbl">Who else handles it</div><ul class="plain">
+ <li>Cloudflare serves this site and sees your address while doing so (Cloudflare, Inc., USA; under its data processing
+ terms and the EU-US Data Privacy Framework).</li>
+ <li>Hetzner (Germany) hosts the server with the accounts, results and visit counts.</li>
+ <li>GitHub (USA) handles signing in, and anything you post in the repository's issues.</li>
+ <li>Nothing is sold or used for advertising.</li></ul></section>
+<section class="panel pad"><div class="lbl">Your rights</div><ul class="plain">
+ <li><code>llmbox forget</code>, or DELETE on the <a href="account.html">account page</a>, deletes the account and every result it
+ sent, at once. Anonymous results are deleted on request with their submission id (<code>~/.llmbox/submitted.json</code>).</li>
+ <li>You can also ask for a copy of your data, for a correction, to limit or object to its use, and take your results elsewhere
+ (they are in the CC BY 4.0 download). And you can complain to the Spanish data protection authority,
+ <a href="https://www.aepd.es">AEPD</a>.</li></ul></section>'''
     return _page("llmbox · privacy", "", body, ("pages.css", "method.css"),
-                 about="What llmbox and its site keep, why, and how to have it deleted: no cookies or trackers, uploads only on a yes, accounts deletable at once.")
+                 about="What llmbox and its site keep, why, for how long and who else handles it: no cookies, counting without ids, uploads only on a yes, accounts deletable at once.")

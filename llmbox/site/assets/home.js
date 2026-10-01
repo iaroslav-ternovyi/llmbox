@@ -132,7 +132,7 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
       : `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
         `<p class="q">installs llmbox and this model, with the settings measured here fitted to your computer, then starts it (Linux + NVIDIA` +
         (hwNow && (hwNow.amd || hwNow.apu) ? "; on AMD it installs the Vulkan build of llama.cpp, not yet tried on AMD hardware" : "") + `; <a href="install.html">more</a>)</p></div></div>`);
-  if ($("#pickcpy")) $("#pickcpy").onclick = () => navigator.clipboard && navigator.clipboard.writeText(cmd).then(() => { $("#pickcpy").textContent = "COPIED"; setTimeout(() => $("#pickcpy").textContent = "COPY", 1500); });
+  if ($("#pickcpy")) $("#pickcpy").onclick = () => (llmboxCount("copy-install/home"), navigator.clipboard) && navigator.clipboard.writeText(cmd).then(() => { $("#pickcpy").textContent = "COPIED"; setTimeout(() => $("#pickcpy").textContent = "COPY", 1500); });
 }
 function render() {
   const w = DATA.presets[preset], refW = weighted(DATA.refBlocks, w);
@@ -202,6 +202,7 @@ $("#gpu").insertAdjacentHTML("beforeend", [["nv", "NVIDIA + system RAM"], ["amd"
 for (const r of DATA.ramKinds) $("#bw").insertAdjacentHTML("beforeend", `<option value="${r[1]}">${r[0]} · ${r[1]} GB/s</option>`);
 $("#bw").value = String(DATA.ramKinds.reduce((a, r) => Math.abs(r[1] - DATA.ref.rambw) < Math.abs(a - DATA.ref.rambw) ? r[1] : a, DATA.ramKinds[0][1]));
 ["#gpu", "#ram", "#bwn"].forEach(s => $(s).addEventListener("change", readBox));
+$("#gpu").addEventListener("change", () => llmboxCount(`pick/${$("#gpu").value || "reference"}`));   // which hardware people come with
 $("#bw").addEventListener("change", () => { $("#bwn").value = ""; readBox(); });   // a preset replaces a typed-in measurement
 document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
   document.querySelectorAll(".seg button").forEach(u => u.classList.remove("on")); b.classList.add("on"); preset = +b.dataset.p; render(); }));

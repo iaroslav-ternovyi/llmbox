@@ -84,4 +84,16 @@ try:
 except SystemExit as e:
     assert "429" in str(e), e
 srv.shutdown()
+
+# request addresses: a keyed hash (not the bare sha256 anyone can undo for IPv4), gone after two days
+import hashlib  # noqa: E402
+k = intake.addr_key("203.0.113.7")
+assert k != hashlib.sha256(b"203.0.113.7").hexdigest()[:16] and k == intake.addr_key("203.0.113.7"), k
+with intake._db() as c:
+    c.execute("UPDATE submissions SET received = '2020-01-01T00:00:00'")
+    c.execute("INSERT OR IGNORE INTO seeds VALUES (?,?,?,1)", (-1, "addr:" + k, "2020-01-01T00:00:00"))
+intake.prune()
+with intake._db() as c:
+    assert c.execute("SELECT count(*) FROM submissions WHERE addr != ''").fetchone()[0] == 0
+    assert c.execute("SELECT count(*) FROM seeds WHERE client LIKE 'addr:%'").fetchone()[0] == 0
 print("all passed")

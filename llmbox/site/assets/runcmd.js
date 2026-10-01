@@ -9,6 +9,7 @@ document.querySelectorAll(".run").forEach(sec => {
     pre.classList.toggle("clip"); b.textContent = pre.classList.contains("clip") ? all : "show fewer lines ▴"; }); });
   sec.querySelectorAll(".cpy").forEach(b => b.addEventListener("click", async () => {
     const t = b.parentElement.querySelector("pre").innerText;
+    llmboxCount(`copy-run/${b.closest(".rp") ? b.closest(".rp").dataset.t : "?"}`);   // which app people run models with
     try { await navigator.clipboard.writeText(t); b.textContent = "COPIED"; } catch (e) { b.textContent = "SELECT AND COPY"; }
     setTimeout(() => b.textContent = "COPY", 1500); }));
 });

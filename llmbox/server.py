@@ -38,6 +38,7 @@ import gzip
 import re
 import subprocess
 import hashlib
+import hmac
 import json
 import os
 import sqlite3
@@ -93,6 +94,48 @@ class Intake:
         c = sqlite3.connect(os.path.join(self.data, "intake.db"), timeout=30)
         c.row_factory = sqlite3.Row
         return c
+
+    def addr_key(self, addr: str) -> str:
+        """A request's address for rate limits only: keyed with this server's salt and the day (an unkeyed hash of an IPv4
+        address is undone by trying all 4 billion), and cleared after two days (prune)."""
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        return hmac.new(f"{self.salt}:{day}".encode(), (addr or "").encode(), hashlib.sha256).hexdigest()[:16]
+
+    ERRORS_KEEP_DAYS = 30
+    ERRORS_MAX_BYTES = 5 * 2**20
+
+    def site_error(self, raw: bytes) -> tuple[int, dict]:
+        """An error in one of the site's scripts: the message, the page, the build - no address, no browser string; kept
+        30 days (prune), at most 5 MB (a flood is dropped, not stored)."""
+        try:
+            d = json.loads(raw or b"{}")
+        except ValueError:
+            return 400, {"error": "not JSON"}
+        if not isinstance(d, dict):
+            return 400, {"error": "not an object"}
+        p = os.path.join(self.data, "site-errors.jsonl")
+        if os.path.exists(p) and os.path.getsize(p) > self.ERRORS_MAX_BYTES:
+            return 202, {"status": "dropped"}
+        row = {"t": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), "msg": str(d.get("msg") or "")[:300],
+               "page": str(d.get("page") or "")[:120], "src": str(d.get("src") or "")[:160], "build": str(d.get("build") or "")[:40]}
+        with self.lock, open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+        return 202, {"status": "kept"}
+
+    def prune(self) -> None:
+        """Address keys older than two days go: the limits look back an hour (submissions) and a day (seeds)."""
+        before = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 2 * 86400))
+        with self.lock, self._db() as c:
+            c.execute("UPDATE submissions SET addr = '' WHERE received < ? AND addr != ''", (before,))
+            c.execute("DELETE FROM seeds WHERE client LIKE 'addr:%' AND issued < ?", (before,))
+        p = os.path.join(self.data, "site-errors.jsonl")   # site script errors: 30 days
+        if os.path.exists(p):
+            old = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - self.ERRORS_KEEP_DAYS * 86400))
+            with self.lock:
+                rows = [l for l in open(p, encoding="utf-8") if l[7:26] >= old]   # '{"t": "<iso>"...'
+                with open(p + ".tmp", "w", encoding="utf-8") as f:
+                    f.writelines(rows)
+                os.replace(p + ".tmp", p)
 
     def recent(self, client: str, addr: str) -> int:
         since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 3600))
@@ -271,7 +314,7 @@ class Intake:
         client = str(b.get("client") or "")[:64]
         if len(client) < 16:
             return 400, {"error": "no install id"}
-        a = hashlib.sha256(addr.encode()).hexdigest()[:16]   # the address itself is not kept
+        a = self.addr_key(addr)   # the address itself is not kept
         with self.lock:
             if self.recent(client, a) >= PER_HOUR:
                 return 429, {"error": f"more than {PER_HOUR} submissions in an hour; try later"}
@@ -294,7 +337,7 @@ class Intake:
             return 400, {"error": "no install id"}
         since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 86400))
         with self.lock, self._db() as c:
-            a = hashlib.sha256(addr.encode()).hexdigest()[:16]
+            a = self.addr_key(addr)
             if c.execute("SELECT count(*) FROM seeds WHERE (client = ? OR client = ?) AND issued > ?", (client, "addr:" + a, since)).fetchone()[0] >= SEEDS_PER_DAY:
                 return 429, {"error": f"more than {SEEDS_PER_DAY} tests a day from this install"}
             s = 10**6 + secrets.randbelow(10**9)
@@ -318,6 +361,7 @@ class Intake:
 
     def ingest(self, save_host: str = COMMUNITY, predict=None) -> list[str]:
         """Check every received submission and file its accepted records; returns the submission ids done."""
+        self.prune()
         with self._db() as c:
             todo = [r["id"] for r in c.execute("SELECT id FROM submissions WHERE status = 'received' ORDER BY received")]
             handles = {r[0]: r[1] for r in c.execute("SELECT s.id, u.handle FROM submissions s JOIN users u ON u.id = s.user_id "
@@ -595,6 +639,8 @@ def handler(intake: Intake):
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
+            if self.path == "/api/v1/err" and n <= 4096:   # a site script's error (sendBeacon, text/plain: no preflight)
+                return self._json(*intake.site_error(self.rfile.read(n)))
             if self.path == "/api/v1/seed" and n <= 4096:
                 return self._json(*intake.seed(self.rfile.read(n), self.headers.get("X-Forwarded-For", "").split(",")[-1].strip() or self.client_address[0]))
             if self.path == "/api/v1/login/github" and n <= 4096:

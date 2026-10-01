@@ -24,6 +24,18 @@ def site() -> str:
     return (os.environ.get("LLMBOX_SITE") or _config().get("site") or SITE).rstrip("/")
 
 
+def operator() -> str:
+    """Who runs the public llmbox, as the privacy page names them (GDPR art. 13): "Name <e-mail>", from $LLMBOX_OPERATOR or
+    the config's "operator"; empty until it is set (the page then says so, plainly)."""
+    return (os.environ.get("LLMBOX_OPERATOR") or _config().get("operator") or "").strip()
+
+
+def stats() -> str:
+    """The GoatCounter the site counts visits with ($LLMBOX_STATS or the config's "stats"); empty: no counting (a local
+    or development build)."""
+    return (os.environ.get("LLMBOX_STATS") or _config().get("stats") or "").rstrip("/")
+
+
 def server() -> str:
     """The intake: $LLMBOX_SERVER, the config, else the address the site's model list names."""
     v = os.environ.get("LLMBOX_SERVER") or _config().get("server")

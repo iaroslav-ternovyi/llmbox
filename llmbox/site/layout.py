@@ -41,6 +41,13 @@ ABOUT = ("Local AI models graded on real work (coding, tools, documents, writing
          "graphics card or Mac, how fast it answers, how close it gets to Claude, and the settings to run it.")
 
 
+def _err_attrs() -> str:
+    """box.js reports the site's script errors to the public server (an https one: none from a local build)."""
+    from ..public import server
+    api = server()
+    return f' data-err="{esc(api)}/api/v1/err" data-build="{time.strftime("%Y-%m-%dT%H:%M")}"' if api.startswith("https://") else ""
+
+
 def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data=None, links: dict | None = None,
           about: str | None = None) -> str:
     """A page: the header (tabs, the visitor's box), the body, the footer. Stylesheets and scripts are shared files
@@ -48,8 +55,10 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
     links = dict(TAB_LINKS, **(links or {}))
     nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "NEW", "COMPARE", "METHOD"))
     styles = "".join(f'<link rel="stylesheet" href="{asset_url(c)}">' for c in ("fonts.css", "osc.css") + tuple(css))
-    scripts = ((f"<script>const DATA = {json.dumps(data).replace('</', '<\\/')};</script>" if data is not None else "")
-               + "".join(f'<script src="{asset_url(j)}"></script>' for j in ("box.js",) + tuple(js)))
+    from ..public import stats
+    counter = f'<script src="{asset_url("stats.js")}" data-stats="{esc(stats())}"></script>' if stats() else ""   # before the page's scripts: they count events
+    scripts = ((f"<script>const DATA = {json.dumps(data).replace('</', '<\\/')};</script>" if data is not None else "") + counter
+               + "".join(f'<script src="{asset_url(j)}"{_err_attrs() if j == "box.js" else ""}></script>' for j in ("box.js",) + tuple(js)))
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title><meta name="description" content="{esc(about or ABOUT)}">'
             '<link rel="icon" href="favicon.ico" sizes="32x32"><link rel="icon" href="icon.svg" type="image/svg+xml">'

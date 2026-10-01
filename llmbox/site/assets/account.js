@@ -22,7 +22,8 @@ function signedOut(msg) {
   $("#acct-sub").textContent = "With your GitHub account. Your profile shows a handle, not your name, unless you choose otherwise.";
   const start = `${API}/api/v1/login/web/start?return=${encodeURIComponent(location.href.split("#")[0])}`;
   $("#acct").innerHTML = `<section class="panel pad">` + (msg ? `<p class="no">${esc(msg)}</p>` : "") +
-    `<p><a class="btn solid" href="${esc(start)}">SIGN IN WITH GITHUB</a></p></section>`;
+    `<p><a class="btn solid" id="ghsignin" href="${esc(start)}">SIGN IN WITH GITHUB</a></p></section>`;
+  $("#ghsignin").addEventListener("click", () => llmboxCount("signin"));
   header(null);
 }
 function signedIn(me) {
