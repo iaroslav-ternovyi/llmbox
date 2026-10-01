@@ -181,7 +181,7 @@ def bandwidth(seconds: float = 3.0) -> dict:
     return json.loads(out)
 
 
-PY_BW_SCALE = 1.0   # C probe / Python probe on the same machine (set from the reference box)
+PY_BW_SCALE = 0.92   # C probe / Python probe on the same machine: the reference box 2026-10-01, 59.8 / 65.1-65.5 GB/s over 3 runs
 
 
 def _copy_worker(args):
