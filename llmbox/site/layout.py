@@ -31,13 +31,12 @@ def copy_assets(out_dir: str) -> list[str]:
     """Every stylesheet, script and image next to the pages."""
     out = []
     for f in sorted(os.listdir(ASSETS)):
-        if f.endswith((".css", ".js", ".sh", ".png", ".ico", ".svg", ".webmanifest")):   # install.sh: `curl -fsSL <site>/install.sh | sh`
+        if f.endswith((".css", ".js", ".sh", ".png", ".ico", ".svg", ".webmanifest", ".woff2", ".txt")):   # install.sh: `curl -fsSL <site>/install.sh | sh`
             shutil.copy(os.path.join(ASSETS, f), os.path.join(out_dir, f))
             out.append(os.path.join(out_dir, f))
     return out
 
 
-FONTS = "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&display=swap"
 ABOUT = ("Local AI models graded on real work (coding, tools, documents, writing) and timed on a real PC: what fits your "
          "graphics card or Mac, how fast it answers, how close it gets to Claude, and the settings to run it.")
 
@@ -48,15 +47,14 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
     (assets/); a page's own numbers go inline as DATA, before its scripts."""
     links = dict(TAB_LINKS, **(links or {}))
     nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "NEW", "COMPARE", "METHOD"))
-    styles = "".join(f'<link rel="stylesheet" href="{asset_url(c)}">' for c in ("osc.css",) + tuple(css))
+    styles = "".join(f'<link rel="stylesheet" href="{asset_url(c)}">' for c in ("fonts.css", "osc.css") + tuple(css))
     scripts = ((f"<script>const DATA = {json.dumps(data).replace('</', '<\\/')};</script>" if data is not None else "")
                + "".join(f'<script src="{asset_url(j)}"></script>' for j in ("box.js",) + tuple(js)))
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(title)}</title><meta name="description" content="{esc(about or ABOUT)}">'
             '<link rel="icon" href="favicon.ico" sizes="32x32"><link rel="icon" href="icon.svg" type="image/svg+xml">'
             '<link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="manifest" href="manifest.webmanifest">'
-            f'<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-            f'<link rel="stylesheet" href="{FONTS}">{styles}</head><body>'
+            f'<link rel="preload" href="plex-mono-400-latin.woff2" as="font" type="font/woff2" crossorigin>{styles}</head><body>'
             '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
             '<div class="wrap"><header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>'
             f'<nav class="tabs" aria-label="sections">{nav}</nav><a class="boxchip" id="boxchip" href="index.html#box" title="the box speeds and fit are shown for; change it on the home page">'
