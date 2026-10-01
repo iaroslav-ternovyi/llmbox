@@ -1,0 +1,36 @@
+name: release
+# a tag v* builds the package and publishes it to PyPI as llmbox-bench with Trusted Publishing (OIDC: no token stored
+# anywhere; PyPI attaches its attestations). One-time on pypi.org: add a pending publisher for project llmbox-bench,
+# owner iaroslav-ternovyi, repository llmbox, workflow release.yml, environment pypi.
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build && python -m build
+      - name: the suite in the package is a released one (a run from it is accepted by the server)
+        run: |
+          python -m venv /tmp/v && /tmp/v/bin/pip install -q dist/*.whl
+          cd /tmp && /tmp/v/bin/python -c "from llmbox import suite, irt; h = irt.canonical(suite.content_hash()); assert h in irt.RELEASES, h; print('suite', irt.RELEASES[h], h)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

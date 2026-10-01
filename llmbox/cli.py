@@ -388,7 +388,9 @@ def cmd_update(a: argparse.Namespace) -> None:
     """The newest llmbox, the way it was installed (the installer's venv, or pip), and the newest list of models."""
     venv = os.path.expanduser("~/.llmbox/venv/bin/pip")
     pip = [venv] if os.path.exists(venv) else [sys.executable, "-m", "pip"]
-    r = subprocess.run(pip + ["install", "-q", "--upgrade", "git+https://github.com/iaroslav-ternovyi/llmbox"])
+    r = subprocess.run(pip + ["install", "-q", "--upgrade", "llmbox-bench"], capture_output=True, text=True)   # PyPI first
+    if r.returncode:   # not on PyPI yet (or offline from it): the repository
+        r = subprocess.run(pip + ["install", "-q", "--upgrade", "git+https://github.com/iaroslav-ternovyi/llmbox"])
     if r.returncode:
         raise SystemExit("the update failed (see above)")
     from . import registry

@@ -1,5 +1,5 @@
 [project]
-name = "llmbox"
+name = "llmbox-bench"   # on PyPI ("llmbox" is another project there); the command is still llmbox
 version = "0.1.0"
 description = "Get the most quality x speed out of local LLMs on your hardware: scout, tune, benchmark, compare."
 requires-python = ">=3.12"   # f-strings reuse their quote character (PEP 701)
