@@ -33,7 +33,7 @@ assert H.key("NVIDIA GeForce RTX 3090", 24576, 60, count=2).startswith("2x-rtx-3
 assert H.ram_bucket(59) == "ram-45-65" and H.ram_bucket(20) == "ram-under-30" and H.ram_bucket(400) == "ram-120-plus" and H.ram_bucket(None) == "ram-unknown"
 assert H.key("", 0, 80, vendor="") == "cpu-only|ram-65-85|cpu"
 assert H.key("Apple M4 Max", 128 * 1024, vendor="apple", apple_gpu_cores=40) == "apple-m4-max-40c-128g|metal"
-assert H.key("AMD Radeon RX 7900 XTX", 24560, 60, vendor="amd").endswith("|rocm")
+assert H.key("AMD Radeon RX 7900 XTX", 24560, 60, vendor="amd").endswith("|vulkan")   # the build llmbox installs on AMD
 
 assert H.label("rtx-5070-12g|ram-45-65|cuda") == "RTX 5070 12 GB · RAM 45–65 GB/s", H.label("rtx-5070-12g|ram-45-65|cuda")
 assert H.label("2x-rtx-3090-24g|ram-65-85|cuda") == "2 × RTX 3090 24 GB · RAM 65–85 GB/s"

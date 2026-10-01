@@ -49,7 +49,7 @@ def ram_bucket(gbs: float | None) -> str:
 
 def backend(vendor: str, engine: str = "") -> str:
     v = (vendor or "").lower()
-    return {"nvidia": "cuda", "amd": "rocm", "apple": "metal", "intel": "sycl"}.get(v, "cpu" if not v else v)
+    return {"nvidia": "cuda", "amd": "vulkan", "apple": "metal", "intel": "sycl"}.get(v, "cpu" if not v else v)   # AMD: the build llmbox installs
 
 
 def key(gpu: str, vram_mib: float, ram_gbs: float | None = None, vendor: str = "nvidia", count: int = 1,

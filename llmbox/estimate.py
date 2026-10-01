@@ -24,7 +24,10 @@ RAM_EFFICIENCY = 0.80
 #   CUDA MoE: gpt-oss 20B on six Ada/Blackwell cards (#15396): routing and expert kernels cost more per layer
 #   Metal dense: llama 7B Q4_0 on nineteen M1-M5 chips (#4167); Metal MoE: community M4 Pro / M5 Max runs of 35B-A3B MoE
 #   models (llm-bench.io, 2026-09)
-DECODE = {("cuda", False): (0.90, 0.035), ("cuda", True): (0.72, 0.060), ("metal", False): (0.90, 0.14), ("metal", True): (0.80, 0.10)}
+#   Vulkan dense (AMD, RADV): llama 7B Q4_0 on seven Radeon cards and a Ryzen AI Max+ (#10879); Vulkan MoE: no table yet,
+#   CUDA's MoE efficiency with a fixed part between the two public Radeon AI PRO R9700 runs (#19890)
+DECODE = {("cuda", False): (0.90, 0.035), ("cuda", True): (0.72, 0.060), ("metal", False): (0.90, 0.14), ("metal", True): (0.80, 0.10),
+          ("vulkan", False): (0.80, 0.022), ("vulkan", True): (0.72, 0.050)}
 # older NVIDIA generations reach less of their bandwidth (same tables: Ampere ~0.88, Turing ~0.85, Pascal ~0.6)
 GPU_GENERATION = (("RTX 50", 1.0), ("RTX 40", 1.0), ("RTX PRO", 1.0), ("RTX 30", 0.88), ("RTX A", 0.88), ("A100", 0.88), ("A40", 0.88),
                   ("RTX 20", 0.85), ("TITAN RTX", 0.85), ("T4", 0.85), ("GTX 16", 0.75), ("GTX 10", 0.6), ("TITAN X", 0.6))
@@ -233,7 +236,7 @@ class HostSpec:
     ram_bw_gbs: float                 # measured sustained read bandwidth
     vram_bw_gbs: float
     ram_headroom_mib: int = 4096
-    backend: str = "cuda"             # "metal": Apple unified memory
+    backend: str = "cuda"             # "metal": Apple unified memory; "vulkan": AMD (llmbox installs the Vulkan build there)
     gpu_eff: float = 1.0              # the card's generation (gpu_generation)
 
 

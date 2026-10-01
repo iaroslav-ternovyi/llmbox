@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 
 from .estimate import HostSpec, gpu_generation
@@ -18,6 +19,9 @@ GPU_BW = {
     "RTX 3090 Ti": 1008, "RTX 3090": 936, "RTX 3080 Ti": 912, "RTX 3080": 760, "RTX 3070 Ti": 608, "RTX 3070": 448,
     "RTX 3060 Ti": 448, "RTX 3060": 360, "RTX 2080 Ti": 616, "RTX 2080 SUPER": 496, "RTX 2080": 448, "RTX 2070": 448,
     "RTX PRO 6000": 1792, "RTX A6000": 768, "A100": 1935, "H100": 3350, "L40S": 864,
+    "RX 9070 XT": 640, "RX 9070": 640, "RX 9060 XT": 320, "RX 7900 XTX": 960, "RX 7900 XT": 800, "RX 7900 GRE": 576,
+    "RX 7800 XT": 624, "RX 7700 XT": 432, "RX 7600 XT": 288, "RX 7600": 288, "RX 6950 XT": 576, "RX 6900 XT": 512,
+    "RX 6800 XT": 512, "RX 6800": 512, "RX 6700 XT": 384, "AI PRO R9700": 640, "PRO W7900": 864,
 }
 
 # VRAM (MiB) of the common size of each card, for what-if fits without a host profile (8 GB variants: pass --vram-gb)
@@ -27,6 +31,9 @@ GPU_VRAM_MIB = {
     "RTX 4070 SUPER": 12282, "RTX 4070": 12282, "RTX 4060 Ti": 16380, "RTX 3090 Ti": 24576, "RTX 3090": 24576,
     "RTX 3080 Ti": 12288, "RTX 3080": 10240, "RTX 3070 Ti": 8192, "RTX 3070": 8192, "RTX 3060 Ti": 8192, "RTX 3060": 12288,
     "RTX 4060": 8188, "RTX 5060": 8151, "RTX 2080 Ti": 11264, "RTX PRO 6000": 97887,
+    "RX 9070 XT": 16304, "RX 9070": 16304, "RX 9060 XT": 16304, "RX 7900 XTX": 24560, "RX 7900 XT": 20464, "RX 7900 GRE": 16368,
+    "RX 7800 XT": 16368, "RX 7700 XT": 12272, "RX 7600 XT": 16368, "RX 7600": 8176, "RX 6950 XT": 16368, "RX 6900 XT": 16368,
+    "RX 6800 XT": 16368, "RX 6800": 16368, "RX 6700 XT": 12272, "AI PRO R9700": 32624, "PRO W7900": 49136,
 }
 
 
@@ -57,6 +64,12 @@ def gpu_vram(name: str) -> int | None:
 
 # cards sold under one name with a different memory bus by size (the driver reports the same name): {name: {GB: GB/s}}
 GPU_BW_BY_SIZE = {"RTX 3080": {12: 912}, "RTX 3060": {8: 240}}
+
+
+def gpu_backend(name: str) -> str:
+    """The llama.cpp backend llmbox uses for a card named like this: AMD gets the Vulkan build, Apple Metal."""
+    n = (name or "").upper()
+    return "metal" if n.startswith(("APPLE", "MAC ")) else "vulkan" if re.search(r"\bRX \d|RADEON|RYZEN AI|R9700|W7900", n) else "cuda"
 
 
 def gpu_bw(name: str, vram_mib: float | None = None) -> float | None:
@@ -168,7 +181,8 @@ def spec(prof: dict, ram_headroom_mib: int = 4096) -> HostSpec:
                         backend="metal", gpu_eff=gpu_generation(gpus[0]["name"]))
     return HostSpec(vram_mib=gpus[0]["vram_mib"] if gpus else 0, ram_mib=prof["hw"]["ram_mib"],
                     ram_bw_gbs=float(bw), vram_bw_gbs=float(prof.get("vram_bw_gbs") or 500.0),
-                    ram_headroom_mib=ram_headroom_mib, gpu_eff=gpu_generation(gpus[0]["name"]) if gpus else 1.0)
+                    ram_headroom_mib=ram_headroom_mib, gpu_eff=gpu_generation(gpus[0]["name"]) if gpus else 1.0,
+                    backend="vulkan" if gpus and gpus[0].get("vendor") == "amd" else "cuda")
 
 
 def free_up(h, wait_s: int = 240) -> dict:

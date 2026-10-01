@@ -130,7 +130,8 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
       ? `<div class="pkc"><p><a class="btn solid" href="recipe-${best.id}.html#run">SETTINGS FOR LM STUDIO AND OLLAMA</a></p>` +
         `<p class="q">the file and the settings it was measured with; llmbox itself runs models on Linux + NVIDIA for now</p></div></div>`
       : `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
-        `<p class="q">installs llmbox and this model, with the settings measured here fitted to your computer, then starts it (Linux + NVIDIA; <a href="install.html">more</a>)</p></div></div>`);
+        `<p class="q">installs llmbox and this model, with the settings measured here fitted to your computer, then starts it (Linux + NVIDIA` +
+        (hwNow && (hwNow.amd || hwNow.apu) ? "; on AMD it installs the Vulkan build of llama.cpp, not yet tried on AMD hardware" : "") + `; <a href="install.html">more</a>)</p></div></div>`);
   if ($("#pickcpy")) $("#pickcpy").onclick = () => navigator.clipboard && navigator.clipboard.writeText(cmd).then(() => { $("#pickcpy").textContent = "COPIED"; setTimeout(() => $("#pickcpy").textContent = "COPY", 1500); });
 }
 function render() {
@@ -187,15 +188,17 @@ function readBox() {
   if (!g) { hwNow = null; $("#boxnote").textContent = "speeds measured on this box"; try { localStorage.removeItem("llmbox-box"); } catch (e) {} history.replaceState(null, "", location.pathname); render(); return; }
   const bw = parseFloat($("#bwn").value) || parseFloat($("#bw").value);
   hwNow = boxFrom(g, parseInt($("#ram").value), bw);
-  ["#bw", "#bwn"].forEach(s => $(s).disabled = !!hwNow.mac);   // a Mac's memory speed comes with the chip
+  ["#bw", "#bwn"].forEach(s => $(s).disabled = !!hwNow.uni);   // unified memory: its speed comes with the chip
   $("#boxnote").textContent = hwNow.mac ? "Mac: rough, for MLX-class engines (llama.cpp on Metal is often slower) - nothing here is measured on a Mac" :
+    hwNow.apu ? "Ryzen AI Max: unified memory, the whole model on the GPU; predicted for llama.cpp on Vulkan (~), nothing here is measured on one" :
+    hwNow.amd ? "AMD: predicted for llama.cpp on Vulkan (~), fitted to public runs on Radeon cards; nothing here is measured on AMD" :
     sameClass(hwNow) ? "same class as the reference box: measured speeds" : "speeds predicted for this box (~)";
   try { localStorage.setItem("llmbox-box", JSON.stringify({ gpu: $("#gpu").value, ram: $("#ram").value, bw: $("#bw").value, bwn: $("#bwn").value })); } catch (e) {}
   history.replaceState(null, "", `#gpu=${encodeURIComponent(g[0])}&ram=${$("#ram").value}&bw=${bw}`);
   render();
 }
-$("#gpu").insertAdjacentHTML("beforeend", `<optgroup label="NVIDIA + system RAM">${DATA.gpus.filter(g => g[3] !== "mac").map(g => `<option>${g[0]}</option>`).join("")}</optgroup>`
-  + `<optgroup label="Mac (unified memory)">${DATA.gpus.filter(g => g[3] === "mac").map(g => `<option>${g[0]}</option>`).join("")}</optgroup>`);
+$("#gpu").insertAdjacentHTML("beforeend", [["nv", "NVIDIA + system RAM"], ["amd", "AMD + system RAM"], ["apu", "AMD Ryzen AI Max (unified memory)"], ["mac", "Mac (unified memory)"]]
+  .map(([k, label]) => `<optgroup label="${label}">${DATA.gpus.filter(g => gpuKind(g) === k).map(g => `<option>${g[0]}</option>`).join("")}</optgroup>`).join(""));
 for (const r of DATA.ramKinds) $("#bw").insertAdjacentHTML("beforeend", `<option value="${r[1]}">${r[0]} · ${r[1]} GB/s</option>`);
 $("#bw").value = String(DATA.ramKinds.reduce((a, r) => Math.abs(r[1] - DATA.ref.rambw) < Math.abs(a - DATA.ref.rambw) ? r[1] : a, DATA.ramKinds[0][1]));
 ["#gpu", "#ram", "#bwn"].forEach(s => $(s).addEventListener("change", readBox));

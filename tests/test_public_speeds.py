@@ -7,6 +7,7 @@ Sources (2026-10-01):
   dense: llama 7B Q4_0, https://github.com/ggml-org/llama.cpp/discussions/15013
   MoE:   gpt-oss 20B MXFP4, https://github.com/ggml-org/llama.cpp/discussions/15396
   Apple: llama 7B Q4_0 on M1-M5, https://github.com/ggml-org/llama.cpp/discussions/4167
+  AMD:   llama 7B Q4_0 on Vulkan (RADV), https://github.com/ggml-org/llama.cpp/discussions/10879
 """
 import os
 import statistics
@@ -26,6 +27,10 @@ APPLE = [("M1", 68, 14.15), ("M1 Pro", 200, 36.41), ("M1 Max", 400, 61.19), ("M1
          ("M2 Pro", 200, 38.86), ("M2 Max", 400, 65.95), ("M2 Ultra", 800, 94.27), ("M3", 100, 21.34), ("M3 Pro", 150, 30.74),
          ("M3 Max", 300, 56.58), ("M3 Max", 400, 66.31), ("M3 Ultra", 800, 92.14), ("M4", 120, 24.11), ("M4 Pro", 273, 50.74),
          ("M4 Max", 410, 69.95), ("M4 Max", 546, 83.06), ("M5 Pro", 307, 66.33), ("M5 Max", 614, 119.92)]
+# AMD on Vulkan: (card, bandwidth GB/s, t/s); the 7900 XT's posted run sits below the 7800 XT's (an old run), hence the
+# looser worst case
+VULKAN = [("RX 7900 XTX", 960, 182.63), ("RX 7900 XT", 800, 123.18), ("RX 7800 XT", 624, 118.27), ("RX 6900 XT", 512, 108.0),
+          ("RX 6800 XT", 512, 100.32), ("RX 6700 XT", 384, 83.88), ("RX 7600", 288, 58.03), ("Ryzen AI Max+ 395", 256, 53.59)]
 # the two models as the formula sees them (bytes read per token from the GGUF headers)
 LLAMA = E.ModelShape(arch="llama", n_layers=32, n_mtp_layers=0, attn_layers=32, kv_heads=32, k_len=128, v_len=128,
                      nonexpert_bytes=int(3.76e9), embed_bytes=int(0.07e9), total_bytes=int(3.83e9), context_length=4096)
@@ -51,4 +56,11 @@ for chip, bw, measured in APPLE:
 med = statistics.median(abs(e) for _, e in errs)
 print(f"{'Apple llama 7B':16s} median |error| {med:.0%}   " + "  ".join(f"{c} {e:+.0%}" for c, e in errs))
 assert med <= 0.05 and max(abs(e) for _, e in errs) <= 0.16, errs
+errs = []
+for card, bw, measured in VULKAN:
+    hw = E.HostSpec(vram_mib=32000, ram_mib=65536, ram_bw_gbs=60, vram_bw_gbs=bw, backend="vulkan")
+    errs.append((card, E.plan(LLAMA, hw, ctx=4096, kv_type="q8_0", depth=0).decode_tps / measured - 1))
+med = statistics.median(abs(e) for _, e in errs)
+print(f"{'AMD llama 7B':16s} median |error| {med:.0%}   " + "  ".join(f"{c.replace('RX ', '')} {e:+.0%}" for c, e in errs))
+assert med <= 0.05 and max(abs(e) for _, e in errs) <= 0.25, errs
 print("all passed")

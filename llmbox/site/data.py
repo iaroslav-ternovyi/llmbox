@@ -43,6 +43,14 @@ GPUS = [("RTX 2080 Ti 11 GB", 11264, 616),
         ("RTX 5060 8 GB", 8151, 448), ("RTX 5060 Ti 8 GB", 8151, 448), ("RTX 5060 Ti 16 GB", 16311, 448), ("RTX 5070 12 GB", 12227, 672),
         ("RTX 5070 Ti 16 GB", 16303, 896), ("RTX 5080 16 GB", 16303, 960), ("RTX 5090 32 GB", 32607, 1792),
         ("RTX PRO 6000 96 GB", 97887, 1792)]
+# AMD cards (llmbox runs the Vulkan build of llama.cpp there): (name, VRAM MiB, GB/s)
+AMD = [("RX 6700 XT 12 GB", 12272, 384), ("RX 6800 XT 16 GB", 16368, 512), ("RX 6900 XT 16 GB", 16368, 512),
+       ("RX 7600 8 GB", 8176, 288), ("RX 7600 XT 16 GB", 16368, 288), ("RX 7700 XT 12 GB", 12272, 432), ("RX 7800 XT 16 GB", 16368, 624),
+       ("RX 7900 GRE 16 GB", 16368, 576), ("RX 7900 XT 20 GB", 20464, 800), ("RX 7900 XTX 24 GB", 24560, 960),
+       ("RX 9060 XT 16 GB", 16304, 320), ("RX 9070 16 GB", 16304, 640), ("RX 9070 XT 16 GB", 16304, 640),
+       ("Radeon AI PRO R9700 32 GB", 32624, 640)]
+# AMD Ryzen AI Max (Strix Halo): unified memory like a Mac, but Linux and the Vulkan build - (name, 0, GB/s, "apu", largest GB)
+APUS = [("Ryzen AI Max+ 395", 0, 256, "apu", 128), ("Ryzen AI Max 390", 0, 256, "apu", 64)]
 
 
 # Apple Silicon: unified memory, so no VRAM/RAM split - (name, 0, memory bandwidth GB/s, "mac", largest memory GB).
@@ -57,7 +65,9 @@ MACS = [("Mac M1", 0, 68, "mac", 16), ("Mac M1 Pro", 0, 200, "mac", 32), ("Mac M
 
 
 # the generation factor plan.js reads: NVIDIA g[3], Mac g[5] (g[3] is "mac" there)
-GPUS = [(n, v, b, gpu_generation(n)) for n, v, b in GPUS] + [m + (gpu_generation(m[0]),) for m in MACS]
+# AMD: g[3] the generation factor, g[4] "vulkan"; Ryzen AI Max: g[5] the factor (1)
+GPUS = ([(n, v, b, gpu_generation(n)) for n, v, b in GPUS] + [(n, v, b, 1.0, "vulkan") for n, v, b in AMD]
+        + [m + (gpu_generation(m[0]),) for m in MACS] + [a + (1.0,) for a in APUS])
 
 
 RAM_KINDS = [("DDR4-3200", 40), ("DDR5-5600", 60), ("DDR5-6400", 75), ("DDR5-8000", 88)]
@@ -91,7 +101,8 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
             # speeds people measured, per recipe and hardware class: [t2, deep, machines, people] (community_speeds)
             "cm": {rid: {c["class"]: [c["t2"], c["t80"] or c["t32"], c["machines"], c["people"]] for c in cls}
                    for rid, cls in community_speeds(files, host).items()},
-            "gpuClass": {g[0]: hwclass.key(g[0], g[1]).split("|")[0] for g in GPUS if g[3:4] != ("mac",)},
+            "gpuClass": {g[0]: hwclass.key(g[0], g[1], vendor="amd" if g[4:5] == ("vulkan",) else "nvidia").split("|")[0]
+                         for g in GPUS if g[3] not in ("mac", "apu")},
             "ramEdges": list(hwclass.RAM_EDGES)}
 
 

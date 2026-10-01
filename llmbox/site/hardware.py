@@ -18,7 +18,7 @@ def hardware_page(rid: str, rec: dict, shape: dict, data: dict, community: list 
 <section class="panel"><div class="lbl" id="advbox">What would make the reference PC faster</div><div class="adv" id="adv"></div>
  <div class="why" id="why"></div></section>
 <section class="panel"><div class="lbl" id="boxlbl">Computers</div>
- <div class="hwf"><div class="seg" role="group" aria-label="show"><button class="on" data-k="all">All</button><button data-k="nv">NVIDIA</button><button data-k="mac">Mac</button></div>
+ <div class="hwf"><div class="seg" role="group" aria-label="show"><button class="on" data-k="all">All</button><button data-k="nv">NVIDIA</button><button data-k="amd">AMD</button><button data-k="mac">Mac</button></div>
   <label><input type="checkbox" id="fitonly"> only where it fits</label><span class="q" id="hwnote"></span></div>
  <div id="boxes"></div>
  <p class="q hwl">Bar: tokens per second in a short chat; the tick marks the speed with a long document in context. <span class="src">measured</span> = timed on that box ·

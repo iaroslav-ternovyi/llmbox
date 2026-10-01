@@ -91,7 +91,7 @@ def run(host: str | None, use: str, what_if: tuple | None = None, out=print) -> 
         if not vram:
             raise SystemExit(f"unknown VRAM for {gpu!r}: pass --vram-gb")
         hw = E.HostSpec(vram_mib=vram, ram_mib=int(ram_gb * 1024), ram_bw_gbs=ram_bw, vram_bw_gbs=hosts.gpu_bw(gpu, vram) or 500.0,
-                        gpu_eff=E.gpu_generation(gpu))
+                        gpu_eff=E.gpu_generation(gpu), backend=hosts.gpu_backend(gpu))
         cores, where = None, f"{gpu} · {ram_gb:g} GB RAM @ {ram_bw:g} GB/s"
         host = "<your host>"
 
