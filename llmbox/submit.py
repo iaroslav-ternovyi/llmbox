@@ -167,8 +167,10 @@ def run(paths: list[str], host: str | None, server: str, dry_run: bool, out=prin
     for (_p, r) in todo:
         led[r["id"]] = res.get("id")
     json.dump(led, open(LEDGER, "w"), indent=1)
-    out(f"sent {len(todo)} record(s): the server checks them within a minute - {server.rstrip('/')}{res['url']}" if res.get("url")
-        else f"sent {len(todo)} record(s): submission {res.get('id')} {res.get('status')}")
+    wait = (f"{res['ahead']} submission(s) ahead; on the site in about {res['site_within_min']} minutes" if "ahead" in res
+            else "on the site within about 20 minutes")   # an older server
+    out(f"sent {len(todo)} record(s): {wait} (a quality test is re-graded on the server first) - status: {server.rstrip('/')}{res['url']}"
+        if res.get("url") else f"sent {len(todo)} record(s): submission {res.get('id')} {res.get('status')}")
     from . import registry
     rids = sorted({(r.get("recipe") or {}).get("id") for _p, r in todo} - {None})
     if rids:   # where it shows up (the site rebuilds after the check)

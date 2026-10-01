@@ -324,7 +324,7 @@ class Intake:
                 c.execute("INSERT INTO submissions (id, received, client, addr, bytes, records, status, reason, detail, user_id) "
                           "VALUES (?,?,?,?,?,?,?,?,?,?)", (sid, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), client, a, len(raw),
                                                            len(b["records"]), "received", "", "[]", (user or {}).get("id")))
-        return 202, {"id": sid, "status": "received", "url": f"/api/v1/runs/{sid}"}
+        return 202, {"id": sid, "status": "received", "url": f"/api/v1/runs/{sid}", **self.queue(sid)}
 
     def seed(self, raw: bytes, addr: str = "") -> tuple[int, dict]:
         """A fresh seed for this install's next quality test (the tasks cannot be prepared in advance)."""
@@ -354,10 +354,20 @@ class Intake:
                 c.execute("UPDATE seeds SET used = 1 WHERE seed = ?", (seed,))
             return ok
 
+    def queue(self, sid: str) -> dict:
+        """Where a received submission stands: how many are checked before it, and roughly when the site shows it (a
+        quality run is re-graded in the sandbox, a few minutes each; the site is published at most every PUBLISH_EVERY_S)."""
+        with self._db() as c:
+            r = c.execute("SELECT received FROM submissions WHERE id = ?", (sid,)).fetchone()
+            ahead = c.execute("SELECT count(*) FROM submissions WHERE status = 'received' AND received < ?", (r[0],)).fetchone()[0] if r else 0
+        return {"ahead": ahead, "site_within_min": 4 * (ahead + 1) + PUBLISH_EVERY_S // 60}
+
     def status(self, sid: str) -> dict | None:
         with self._db() as c:
             r = c.execute("SELECT id, received, records, status, reason, detail FROM submissions WHERE id = ?", (sid,)).fetchone()
-        return dict(r, detail=json.loads(r["detail"] or "[]")) if r else None
+        if not r:
+            return None
+        return dict(r, detail=json.loads(r["detail"] or "[]"), **(self.queue(sid) if r["status"] == "received" else {}))
 
     def ingest(self, save_host: str = COMMUNITY, predict=None) -> list[str]:
         """Check every received submission and file its accepted records; returns the submission ids done."""

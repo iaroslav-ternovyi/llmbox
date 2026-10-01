@@ -1,0 +1,9 @@
+[Unit]
+Description=llmbox: back up the server's state with restic (deploy/backup.sh)
+ConditionPathExists=/etc/llmbox-backup.env
+
+[Service]
+Type=oneshot
+ExecStart=/home/llmbox/llmbox/deploy/backup.sh
+Nice=10
+IOSchedulingClass=idle

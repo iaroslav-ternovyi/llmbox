@@ -12,7 +12,7 @@ REPO="${1:?usage: vps-setup.sh <repo-url> [<ssh public key for the llmbox user>]
 PUBKEY="${2:-}"
 
 apt-get update -q
-apt-get install -y -q python3 python3-venv git rsync ufw bubblewrap apparmor debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+apt-get install -y -q python3 python3-venv git rsync ufw bubblewrap apparmor debian-keyring debian-archive-keyring apt-transport-https curl gnupg restic
 # Node 22+ for wrangler (the site upload); Ubuntu 24.04 ships 18
 if ! node -e 'process.exit(parseInt(process.versions.node) >= 22 ? 0 : 1)' 2>/dev/null; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
@@ -78,8 +78,9 @@ stats.$HOST {
 }
 EOF
 install -m 644 /home/llmbox/llmbox/deploy/llmbox-intake.service /etc/systemd/system/llmbox-intake.service
+install -m 644 /home/llmbox/llmbox/deploy/llmbox-backup.service /home/llmbox/llmbox/deploy/llmbox-backup.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now llmbox-intake goatcounter caddy
+systemctl enable --now llmbox-intake goatcounter caddy llmbox-backup.timer   # the backup skips until /etc/llmbox-backup.env exists
 systemctl reload caddy
 
 ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw --force enable >/dev/null
@@ -93,3 +94,5 @@ echo "     then in https://stats.$HOST settings: public dashboard on, data reten
 echo "  3. LLMBOX_STATS=https://stats.$HOST in /etc/llmbox.env; in the Pages project: GOATCOUNTER_URL=https://stats.$HOST and"
 echo "     the secret GOATCOUNTER_TOKEN (npx wrangler pages secret put GOATCOUNTER_TOKEN --project-name llmbox)"
 echo "  4. systemctl restart llmbox-intake"
+echo "  5. backups: RESTIC_REPOSITORY and RESTIC_PASSWORD in /etc/llmbox-backup.env (chmod 600), then"
+echo "       /home/llmbox/llmbox/deploy/backup.sh && /home/llmbox/llmbox/deploy/backup.sh check   (a restore, checked)"
