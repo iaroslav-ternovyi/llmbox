@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .. import report
 from .layout import _page
-from .words import INSTALL, _name_of, esc
+from .words import INSTALL, _name_of, esc, variant
 
 
 def hardware_page(rid: str, rec: dict, shape: dict, data: dict, community: list | None = None) -> str:
@@ -31,7 +31,7 @@ llmbox test {esc(rid)}          # then: the 40-minute quality test too</pre></se
     sp = rec["summary"]["speed"]
     measured = {"gpu": data["ref"]["gpu"], "ram": data["ref"]["ram"], "rambw": data["ref"]["rambw"], "t2": sp.get("decode_tps"),
                 "td": float(report._deep(sp)) if report._deep(sp) != "-" else None}
-    return _page(f"llmbox · {nm} on other computers", "MODELS", body, ("pages.css", "hardware.css"), ("plan.js", "hardware.js"),
+    return _page(f"llmbox · {nm} · {variant(rid, (rec.get('model') or {}).get('file'), full=True)} on other computers", "MODELS", body, ("pages.css", "hardware.css"), ("plan.js", "hardware.js"),
                  dict(data, sh=shape, measured=measured, community=community or []), about=f"How fast {nm} runs on {len(data['gpus'])} graphics cards and Macs: one measured, the rest predicted from the model file and memory speeds.")
 
 
