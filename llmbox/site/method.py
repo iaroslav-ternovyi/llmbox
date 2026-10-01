@@ -112,9 +112,10 @@ than the top of the group above. Inside a group the order can still change with 
 and 90k tokens, so nothing comes from the cache, with code as the answer, so speculative decoding sees realistic text.
 <b>Tok/s</b> is how fast the answer is written; <b>first word</b> is how long the model reads the whole context before it starts.</p>
 <p>Speed on other boxes is predicted: a token needs the active weights read once, from VRAM for what fits on the card and from system RAM for the rest,
-so the time per token follows from the model file and the two memory speeds. The prediction is then scaled by what the measured run got
-against the same prediction on its own box. When most of a model moves onto a bigger card, or onto a Mac, it is outside what was measured,
-and the page says <i>rough</i>.</p>
+plus a fixed cost for each layer that does not shrink on a faster card. So the time per token follows from the model file and the two memory speeds.
+The card side and the fixed cost are fitted to public llama.cpp runs on eleven NVIDIA cards (half the predictions within 2% for dense models
+and 4% for mixture-of-experts ones, the worst 15%). What the reference box read from its RAM is then scaled to what its run measured.
+When most of a model moves onto a bigger card, or onto a Mac, it is outside what was measured, and the page says <i>rough</i>.</p>
 
 {_optimize_table(opts or {}, ranked)}
 

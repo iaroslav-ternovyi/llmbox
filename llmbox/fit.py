@@ -91,6 +91,35 @@ class Calibration:
     deep_k: int = 88              # depth (thousands of tokens) the deep figure refers to
     source: str = "uncalibrated: formula only"
     measured: dict = field(default_factory=dict)
+    term: str = ""                # what k2/kd scale: "" the whole speed; "cpu" / "gpu" only the time of what was read from
+                                  # RAM / on the card on the measured machine. The formula's card side and fixed per-layer part
+                                  # are fitted to public runs; a ratio of the whole made a 5090 look 50% faster than measured.
+
+    def tps(self, shape: E.ModelShape, hw: E.HostSpec, depth: int, deep: bool = False, **kw) -> float:
+        """Calibrated decode speed `depth` tokens into the context (deep: with the deep factor)."""
+        k = self.kd if deep else self.k2
+        p = E.plan(shape, hw, depth=depth, cpu_k=k if self.term == "cpu" else 1.0, gpu_k=k if self.term == "gpu" else 1.0, **kw)
+        return p.decode_tps_at_depth * (1.0 if self.term else k)
+
+
+def speculative(r: dict) -> bool:
+    sp = r.get("speculative") or {}
+    return bool(sp.get("type")) and (sp.get("draft_max") or 0) > 0
+
+
+def solve(r: dict, shape: E.ModelShape, hw: E.HostSpec, measured_tps: float, depth: int, term: str | None = None, **kw) -> tuple[float, str]:
+    """(factor, term) that makes the formula give the measured speed on the machine it was measured on: the factor goes on
+    the time of what that machine read from RAM when that was a real share of it (the less certain side), else on the
+    card's. A recipe with speculative decoding keeps a ratio of the whole: drafting saves whole passes, fixed part included."""
+    p = E.plan(shape, hw, depth=depth, **kw)
+    ratio = measured_tps / p.decode_tps_at_depth
+    if speculative(r):
+        return ratio, ""
+    cpu, gpu, fixed = p.parts
+    term = term or ("cpu" if cpu >= 0.25 * sum(p.parts) else "gpu")
+    part, rest = (cpu, gpu + fixed) if term == "cpu" else (gpu, cpu + fixed)
+    k = (1 / measured_tps - rest) / part if part > 0 else 0
+    return (k, term) if 0.2 <= k <= 5 else (ratio, "")
 
 
 def calibration(r: dict, shape: E.ModelShape, ref_host: str) -> Calibration:
@@ -106,13 +135,15 @@ def calibration(r: dict, shape: E.ModelShape, ref_host: str) -> Calibration:
     sp = rec["summary"]["speed"]
     hw = hosts.spec(hosts.load(ref_host))
     ctx, kv = r["placement"]["ctx"] or shape.context_length, r["placement"]["kv_type"]
-    k2 = sp["decode_tps"] / E.plan(shape, hw, ctx=ctx, kv_type=kv, depth=2000).decode_tps_at_depth
+    k2, term = solve(r, shape, hw, sp["decode_tps"], 2000, ctx=ctx, kv_type=kv)
     deep = [(report._depth_k(k), d["decode_tps"]) for k, d in (sp.get("by_depth") or {}).items()
             if report._depth_k(k) >= 24 and d.get("decode_tps")]
     dk, dv = max(deep) if deep else (88, None)
-    kd = dv / E.plan(shape, hw, ctx=ctx, kv_type=kv, depth=int(dk * 1000)).decode_tps_at_depth if dv else k2
+    kd, t2 = solve(r, shape, hw, dv, int(dk * 1000), term=term or None, ctx=ctx, kv_type=kv) if dv else (k2, term)
+    if t2 != term:   # one form for both figures: the deep one could not be solved on the same side
+        kd = k2
     return Calibration(k2, kd, int(dk), f"calibrated on 1 run on {ref_host} ({rec.get('created', '')[:10]})",
-                       {"decode_tps": sp["decode_tps"], "deep_tps": dv, "by_depth": {str(int(round(k))): v for k, v in sorted(deep)}})
+                       {"decode_tps": sp["decode_tps"], "deep_tps": dv, "by_depth": {str(int(round(k))): v for k, v in sorted(deep)}}, term)
 
 
 # ---- the fit ----------------------------------------------------------------------------------------------------------
@@ -170,8 +201,8 @@ def fit(r: dict, shape: E.ModelShape, hw: E.HostSpec, cores: int | None = None, 
         f.alternatives = _alternatives(shape, hw, kv)
         return f
     c, ub, p = chosen
-    f = Fit(fits=True, ctx=c, ubatch=ub, plan=p, tps=E.plan(shape, hw, ctx=c, kv_type=kv, ubatch=ub, depth=2000).decode_tps_at_depth * cal.k2,
-            tps_deep=p.decode_tps_at_depth * cal.kd, **base)
+    f = Fit(fits=True, ctx=c, ubatch=ub, plan=p, tps=cal.tps(shape, hw, 2000, ctx=c, kv_type=kv, ubatch=ub),
+            tps_deep=cal.tps(shape, hw, cal.deep_k * 1000, deep=True, ctx=c, kv_type=kv, ubatch=ub), **base)
     if c < want:
         f.warnings.append(f"context {c // 1024}k is below the {want // 1024}k the score was measured with"
                           + (f": documents over ~{int(c * 0.85) // 1000}k tokens will not fit, so the long-document score does not apply"
@@ -181,7 +212,7 @@ def fit(r: dict, shape: E.ModelShape, hw: E.HostSpec, cores: int | None = None, 
         p2 = E.plan(shape, hw, ctx=c2, kv_type=kv, ubatch=ub, depth=2000)
         gain = p2.decode_tps_at_depth / E.plan(shape, hw, ctx=c, kv_type=kv, ubatch=ub, depth=2000).decode_tps_at_depth - 1
         if p2.fits and gain >= 0.05:
-            f.options.append(f"--ctx {c2 // 1024}k: ~{p2.decode_tps_at_depth * cal.k2:.0f} tok/s (+{gain * 100:.0f}%)"
+            f.options.append(f"--ctx {c2 // 1024}k: ~{cal.tps(shape, hw, 2000, ctx=c2, kv_type=kv, ubatch=ub):.0f} tok/s (+{gain * 100:.0f}%)"
                              + (f", but documents over ~{int(c2 * 0.85) // 1000}k tokens no longer fit" if c2 < LONGDOC_TOKENS else ""))
     return f
 

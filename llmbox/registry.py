@@ -72,17 +72,20 @@ def calibration(r: dict, shape, at_k: int | None = None) -> F.Calibration:
     ref = r.get("reference") or {}
     if not ref.get("decode_tps"):
         return F.Calibration()
-    hw = E.HostSpec(vram_mib=ref["vram_mib"], ram_mib=ref["ram_mib"], ram_bw_gbs=ref["ram_bw_gbs"], vram_bw_gbs=ref["vram_bw_gbs"])
+    hw = E.HostSpec(vram_mib=ref["vram_mib"], ram_mib=ref["ram_mib"], ram_bw_gbs=ref["ram_bw_gbs"], vram_bw_gbs=ref["vram_bw_gbs"],
+                    gpu_eff=E.gpu_generation(ref.get("gpu") or ""))
     ctx, kv = ref.get("ctx") or shape.context_length, ref.get("kv_type") or r["placement"]["kv_type"]
-    k2 = ref["decode_tps"] / E.plan(shape, hw, ctx=ctx, kv_type=kv, depth=2000).decode_tps_at_depth
+    k2, term = F.solve(r, shape, hw, ref["decode_tps"], 2000, ctx=ctx, kv_type=kv)
     dk, dv = ref.get("deep_k") or 88, ref.get("deep_tps")
     bd = {int(k): v for k, v in (ref.get("by_depth") or {}).items() if v}
     if at_k and bd:
         dk = min(bd, key=lambda k: abs(k - at_k))
         dv = bd[dk]
-    kd = dv / E.plan(shape, hw, ctx=ctx, kv_type=kv, depth=int(dk * 1000)).decode_tps_at_depth if dv else k2
+    kd, t2 = F.solve(r, shape, hw, dv, int(dk * 1000), term=term or None, ctx=ctx, kv_type=kv) if dv else (k2, term)
+    if t2 != term:   # one form for both figures: the deep one could not be solved on the same side
+        kd = k2
     return F.Calibration(k2, kd, int(dk), f"calibrated on the reference {ref.get('gpu') or 'box'} ({ref.get('measured', '')})",
-                         {"decode_tps": ref["decode_tps"], "deep_tps": dv})
+                         {"decode_tps": ref["decode_tps"], "deep_tps": dv}, term)
 
 
 def export(host: str, rids: list[str], out_dir: str, meta: dict | None = None) -> list[str]:

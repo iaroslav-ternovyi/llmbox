@@ -65,7 +65,7 @@ def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = 
         f = F.fit(r, shape, hw, cores=cores, cal=F.Calibration() if mac else registry.calibration(r, shape))
         cal = F.Calibration() if mac else registry.calibration(r, shape, at_k=LONG // 1000)
         # one depth for every model (32k: an agent a few steps in), calibrated with the measured deep ratio
-        t32 = E.plan(shape, hw, ctx=f.ctx, kv_type=r["placement"]["kv_type"], ubatch=f.ubatch, depth=LONG).decode_tps_at_depth * cal.kd \
+        t32 = cal.tps(shape, hw, LONG, deep=True, ctx=f.ctx, kv_type=r["placement"]["kv_type"], ubatch=f.ubatch) \
             if f.fits and f.ctx >= LONG else None
         score = e.get("score") if USES[use] is None else (e.get("uses") or {}).get(USES[use])
         eng = e.get("engine") or "llama.cpp"
@@ -90,7 +90,8 @@ def run(host: str | None, use: str, what_if: tuple | None = None, out=print) -> 
         vram = int(vram_gb * 1024) if vram_gb else hosts.gpu_vram(gpu)
         if not vram:
             raise SystemExit(f"unknown VRAM for {gpu!r}: pass --vram-gb")
-        hw = E.HostSpec(vram_mib=vram, ram_mib=int(ram_gb * 1024), ram_bw_gbs=ram_bw, vram_bw_gbs=hosts.gpu_bw(gpu) or 500.0)
+        hw = E.HostSpec(vram_mib=vram, ram_mib=int(ram_gb * 1024), ram_bw_gbs=ram_bw, vram_bw_gbs=hosts.gpu_bw(gpu) or 500.0,
+                        gpu_eff=E.gpu_generation(gpu))
         cores, where = None, f"{gpu} · {ram_gb:g} GB RAM @ {ram_bw:g} GB/s"
         host = "<your host>"
 

@@ -17,8 +17,21 @@ from .gguf import GGUFHeader
 
 # Measured on the reference box (RTX 5070 + DDR5, llama.cpp b11161). Efficiency = achieved / nominal bandwidth during decode.
 RAM_EFFICIENCY = 0.80
-VRAM_EFFICIENCY = 0.75
-OVERHEAD_MS_PER_LAYER = 0.025      # kernel launches / sync per transformer layer (fit on 6 models, 2026-09-25)
+# The GPU side, by backend and dense/MoE: (efficiency, fixed ms per layer per token: kernel launches and syncs). Fitted to
+# public llama-bench tg128 runs with every weight on the card (depth 0), because on the reference box the experts in RAM
+# hide the fixed part; tests/test_public_speeds.py holds the runs and checks the error per card.
+#   CUDA dense: llama 7B Q4_0 on six Ada/Blackwell cards (llama.cpp discussion #15013)
+#   CUDA MoE: gpt-oss 20B on six Ada/Blackwell cards (#15396): routing and expert kernels cost more per layer
+#   Metal: community M4 Pro / M5 Max runs of 35B-A3B MoE models (llm-bench.io, 2026-09)
+DECODE = {("cuda", False): (0.90, 0.035), ("cuda", True): (0.72, 0.060), ("metal", False): (0.80, 0.10), ("metal", True): (0.80, 0.10)}
+# older NVIDIA generations reach less of their bandwidth (same tables: Ampere ~0.88, Turing ~0.85, Pascal ~0.6)
+GPU_GENERATION = (("RTX 50", 1.0), ("RTX 40", 1.0), ("RTX PRO", 1.0), ("RTX 30", 0.88), ("RTX A", 0.88), ("A100", 0.88), ("A40", 0.88),
+                  ("RTX 20", 0.85), ("TITAN RTX", 0.85), ("T4", 0.85), ("GTX 16", 0.75), ("GTX 10", 0.6), ("TITAN X", 0.6))
+
+
+def gpu_generation(name: str) -> float:
+    n = (name or "").upper().replace("NVIDIA ", "").replace("GEFORCE ", "")
+    return next((f for k, f in GPU_GENERATION if k in n), 1.0)
 GPU_RESERVE_MIB = 700              # driver + display + fit-target margin
 COMPUTE_BUFFER_MIB = {512: 900, 1024: 1300, 2048: 2100}  # by -ub, measured-ish for 35B-A3B class
 
@@ -213,6 +226,8 @@ class HostSpec:
     ram_bw_gbs: float                 # measured sustained read bandwidth
     vram_bw_gbs: float
     ram_headroom_mib: int = 4096
+    backend: str = "cuda"             # "metal": Apple unified memory
+    gpu_eff: float = 1.0              # the card's generation (gpu_generation)
 
 
 @dataclass
@@ -228,10 +243,12 @@ class Plan:
     decode_tps: float                 # predicted at shallow depth, speculative decoding off
     decode_tps_at_depth: float
     depth: int
+    parts: tuple = (0.0, 0.0, 0.0)    # seconds a token at `depth`: experts read from RAM, read on the card, fixed per layer
 
 
 def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv_type: str = "q8_0",
-         ubatch: int = 2048, depth: int = 50_000) -> Plan:
+         ubatch: int = 2048, depth: int = 50_000, cpu_k: float = 1.0, gpu_k: float = 1.0) -> Plan:
+    """cpu_k / gpu_k scale the time of what is read from RAM / on the card (a recipe's calibration, fit.solve)."""
     ctx = ctx or s.context_length or 32768
     mib = 1 / 2**20
     kv = s.kv_bytes_per_token(kv_type) * ctx + s.kv_swa_bytes(kv_type, ctx) + s.recurrent_state_bytes * slots
@@ -260,16 +277,19 @@ def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv
         per_token_gpu = s.nonexpert_bytes + s.expert_bytes * gpu_frac * frac
     vram_used = min(hw.vram_mib, gpu_fixed + (s.expert_bytes * gpu_frac * mib if s.is_moe else s.embed_bytes * mib))
 
-    def tps(d: int) -> float:
+    eff, ovh = DECODE[(hw.backend, s.is_moe)]
+
+    def parts(d: int) -> tuple:
         kv_read = s.kv_bytes_per_token(kv_type) * d + s.kv_swa_bytes(kv_type, d)
-        t = (per_token_cpu / (hw.ram_bw_gbs * 1e9 * RAM_EFFICIENCY * s.expert_cpu_eff)
-             + (per_token_gpu + kv_read) / (hw.vram_bw_gbs * 1e9 * VRAM_EFFICIENCY)
-             + s.n_layers * OVERHEAD_MS_PER_LAYER / 1000)
-        return 1 / t
+        return (cpu_k * per_token_cpu / (hw.ram_bw_gbs * 1e9 * RAM_EFFICIENCY * s.expert_cpu_eff),
+                gpu_k * (per_token_gpu + kv_read) / (hw.vram_bw_gbs * 1e9 * eff * hw.gpu_eff), s.n_layers * ovh / 1000)
+
+    def tps(d: int) -> float:
+        return 1 / sum(parts(d))
 
     return Plan(ctx=ctx, slots=slots, kv_type=kv_type, fits=fits, reason=reason, gpu_expert_frac=gpu_frac,
                 vram_used_mib=vram_used, ram_used_mib=ram_used, decode_tps=tps(0),
-                decode_tps_at_depth=tps(min(depth, ctx)), depth=min(depth, ctx))
+                decode_tps_at_depth=tps(min(depth, ctx)), depth=min(depth, ctx), parts=parts(min(depth, ctx)))
 
 
 def max_context(s: ModelShape, hw: HostSpec, kv_type: str = "q8_0", ubatch: int = 2048, floor_frac: float = 0.95) -> int:

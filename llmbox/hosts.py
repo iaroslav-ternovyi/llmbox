@@ -5,7 +5,7 @@ import json
 import os
 import time
 
-from .estimate import HostSpec
+from .estimate import HostSpec, gpu_generation
 from .host import Host
 
 HOME = os.path.expanduser(os.environ.get("LLMBOX_HOME", "~/.llmbox"))
@@ -156,10 +156,11 @@ def spec(prof: dict, ram_headroom_mib: int = 4096) -> HostSpec:
                          "or measure while the host is idle")
     if gpus and gpus[0].get("unified"):   # Apple: the GPU's share of unified memory is its "VRAM", the rest is RAM at the same speed
         return HostSpec(vram_mib=gpus[0]["vram_mib"], ram_mib=max(0, prof["hw"]["ram_mib"] - gpus[0]["vram_mib"]),
-                        ram_bw_gbs=float(bw), vram_bw_gbs=float(prof.get("vram_bw_gbs") or bw), ram_headroom_mib=ram_headroom_mib)
+                        ram_bw_gbs=float(bw), vram_bw_gbs=float(prof.get("vram_bw_gbs") or bw), ram_headroom_mib=ram_headroom_mib,
+                        backend="metal")
     return HostSpec(vram_mib=gpus[0]["vram_mib"] if gpus else 0, ram_mib=prof["hw"]["ram_mib"],
                     ram_bw_gbs=float(bw), vram_bw_gbs=float(prof.get("vram_bw_gbs") or 500.0),
-                    ram_headroom_mib=ram_headroom_mib)
+                    ram_headroom_mib=ram_headroom_mib, gpu_eff=gpu_generation(gpus[0]["name"]) if gpus else 1.0)
 
 
 def free_up(h, wait_s: int = 240) -> dict:

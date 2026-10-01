@@ -77,7 +77,8 @@ def cmd_fit(a: argparse.Namespace) -> None:
         vram = int(a.vram_gb * 1024) if a.vram_gb else hosts.gpu_vram(a.gpu)
         if not vram:
             raise SystemExit(f"unknown VRAM for {a.gpu!r}: pass --vram-gb")
-        hw = E.HostSpec(vram_mib=vram, ram_mib=int(a.ram_gb * 1024), ram_bw_gbs=a.ram_bw, vram_bw_gbs=hosts.gpu_bw(a.gpu) or 500.0)
+        hw = E.HostSpec(vram_mib=vram, ram_mib=int(a.ram_gb * 1024), ram_bw_gbs=a.ram_bw, vram_bw_gbs=hosts.gpu_bw(a.gpu) or 500.0,
+                        gpu_eff=E.gpu_generation(a.gpu))
         target, cores = f"{a.gpu} · {a.ram_gb:g} GB RAM @ {a.ram_bw:g} GB/s (what-if)", a.cores
     else:
         prof = hosts.load(a.host or a.src)

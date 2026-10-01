@@ -7,6 +7,7 @@ import sqlite3
 
 from .. import report
 from .. import suite as _suite
+from ..estimate import gpu_generation
 from ..hosts import HOME
 
 
@@ -48,7 +49,7 @@ MACS = [("Mac M1", 0, 68, "mac", 16), ("Mac M1 Pro", 0, 200, "mac", 32), ("Mac M
         ("Mac M5 Max 32-core GPU", 0, 460, "mac", 128), ("Mac M5 Max 40-core GPU", 0, 614, "mac", 128)]
 
 
-GPUS = GPUS + MACS
+GPUS = [(n, v, b, gpu_generation(n)) for n, v, b in GPUS] + MACS   # NVIDIA: the generation factor plan.js reads as g[3]
 
 
 RAM_KINDS = [("DDR4-3200", 40), ("DDR5-5600", 60), ("DDR5-6400", 75), ("DDR5-8000", 88)]
@@ -72,7 +73,7 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
         kv, ctx = rec["placement"]["kv_type"], rec["placement"]["ctx"] or sh.context_length
         out[r["id"]] = {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
                         "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used, "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv),
-                        "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "ctx": ctx, "k2": round(cal.k2, 4), "kd": round(cal.kd, 4),
+                        "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "swaB": sh.kv_swa_bytes(kv, 1), "swaW": sh.swa_window, "ctx": ctx, "k2": round(cal.k2, 4), "kd": round(cal.kd, 4), "term": cal.term,
                         "deepK": cal.deep_k, "size": round((sh.total_bytes or 0) / 1e9, 1),
                         "arch": sh.arch, "params": int(sh.total_params * (1 - (sh.mtp_bytes or 0) / sh.total_bytes)) if sh.total_bytes else 0,
                         "active": sh.active_params, "engine": rec["runtime"].get("engine") or "llama.cpp"}
