@@ -17,9 +17,15 @@ def checks(host: str | None = None) -> list[tuple[bool | None, str, str]]:
     out.append((v >= (3, 12), f"Python {v.major}.{v.minor}", "llmbox needs 3.12+: sudo apt install python3.12 python3.12-venv, or brew install python@3.12"))
     names = hosts.names()
     name = host or next((n for n in names if not hosts.load(n).get("ssh")), None) or (names[0] if len(names) == 1 else None)
-    if not name:
-        out.append((False, "this computer is not registered", "llmbox host add me   (or just: llmbox)"))
-        return out
+    if not name:   # a first run: nothing wrong, the guided start looks at the computer first
+        out.append((None, "this computer has not been looked at yet", "llmbox   (the guided start: detects it, picks a model, installs it)"))
+    else:
+        out += _machine(name)
+    return out + _reach()
+
+
+def _machine(name: str) -> list:
+    out: list = []
     prof = hosts.load(name)
     hw = prof["hw"]
     g = (hw.get("gpus") or [{}])[0]
@@ -43,6 +49,11 @@ def checks(host: str | None = None) -> list[tuple[bool | None, str, str]]:
                 f"llmbox host add {name}   (measures it; the machine should be idle)"))
     free = hw.get("disk_free_gib") or 0
     out.append((free >= 30, f"disk: {free:.0f} GB free", "models take 5-60 GB each: free some space in your home folder"))
+    return out
+
+
+def _reach() -> list:
+    out: list = []
     for what, url in (("the site (model list)", registry.DEFAULT_URL.rstrip("/") + "/recipes/index.json"), ("the results server", submit.DEFAULT_SERVER.rstrip("/") + "/api/v1/health")):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "llmbox"}), timeout=10):
@@ -50,7 +61,7 @@ def checks(host: str | None = None) -> list[tuple[bool | None, str, str]]:
         except OSError as e:
             out.append((None, f"cannot reach {what} ({str(e)[:60]})", "check the network; everything else still works offline"))
     if shutil.which("llmbox") is None and os.path.exists(os.path.expanduser("~/.local/bin/llmbox")):
-        out.append((False, "the llmbox command is not on your PATH", 'echo \'export PATH="$HOME/.local/bin:$PATH"\' >> ~/.bashrc && . ~/.bashrc'))
+        out.append((False, "the llmbox command is not on your PATH", 'export PATH="$HOME/.local/bin:$PATH"   (new terminals: the installer added it to your shell\'s startup file, unless LLMBOX_NO_MODIFY_PATH was set)'))
     return out
 
 
@@ -58,7 +69,7 @@ def run(host: str | None = None, out=print) -> int:
     bad = 0
     for ok, what, fix in checks(host):
         mark = {True: "ok ", False: "✗  ", None: "·  "}[ok]
-        out(f"{mark} {what}" + (f"\n     fix: {fix}" if ok is False or (ok is None and fix not in ("", "-")) else ""))
+        out(f"{mark} {what}" + (f"\n     {'fix:' if ok is False else '→'} {fix}" if ok is False or (ok is None and fix not in ("", "-")) else ""))
         bad += ok is False
     out("\nready: `llmbox` picks, installs and starts the best model for this computer" if not bad else f"\n{bad} thing{'s' if bad > 1 else ''} to fix first")
     return 1 if bad else 0

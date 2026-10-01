@@ -36,5 +36,15 @@ best, _ = pick.choose([dict(x("k2", 90, 80, 70), needs="ik_llama.cpp"), x("a", 8
 assert best["id"] == "a", best
 assert pick.engines_of({"hw": {"runtimes": [{"path": "/h/ik_llama.cpp/build/bin/llama-server"}]}}) == {"llama.cpp", "ik_llama.cpp"}
 assert pick.engines_of(None) == {"llama.cpp"}
+# doctor on a first run (nothing detected yet): not a failure - it points at the guided start and still checks the rest
+from llmbox import doctor, hosts  # noqa: E402
+names = hosts.names
+hosts.names = lambda: []
+items = doctor.checks()
+hosts.names = names
+first = next(i for i in items if "looked at" in i[1])
+assert first[0] is None and first[2].startswith("llmbox "), first
+assert any("reaches" in i[1] or "cannot reach" in i[1] for i in items), items   # the network checks still run
+
 print(lines[2] if len(lines) > 2 else text)
 print("all passed")

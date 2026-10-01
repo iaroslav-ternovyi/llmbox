@@ -1,6 +1,7 @@
 #!/bin/sh
 # llmbox installer: a private Python environment in ~/.llmbox/venv and the `llmbox` command in ~/.local/bin.
 # No sudo, no background service; everything llmbox keeps is under ~/.llmbox. Remove: rm -rf ~/.llmbox/venv ~/.local/bin/llmbox
+# (and the "# llmbox" PATH line it adds to the shell's startup file, when ~/.local/bin was not on the PATH)
 #   curl -fsSL https://llmbox.pages.dev/install.sh | sh             then the guided start: the best model for this computer
 #   curl -fsSL https://llmbox.pages.dev/install.sh | sh -s -- <id>   the same with that model
 set -eu
@@ -22,9 +23,24 @@ echo "installing llmbox with $PY into $V ..."
 mkdir -p "$HOME/.local/bin"
 ln -sf "$V/bin/llmbox" "$HOME/.local/bin/llmbox"
 echo "installed: $("$V/bin/llmbox" --version)"
+# ~/.local/bin on the PATH the way uv and rustup do it: one line in the shell's startup file, once
+# (LLMBOX_NO_MODIFY_PATH=1 leaves the startup files alone and only says what to add)
 case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
-  *) echo "add ~/.local/bin to your PATH:  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && . ~/.bashrc" ;;
+  *)
+    case "$(basename "${SHELL:-sh}")" in
+      zsh) RC="$HOME/.zshrc"; LINE='export PATH="$HOME/.local/bin:$PATH"' ;;
+      bash) RC="$HOME/.bashrc"; LINE='export PATH="$HOME/.local/bin:$PATH"' ;;
+      fish) RC="$HOME/.config/fish/conf.d/llmbox.fish"; LINE='fish_add_path -g $HOME/.local/bin'; NOW='set -gx PATH $HOME/.local/bin $PATH' ;;
+      *) RC="$HOME/.profile"; LINE='export PATH="$HOME/.local/bin:$PATH"' ;;
+    esac
+    if [ -n "${LLMBOX_NO_MODIFY_PATH:-}" ]; then
+      echo "add ~/.local/bin to your PATH: $LINE"
+    else
+      mkdir -p "$(dirname "$RC")"
+      grep -qsF "$LINE" "$RC" || printf '\n# llmbox\n%s\n' "$LINE" >> "$RC"
+      echo "llmbox is on the PATH of new terminals ($RC); in this one: ${NOW:-export PATH=\"\$HOME/.local/bin:\$PATH\"}"
+    fi ;;
 esac
 # straight on to the guided start when a person is at the terminal (the script itself came through a pipe: ask /dev/tty)
 if [ -t 1 ] && [ -r /dev/tty ] && [ -z "${LLMBOX_NO_START:-}" ]; then

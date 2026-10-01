@@ -46,7 +46,7 @@ llmbox login           # optional: GitHub, for your profile page and for your qu
  <li>Everything llmbox keeps is in <code>~/.llmbox</code> on your computer.</li>
  <li>Nothing is sent unless you run <code>llmbox test</code> or <code>llmbox submit</code>; <code>llmbox submit --dry-run</code> shows exactly what would go,
  and nothing in it names you or the machine. <a href="method.html#trust">How results are checked →</a></li>
- <li>Remove it: <code>rm -rf ~/.llmbox/venv ~/.local/bin/llmbox</code> (and <code>~/.llmbox</code> for its data).</li></ul>
+ <li>Remove it: <code>rm -rf ~/.llmbox/venv ~/.local/bin/llmbox</code> (and <code>~/.llmbox</code> for its data). When <code>~/.local/bin</code> was not on your PATH, the installer added one line marked <code># llmbox</code> to your shell's startup file (<code>~/.zshrc</code>, <code>~/.bashrc</code> or <code>~/.profile</code>); delete it too. <code>LLMBOX_NO_MODIFY_PATH=1</code> before <code>sh</code> stops it from adding the line.</li></ul>
  <p class="q" style="margin-top:10px">Source, issues and releases: <a href="{esc(REPO)}">{esc(REPO)}</a></p></section>'''
     return _page("llmbox · get llmbox", "", body, ("pages.css", "method.css"), ("install.js",),
                  about="Install llmbox: pick, install, tune and measure local AI models on your own computer. Free and open source.")
