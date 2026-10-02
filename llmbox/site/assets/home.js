@@ -186,11 +186,13 @@ function ramFor(g) {
   $("#ram").value = String(sizes ? macMem(sizes, was) : was);
   if (!$("#ram").value) $("#ram").value = "64";
 }
-function readBox() {
+// save: the visitor picked it here. A box from a link someone shared, or the card this browser reports, is shown but not
+// saved as theirs (the header, the map's YOU and every page read the saved one)
+function readBox(save) {
   const g = DATA.gpus.find(x => x[0] === $("#gpu").value);
   ramFor(g);
   ["#ram", "#bw", "#bwn"].forEach(s => $(s).disabled = !g);
-  if (!g) { hwNow = null; $("#boxnote").textContent = "speeds measured on this box"; try { localStorage.removeItem("llmbox-box"); } catch (e) {} history.replaceState(null, "", location.pathname); render(); return; }
+  if (!g) { hwNow = null; $("#boxnote").textContent = "speeds measured on this box"; if (save) try { localStorage.removeItem("llmbox-box"); } catch (e) {} history.replaceState(null, "", location.pathname); render(); return; }
   const bw = parseFloat($("#bwn").value) || parseFloat($("#bw").value);
   hwNow = boxFrom(g, parseInt($("#ram").value), bw);
   ["#bw", "#bwn"].forEach(s => $(s).disabled = !!hwNow.uni);   // unified memory: its speed comes with the chip
@@ -198,7 +200,8 @@ function readBox() {
     hwNow.apu ? "Ryzen AI Max: unified memory, the whole model on the GPU; predicted for llama.cpp on Vulkan (~), nothing here is measured on one" :
     hwNow.amd ? "AMD: predicted for llama.cpp on Vulkan (~), fitted to public runs on Radeon cards; nothing here is measured on AMD" :
     sameClass(hwNow) ? "same class as the reference box: measured speeds" : "speeds predicted for this box (~)";
-  try { localStorage.setItem("llmbox-box", JSON.stringify({ gpu: $("#gpu").value, ram: $("#ram").value, bw: $("#bw").value, bwn: $("#bwn").value })); } catch (e) {}
+  if (save) try { localStorage.setItem("llmbox-box", JSON.stringify({ gpu: $("#gpu").value, ram: $("#ram").value, bw: $("#bw").value, bwn: $("#bwn").value }));
+    const c = document.getElementById("boxchip"); if (c) c.querySelector("b").textContent = g[0] + (/^Mac/.test(g[0]) ? ` · ${$("#ram").value} GB` : ` · ${$("#ram").value} GB RAM`); } catch (e) {}
   history.replaceState(null, "", `#gpu=${encodeURIComponent(g[0])}&ram=${$("#ram").value}&bw=${bw}`);
   render();
 }
@@ -206,9 +209,9 @@ $("#gpu").insertAdjacentHTML("beforeend", [["nv", "NVIDIA + system RAM"], ["amd"
   .map(([k, label]) => `<optgroup label="${label}">${DATA.gpus.filter(g => gpuKind(g) === k).map(g => `<option>${g[0]}</option>`).join("")}</optgroup>`).join(""));
 for (const r of DATA.ramKinds) $("#bw").insertAdjacentHTML("beforeend", `<option value="${r[1]}">${r[0]} · ${r[1]} GB/s</option>`);
 $("#bw").value = String(DATA.ramKinds.reduce((a, r) => Math.abs(r[1] - DATA.ref.rambw) < Math.abs(a - DATA.ref.rambw) ? r[1] : a, DATA.ramKinds[0][1]));
-["#gpu", "#ram", "#bwn"].forEach(s => $(s).addEventListener("change", readBox));
+["#gpu", "#ram", "#bwn"].forEach(s => $(s).addEventListener("change", () => readBox(true)));
 $("#gpu").addEventListener("change", () => llmboxCount(`pick/${$("#gpu").value || "reference"}`));   // which hardware people come with
-$("#bw").addEventListener("change", () => { $("#bwn").value = ""; readBox(); });   // a preset replaces a typed-in measurement
+$("#bw").addEventListener("change", () => { $("#bwn").value = ""; readBox(true); });   // a preset replaces a typed-in measurement
 document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
   document.querySelectorAll(".seg button").forEach(u => u.classList.remove("on")); b.classList.add("on"); preset = +b.dataset.p; render(); }));
 const order = DATA.points.slice().sort((a, b) => b.cap - a.cap || (a.id < b.id ? -1 : 1)).map(p => p.id);   // the better model of a ticked pair goes first
@@ -220,10 +223,11 @@ document.querySelectorAll(".pick2 input").forEach(c => c.addEventListener("chang
   if (ids.length === 2) { go.href = `compare.html#${ids[0]}-vs-${ids[1]}`; go.setAttribute("aria-disabled", "false"); go.classList.add("solid"); $("#cmpn").textContent = `${ids[0]} vs ${ids[1]}`; }
   else { go.removeAttribute("href"); go.setAttribute("aria-disabled", "true"); go.classList.remove("solid"); $("#cmpn").textContent = ids.length ? `${ids[0]} vs …` : "tick two models to compare"; }
 }));
-try { const h = Object.fromEntries(new URLSearchParams(location.hash.slice(1))); const saved = h.gpu ? h : JSON.parse(localStorage.getItem("llmbox-box") || "null");
+try { const h = Object.fromEntries(new URLSearchParams(location.hash.slice(1))), stored = JSON.parse(localStorage.getItem("llmbox-box") || "null"), saved = h.gpu ? h : stored;
   const guess = !saved || !saved.gpu ? browserGpu(DATA.gpus) : null;   // a first visit: the card this browser reports
-  if (saved && saved.gpu) { $("#gpu").value = saved.gpu; if (saved.ram) $("#ram").value = saved.ram; if (saved.bw) { const o = [...$("#bw").options].find(o => o.value == saved.bw); if (o) $("#bw").value = saved.bw; else $("#bwn").value = saved.bw; } if (saved.bwn) $("#bwn").value = saved.bwn; readBox(); }
-  else if (guess) { $("#gpu").value = guess[0]; readBox(); $("#boxnote").textContent = `${guess[0]}: what this browser reports - change it, and the RAM, if they are not yours`; }
+  if (saved && saved.gpu) { $("#gpu").value = saved.gpu; if (saved.ram) $("#ram").value = saved.ram; if (saved.bw) { const o = [...$("#bw").options].find(o => o.value == saved.bw); if (o) $("#bw").value = saved.bw; else $("#bwn").value = saved.bw; } if (saved.bwn) $("#bwn").value = saved.bwn; readBox(false);
+    if (h.gpu && (!stored || stored.gpu !== h.gpu || String(stored.ram) !== String(h.ram))) $("#boxnote").textContent = `${h.gpu}: from the link you opened, not saved as your box - pick yours to keep it`; }
+  else if (guess) { $("#gpu").value = guess[0]; readBox(false); $("#boxnote").textContent = `${guess[0]}: what this browser reports - pick yours (and its RAM) to keep it`; }
   else { ["#ram", "#bw", "#bwn"].forEach(s => $(s).disabled = true); render(); }
 } catch (e) { render(); }
 $("#find").addEventListener("input", () => {   // find a model: rows whose name, quant or family match; Claude rows stay as references

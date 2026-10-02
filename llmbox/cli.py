@@ -1148,7 +1148,7 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--speed-probe", action="store_true", help="also run the 1-stream speed-by-depth probe after the run")
     b.add_argument("--adaptive", action="store_true", help="adaptive run (llmbox irt): stop at +-target points or the time budget")
     b.add_argument("--budget", type=float, default=45, help="adaptive: minutes (default 45)")
-    b.add_argument("--target", type=float, default=5, help="adaptive: stop when the 95%% interval is within +-this many points (default 5)")
+    b.add_argument("--target", type=float, default=2.5, help="adaptive: stop when the 95%% interval is within +-this many points (default 2.5, as llmbox test: in practice the time budget ends it, so every model gets the same test)")
     b.add_argument("--prior", help="adaptive: 'theta,sd' to start from (default 0,1.5); e.g. the base model's theta")
     b.add_argument("--explore", type=int, help="adaptive: new task families (no calibration yet) to try; default 6. A strong "
                    "cloud model calibrating new levels: 20+, every task goes to them once each block has its minimum")

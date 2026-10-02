@@ -30,8 +30,10 @@ assert by["RTX 3060 12 GB"][3].startswith("RTX 3060 12 GB: measured on 6 machine
 assert "nobody has measured this card yet" in by["RTX 3080 10 GB"][3] and "nobody has measured this Mac yet" in by["Mac M1"][3]
 assert by["RX 7900 XTX 24 GB"][3].startswith("RX 7900 XTX 24 GB: AMD timing comes after launch")
 one = lambda name: re.search(rf'data-e="{re.escape(name)}".*?</a>', h).group(0)
-assert one("RTX 3060 12 GB").count("<i></i>") == 6 and '<span class="n">44</span>' in one("RTX 3060 12 GB") and 'title="first: @octo"' in one("RTX 3060 12 GB")
-assert '<span class="n pred">~' in one("RTX 3080 10 GB") and "nobody has measured this card yet" in one("RTX 3080 10 GB")
+# a cell says what its number is and its unit: measured (on how many machines) or predicted
+assert ">measured ×6<" in one("RTX 3060 12 GB") and '<span class="n">44<small> tok/s</small></span>' in one("RTX 3060 12 GB") and 'title="first: @octo"' in one("RTX 3060 12 GB")
+assert '<span class="n pred">~' in one("RTX 3080 10 GB") and ">predicted<" in one("RTX 3080 10 GB") and "tok/s" in one("RTX 3080 10 GB") \
+    and "nobody has measured this card yet" in one("RTX 3080 10 GB")
 assert 'class="new"' in one("RTX 3060 12 GB") and 'class="new"' not in one("RTX 5070 12 GB")   # first measured 10 h ago vs weeks ago
 assert 'title="first: u-0000000b"' in one("RTX 4060 8 GB")   # not public: the handle
 assert re.search(rf"<b>\d+</b> of {N} measured", h) and "16 AMD entries open after launch" in h

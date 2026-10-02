@@ -42,14 +42,15 @@ def cell(name: str, ent: dict, users: dict, now: float) -> str:
     num, measured = number(best)
     kind = "m" if n else "u" if testable else "x"
     model = best["name"] if best else "nothing fits at 64 GB"
+    # bottom left says what the number is (measured, by how many machines, or predicted); bottom right the speed with its unit
     if not testable:
-        ticks = '<span class="tk"></span>'   # AMD: the faint name and the legend say it; no word repeated 18 times
+        ticks = '<span class="tk">AMD: later</span>'   # timing on AMD comes after launch (the legend says so)
         said = f"AMD timing comes after launch; best model {model}, predicted roughly {num.lstrip('~')} tokens per second" if best else "AMD timing comes after launch"
     elif n:
-        ticks = '<span class="tk" aria-hidden="true">' + "<i></i>" * min(n, 10) + (f"<em>+{n - 10}</em>" if n > 10 else "") + "</span>"
+        ticks = f'<span class="tk" aria-hidden="true">measured{f" ×{n}" if n > 1 else ""}</span>'
         said = (f"measured on {n} machine{'s' if n > 1 else ''}, best model {model} at {num.lstrip('~')} tokens per second" + (" (predicted)" if not measured else "")) if best else f"measured on {n} machines"
     else:
-        ticks = '<span class="tk"></span>'   # nobody yet: the dashed frame and the legend say it
+        ticks = '<span class="tk" aria-hidden="true">predicted</span>'
         said = f"best model {model} predicted about {num.lstrip('~')} tokens per second, nobody has measured this {'Mac' if ent['kind'] == 'mac' else 'card'} yet" if best else "nobody has measured it yet"
     new = ""
     try:
@@ -65,7 +66,7 @@ def cell(name: str, ent: dict, users: dict, now: float) -> str:
         title = f' title="first: {esc("@" + u["login"] if u.get("public") and u.get("login") else cr["user"])}"'
     return (f'<a class="cell {kind}" href="hw-{ent["slug"]}.html" data-e="{esc(name)}" data-slug="{ent["slug"]}" aria-label="{esc(name)}: {esc(said)}"{title}>'
             f'<b class="nm">{esc(name)}</b>{new}<span class="md" title="{esc(model)}">{esc(model)}</span>{ticks}'
-            f'<span class="n{"" if measured else " pred"}">{esc(num)}</span></a>')
+            f'<span class="n{"" if measured else " pred"}">{esc(num)}{"<small> tok/s</small>" if best else ""}</span></a>')
 
 
 def _fold(items: list[tuple[str, dict]]) -> str:
@@ -74,9 +75,9 @@ def _fold(items: list[tuple[str, dict]]) -> str:
     amd = [(n, e) for n, e in items if not e["testable"]]
     out = ""
     if be:
-        out += '<p class="fold">be the first: ' + " · ".join(f'<a href="hw-{e["slug"]}.html">{esc(n)} {esc(number(e.get("best"))[0])}</a>' for n, e in be) + "</p>"
+        out += '<p class="fold">not measured yet, predicted tok/s: ' + " · ".join(f'<a href="hw-{e["slug"]}.html">{esc(n)} {esc(number(e.get("best"))[0])}</a>' for n, e in be) + "</p>"
     if amd:
-        out += '<p class="fold">AMD, after launch: ' + " · ".join(f'<a href="hw-{e["slug"]}.html">{esc(n)} {esc(number(e.get("best"))[0])}</a>' for n, e in amd) + "</p>"
+        out += '<p class="fold">AMD, measured after launch, predicted tok/s: ' + " · ".join(f'<a href="hw-{e["slug"]}.html">{esc(n)} {esc(number(e.get("best"))[0])}</a>' for n, e in amd) + "</p>"
     return out
 
 
@@ -110,8 +111,11 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
  <div class="mhead"><span><b>{measured}</b> of {len(ents)} measured · each new machine fills a cell: <code id="mapcmd">$ llmbox test</code>
   <button class="btn" data-copy-from="mapcmd">COPY</button></span>
   <span class="q">{later} AMD entries open after launch</span><a id="maprss" href="#box">RSS for your card</a></div>
- <p class="mlegend"><span class="fr m"></span> measured: <span class="n">63</span> tok/s · <span class="fr u"></span> nobody yet: <span class="n pred">~52</span> predicted ·
- <span class="fr x"></span> <span class="faint">AMD: timing after launch</span> · each cell's model is the best that fits with 64 GB of RAM (a Mac: its memory nearest 64)</p>
+ <p class="mlegend">Each cell: a graphics card or Mac, the best model for it, and how fast that model writes, in tokens per second (about ¾ of a
+ word each; 20 reads comfortably, 50+ feels instant). <span class="fr m"></span> <b>measured</b>: someone ran it on that hardware (×3: on three machines) ·
+ <span class="fr u"></span> <b>predicted</b> <span class="n pred">~</span>: worked out from the hardware until someone measures it ·
+ <span class="fr x"></span> <b>AMD: later</b>: measuring on AMD opens after launch. Best = the highest score that fits with 64 GB of RAM (a Mac: its memory nearest 64).</p>
+ <p class="q mapwho" id="mapwho"></p>
  <div id="mapyou" class="mapyou" hidden></div>
  {"".join(tiers)}
  {other}</section>'''
@@ -121,8 +125,8 @@ def hardware_page(board: dict, users: dict, now: float | None = None, latest: st
     """hardware.html: the map on its own page, then the latest results."""
     from .layout import _page
     body = ('<section class="panel hd"><div><h1>What runs on each graphics card and Mac</h1>'
-            '<p class="lede">One cell per card or Mac: the best model that fits it and how fast it answers. A number in white was '
-            'measured on that hardware; a grey <span class="n pred">~</span> number is predicted until someone measures it.</p></div></section>'
+            '<p class="lede">Find your graphics card or Mac below. Its cell shows the best local AI model for it and how fast that '
+            'model writes there. Click the cell for every model on that hardware.</p></div></section>'
             + map_panel(board, users, now) + latest)
     return _page("llmbox · hardware: what runs on each graphics card and Mac", "HARDWARE", body, ("pages.css", "map.css"), ("map.js",),
                  about="The best local AI model for every graphics card and Mac, measured by people with one or predicted.")
