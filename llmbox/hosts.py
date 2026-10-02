@@ -40,7 +40,8 @@ GPU_VRAM_MIB = {
 # Apple silicon memory bandwidth, GB/s (Apple's specs; M5 Pro/Max: newsroom 2026-03): the chip, then by GPU cores
 APPLE_BW = {"M1": 68, "M1 Pro": 200, "M1 Max": 400, "M1 Ultra": 800, "M2": 100, "M2 Pro": 200, "M2 Max": 400, "M2 Ultra": 800,
             "M3": 100, "M3 Pro": 150, "M3 Max": {30: 300, 40: 400}, "M3 Ultra": 819, "M4": 120, "M4 Pro": 273,
-            "M4 Max": {32: 410, 40: 546}, "M5": 153, "M5 Pro": 307, "M5 Max": {32: 460, 40: 614}}
+            "M4 Max": {32: 410, 40: 546}, "M5": 153, "M5 Pro": 307, "M5 Max": {32: 460, 40: 614}, "M5 Ultra": 1228,
+            "M6": 170}   # M6: 170 with 24 or 32 GB, 153 with 16 GB (Mac mini specs, 2026-09)
 
 
 def apple_bw(chip: str, gpu_cores: int = 0) -> float | None:

@@ -115,14 +115,16 @@ APUS = [("Ryzen AI Max+ 395", 0, 256, "apu", 128), ("Ryzen AI Max 390", 0, 256, 
 
 # Apple Silicon: unified memory, so no VRAM/RAM split - (name, 0, memory bandwidth GB/s, "mac", largest memory GB).
 # The sizes each chip is sold with are MAC_MEMORY below.
-# Bandwidth: Apple's specs (M5 Pro 307, M5 Max 460 / 614: apple.com newsroom 2026-03). Nothing is measured on a Mac here.
+# Bandwidth: Apple's specs (M5 Pro 307, M5 Max 460 / 614: apple.com newsroom 2026-03; M5 Ultra 1228 and M6 170: Mac Studio
+# and Mac mini tech specs, 2026-09 - an M6 with 16 GB reads at 153). M6 ships as the base chip only (no Pro/Max/Ultra).
 MACS = [("Mac M1", 0, 68, "mac", 16), ("Mac M1 Pro", 0, 200, "mac", 32), ("Mac M1 Max", 0, 400, "mac", 64), ("Mac M1 Ultra", 0, 800, "mac", 128),
         ("Mac M2", 0, 100, "mac", 24), ("Mac M2 Pro", 0, 200, "mac", 32), ("Mac M2 Max", 0, 400, "mac", 96), ("Mac M2 Ultra", 0, 800, "mac", 192),
         ("Mac M3", 0, 100, "mac", 24), ("Mac M3 Pro", 0, 150, "mac", 36), ("Mac M3 Max 30-core GPU", 0, 300, "mac", 96),
         ("Mac M3 Max 40-core GPU", 0, 400, "mac", 128), ("Mac M3 Ultra", 0, 819, "mac", 512),
         ("Mac M4", 0, 120, "mac", 32), ("Mac M4 Pro", 0, 273, "mac", 64), ("Mac M4 Max 32-core GPU", 0, 410, "mac", 36),
         ("Mac M4 Max 40-core GPU", 0, 546, "mac", 128), ("Mac M5", 0, 153, "mac", 32), ("Mac M5 Pro", 0, 307, "mac", 64),
-        ("Mac M5 Max 32-core GPU", 0, 460, "mac", 36), ("Mac M5 Max 40-core GPU", 0, 614, "mac", 128)]
+        ("Mac M5 Max 32-core GPU", 0, 460, "mac", 36), ("Mac M5 Max 40-core GPU", 0, 614, "mac", 128), ("Mac M5 Ultra", 0, 1228, "mac", 512),
+        ("Mac M6", 0, 170, "mac", 32)]
 
 # the unified memory each chip is sold with (GB), from Apple's tech specs (M5 Pro/Max: support.apple.com/126318); the
 # picker offers only these for a Mac, and a map cell assumes the one nearest 64 GB (mac_memory)
@@ -131,7 +133,8 @@ MAC_MEMORY = {"Mac M1": (8, 16), "Mac M1 Pro": (16, 32), "Mac M1 Max": (32, 64),
               "Mac M3": (8, 16, 24), "Mac M3 Pro": (18, 36), "Mac M3 Max 30-core GPU": (36, 96), "Mac M3 Max 40-core GPU": (48, 64, 128),
               "Mac M3 Ultra": (96, 256, 512), "Mac M4": (16, 24, 32), "Mac M4 Pro": (24, 48, 64), "Mac M4 Max 32-core GPU": (36,),
               "Mac M4 Max 40-core GPU": (48, 64, 128), "Mac M5": (16, 24, 32), "Mac M5 Pro": (24, 48, 64),
-              "Mac M5 Max 32-core GPU": (36,), "Mac M5 Max 40-core GPU": (48, 64, 128)}
+              "Mac M5 Max 32-core GPU": (36,), "Mac M5 Max 40-core GPU": (48, 64, 128), "Mac M5 Ultra": (96, 256, 512),
+              "Mac M6": (16, 24, 32)}
 
 # each picker entry's address on the site (hw-<slug>.html), fixed: a renamed entry keeps its slug, so posted links and
 # feed subscriptions keep working; a new entry adds one here
@@ -155,6 +158,7 @@ SLUGS = {"RTX 2080 Ti 11 GB": "rtx-2080-ti-11gb", "RTX 3060 12 GB": "rtx-3060-12
          "Mac M3 Ultra": "mac-m3-ultra", "Mac M4": "mac-m4", "Mac M4 Pro": "mac-m4-pro", "Mac M4 Max 32-core GPU": "mac-m4-max-32-core",
          "Mac M4 Max 40-core GPU": "mac-m4-max-40-core", "Mac M5": "mac-m5", "Mac M5 Pro": "mac-m5-pro",
          "Mac M5 Max 32-core GPU": "mac-m5-max-32-core", "Mac M5 Max 40-core GPU": "mac-m5-max-40-core",
+         "Mac M5 Ultra": "mac-m5-ultra", "Mac M6": "mac-m6",
          "Ryzen AI Max+ 395": "ryzen-ai-max-plus-395", "Ryzen AI Max 390": "ryzen-ai-max-390"}
 
 

@@ -62,9 +62,9 @@ for other in (H.key("NVIDIA GeForce RTX 3090", 24576, 60, count=2), H.key("", 0,
     assert H.display_class(other) is None, other   # several cards, no card, a card the picker does not list: "Other machines"
 assert H.display_class("") is None and H.display_class("nonsense") is None
 
-# 65 entries, each with a fixed address; a Mac's sizes are the ones Apple sells, and a cell takes the one nearest 64 GB
+# 67 entries (M5 Ultra and M6 joined 2026-10), each with a fixed address; a Mac's sizes are the ones Apple sells, and a cell takes the one nearest 64 GB
 names = [n for n, *_ in H.NVIDIA_CARDS + H.AMD_CARDS + H.APUS + H.MACS]
-assert len(names) == 65 and set(H.SLUGS) == set(names) and len(set(H.SLUGS.values())) == 65
+assert len(names) == 67 and set(H.SLUGS) == set(names) and len(set(H.SLUGS.values())) == 67
 assert H.SLUGS["RTX 4070 Ti Super 16 GB"] == "rtx-4070-ti-super-16gb" and H.SLUGS["Ryzen AI Max+ 395"] == "ryzen-ai-max-plus-395"
 assert set(H.MAC_MEMORY) == {m[0] for m in H.MACS} and all(max(H.MAC_MEMORY[m[0]]) == m[4] for m in H.MACS)
 assert (H.mac_memory("Mac M3 Ultra"), H.mac_memory("Mac M3 Max 30-core GPU"), H.mac_memory("Mac M2 Max"), H.mac_memory("Mac M1"),

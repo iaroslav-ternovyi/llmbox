@@ -50,7 +50,7 @@ people += [run(K3060, 200, machine="cheat", sid="s0000000fake", user="u-0000000b
            run(hwclass.key("", 0, 80, vendor=""), 9, machine="cpu", sid="s00000000cpu", at="2026-10-14T00:00:00")]
 b = board.build(box, people, MODELS, 60.0)
 
-assert len(b["entries"]) == 65 and set(b["entries"]) == set(hwclass.SLUGS)
+assert len(b["entries"]) == len(hwclass.SLUGS) == 67 and set(b["entries"]) == set(hwclass.SLUGS)
 # machines like it: per comparison class, each machine once; the outlier out; the box in
 s = b["sets"][("qwen36-al", K3060)]
 assert s["machines"] == 6 and s["values"] == [40.0] * 6 and s["median"] == 40.0, s
@@ -88,7 +88,7 @@ assert b["runs"]["s00000000002"]["entry"] == "RTX 3060 12 GB" and "box" not in {
 log = os.path.join(tempfile.mkdtemp(), "events.jsonl")
 allv, new = board.events(b, "2026-10-15T00:00:00Z", path=log)
 kinds = sorted({e["kind"] for e in new})
-assert kinds == ["measured", "start"] and sum(e["kind"] == "start" for e in new) == 65, kinds
+assert kinds == ["measured", "start"] and sum(e["kind"] == "start" for e in new) == len(hwclass.SLUGS), kinds
 assert {e["id"] for e in new if e["kind"] == "measured"} >= {"measured/rtx-3060-12gb/qwen36-al", "measured/rtx-5070-12gb/qwen35-9b"}
 assert all(e["seed"] for e in new if e["kind"] == "measured")   # measured before the feeds started: logged, not shown
 start = next(e for e in new if e["id"] == "start/rtx-3060-12gb")

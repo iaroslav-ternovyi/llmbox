@@ -42,8 +42,9 @@ GPU_GENERATION = (("RTX 50", 1.0), ("RTX 40", 1.0), ("RTX PRO", 1.0), ("RTX 30",
                   ("RTX 20", 0.85), ("TITAN RTX", 0.85), ("T4", 0.85), ("GTX 16", 0.75), ("GTX 10", 0.6), ("TITAN X", 0.6))
 
 
-# Apple (#4167): an Ultra (two chips joined) reaches less of its bandwidth, the M5 generation more
-APPLE_GENERATION = (("ULTRA", 0.82), ("M5", 1.3))
+# Apple (#4167): an Ultra (two chips joined) reaches less of its bandwidth, the M5 generation more; M6 decodes per GB/s
+# as M5 does there (llama 7B Q4_0 tg128: M6 35.7 at 170 GB/s, M5 31.9 at 153, 2026-10)
+APPLE_GENERATION = (("ULTRA", 0.82), ("M5", 1.3), ("M6", 1.3))
 
 
 def gpu_generation(name: str) -> float:

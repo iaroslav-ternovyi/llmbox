@@ -1,7 +1,7 @@
 """One table per picker entry, built once per site build: the hardware map's cells, the result cards' comparisons, the
 feeds and the "first" credit all read it, so they cannot disagree.
 
-  speed records (the reference box's and people's) -> hwclass.display_class -> one of the 65 entries, or "other"
+  speed records (the reference box's and people's) -> hwclass.display_class -> one of the picker's entries, or "other"
      |-> sets:   (recipe, comparison class) -> each machine's median (a flagged outlier is left out, the box is in)
      |-> credit: per entry, the first signed-in run by when it was received (never the box's, never an outlier);
      |           FIRST USER ON THIS CARD where the box measured the entry before anyone

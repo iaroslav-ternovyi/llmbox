@@ -94,7 +94,8 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
     macs = [(n, ents[n]) for n in order if ents[n]["kind"] == "mac"]
     lis = "".join(f'<li class="{"m" if e["machines"] else "u"}" style="grid-row:{_mac_place(n)[0] + 2};grid-column:{_mac_place(n)[1] + 2}">{cell(n, e, users, now)}</li>' for n, e in macs)
     heads = "".join(f'<li class="ch" aria-hidden="true" style="grid-row:1;grid-column:{i + 2}">{c}</li>' for i, c in enumerate(MAC_COLS))
-    rows = "".join(f'<li class="rh" aria-hidden="true" style="grid-row:{g + 2};grid-column:1">M{g + 1}</li>' for g in range(5))
+    gens = max(_mac_place(n)[0] for n, _e in macs) + 1   # M1 .. the newest chip in the picker
+    rows = "".join(f'<li class="rh" aria-hidden="true" style="grid-row:{g + 2};grid-column:1">M{g + 1}</li>' for g in range(gens))
     tiers.append(f'<div class="tier mac"><h3 class="sc">Mac</h3><ul class="cells chips">{heads}{rows}{lis}</ul>{_fold(macs)}</div>')
     apus = [(n, ents[n]) for n in order if ents[n]["kind"] == "chip"]
     lis = "".join(f'<li class="x">{cell(n, e, users, now)}</li>' for n, e in apus)
@@ -104,7 +105,7 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
         o = board["other"]
         links = " · ".join(f'<a href="r/{esc(x["newest"])}.html">{esc(x["label"])}</a> · {x["machines"]}' for x in o[:12] if x.get("newest"))
         other = (f'<div class="other"><span class="sc">Other machines</span> {links}{f" · +{len(o) - 12} more" if len(o) > 12 else ""}'
-                 '<p class="q">Not in the picker yet, so not counted in the 65.</p></div>')
+                 f'<p class="q">Not in the picker yet, so not counted in the {len(ents)}.</p></div>')
     return f'''<section class="panel mapp" id="map" aria-labelledby="maph"><div class="lbl" id="maph">Hardware map</div>
  <div class="mhead"><span><b>{measured}</b> of {len(ents)} measured · each new machine fills a cell: <code id="mapcmd">$ llmbox test</code>
   <button class="btn" data-copy-from="mapcmd">COPY</button></span>
