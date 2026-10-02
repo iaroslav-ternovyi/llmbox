@@ -762,6 +762,7 @@ def cmd_bench(a: argparse.Namespace) -> None:
         rec.update(res)
         if a.set:   # served with these overrides (llmbox test --set): a variant of the recipe, not the recipe
             rec["overrides"] = list(a.set)
+        rec["traces"] = os.path.splitext(os.path.basename(jl))[0]   # ~/.llmbox/traces/<this>: the saved thinking (loop checks)
         if info:
             rec["runtime"] = info["runtime"]
             rec["telemetry"] = info["telemetry"]

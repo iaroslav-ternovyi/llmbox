@@ -95,7 +95,14 @@ def end(ctx: dict, recipe: dict | None) -> dict:
         st = ctx.get("start") or {}
         argv = st.get("argv") or fin.get("argv")
         props = st.get("props") or fin.get("props") or {}
-        consistent = bool(st.get("argv")) and st.get("argv") == fin.get("argv") and (st.get("props") or {}).get("params") == (fin.get("props") or {}).get("params")
+        # the same command line (its --port aside: llama-swap gives a reloaded server a new one) and the same sampling at
+        # the start and the end. None when it cannot be told: the server was gone at the end (llama-swap unloads the
+        # model under test while the reader model grades the explanations) or never seen at the start.
+        noport = lambda a: [x for i, x in enumerate(a or []) if x != "--port" and (i == 0 or a[i - 1] != "--port")]
+        if not st.get("argv") or not fin.get("argv"):
+            consistent = None
+        else:
+            consistent = noport(st["argv"]) == noport(fin["argv"]) and (st.get("props") or {}).get("params") == (fin.get("props") or {}).get("params")
         rt = {"llama_cpp_build": props.get("build_info"), "argv": argv, "n_ctx": props.get("n_ctx"), "slots": props.get("total_slots"),
               "sampling_defaults": props.get("params"), "chat_template_sha": props.get("chat_template_sha"),
               "model_path": props.get("model_path"), "settings_consistent": consistent}

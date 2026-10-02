@@ -170,14 +170,38 @@ def _pool_summary(rec: dict, recs: list[dict], where: str = "box", current: bool
 
 
 def _trace_dir(rec: dict) -> str | None:
-    """Traces are saved per queue job (~/.llmbox/traces/job-N); the queue knows which job produced which record."""
+    """Where a run's saved thinking is: the folder the record names (llmbox bench writes it since 2026-10-02), else the
+    queue job that produced it (~/.llmbox/traces/job-N), else the folder `llmbox bench` named after the model and the
+    run's start (<model>-<tier>-<epoch>), within 15 minutes of the start the record implies. None: not saved."""
+    import calendar
+    import re as _re
+    import time as _time
+    root = os.path.join(HOME, "traces")
+    if rec.get("traces"):
+        d = os.path.join(root, os.path.basename(str(rec["traces"])))
+        return d if os.path.isdir(d) else None
     db = os.path.join(HOME, "queue.db")
-    if os.path.exists(db):
+    if os.path.exists(db) and rec.get("_path"):
         row = sqlite3.connect(db).execute("SELECT id FROM jobs WHERE result=?", (rec.get("_path"),)).fetchone()
         if row:
-            d = os.path.join(HOME, "traces", f"job-{row[0]}")
+            d = os.path.join(root, f"job-{row[0]}")
             return d if os.path.isdir(d) else None
-    return None
+    rid, cr = (rec.get("recipe") or {}).get("id"), str(rec.get("created") or "")
+    if not rid or not os.path.isdir(root) or len(cr) < 19:
+        return None
+    try:
+        end = calendar.timegm(_time.strptime(cr[:19], "%Y-%m-%dT%H:%M:%S"))
+        if _re.fullmatch(r"[+-]\d{4}", cr[19:24]):
+            end -= (1 if cr[19] == "+" else -1) * (int(cr[20:22]) * 3600 + int(cr[22:24]) * 60)
+    except ValueError:
+        return None
+    start = end - ((rec.get("summary") or {}).get("wall_minutes") or 0) * 60
+    best = None
+    for d in os.listdir(root):
+        m = _re.fullmatch(_re.escape(rid) + r"-(?:quick|adaptive|medium|deep|ladder)-(\d{10})", d)
+        if m and abs(int(m.group(1)) - start) < 900 and (best is None or abs(int(m.group(1)) - start) < best[0]):
+            best = (abs(int(m.group(1)) - start), d)
+    return os.path.join(root, best[1]) if best else None
 
 
 def task_flags(rec: dict) -> dict:
