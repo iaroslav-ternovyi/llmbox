@@ -29,3 +29,5 @@ pre.cmd{background:#0b0c09;border:1px solid var(--line);padding:12px 14px;font-s
 .news .nf{font-size:11.5px;padding:0 18px 14px;margin:0}
 .feed ul{list-style:none;padding:14px 18px}.feed li{font-size:13px;padding:8px 0;border-bottom:1px solid var(--line2)}.feed li:last-child{border-bottom:0}
 .feed .fv{color:var(--soft);margin-left:6px}.feed .when{display:block;font-size:11px;color:var(--faint)}
+/* a page's opening sentence under its title */
+.hd .lede{margin-top:10px;max-width:68ch;font-size:16px;line-height:1.55;color:var(--soft)}.hd .lede b{color:var(--ink);font-weight:500}

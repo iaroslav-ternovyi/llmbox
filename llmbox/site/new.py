@@ -105,9 +105,8 @@ def new_page(rs: list[dict], data: dict, host: str, news: str = "") -> str | Non
                      "ladder": [{"file": rec["model"].get("file") or "", "quant": _quant(rec["model"].get("file") or ""), "bytes": sh.total_bytes or 1}]})
     body = f"""
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / new</div><h1>New models for your box</h1>
- <p class="q" style="margin-top:6px">Released in the last six months and pulled by enough people: releases, fine-tunes and uncensored remixes,
- one entry per model. Fit and speed are for <b id="boxname">the reference PC</b> (<a href="index.html#box">pick your box</a>). Measured models show
- their score; the rest show the range expected from public benchmarks.</p></div></section>
+ <p class="lede">Local models from the last six months that people actually download: which file fits <b id="boxname">the reference PC</b>
+ (<a href="index.html#box">pick your box</a>), how fast it runs there, and how good it is: measured here, or the range public benchmarks suggest.</p></div></section>
 <p class="nsum" id="nsum"></p>
 <section class="panel"><div class="lbl"><span id="count">{len(rows)}</span> models</div>
  <div class="nctl"><div class="chips" role="group" aria-label="show">
