@@ -144,7 +144,7 @@ def feed(name: str, board: dict, events: list[dict], meta: dict, site: str) -> s
     """feeds/<slug>.xml: RSS 2.0, newest first; each item's guid is its event id, so a reader never sees one twice."""
     slug = board["entries"][name]["slug"]
     page = f"{site}/hw-{slug}"
-    mine = sorted((e for e in events if e["entry"] == name and not e.get("seed")), key=lambda e: e["at"], reverse=True)
+    mine = sorted((e for e in events if e["id"].split("/")[1] == slug and not e.get("seed")), key=lambda e: e["at"], reverse=True)   # by slug: a renamed entry keeps its feed
     items = "".join(f"<item><title>{esc(item_text(e, meta))}</title><link>{esc(page)}</link>"
                     f'<guid isPermaLink="false">{TAG}{esc(slug)}/{esc(e["id"])}</guid><pubDate>{_when(e["at"])}</pubDate></item>\n'
                     for e in mine)

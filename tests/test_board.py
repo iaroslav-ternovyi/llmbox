@@ -60,6 +60,9 @@ p = board.place(b, "qwen36-al", K3060, 45.0, machine="new")
 assert p["m"] == 6 and p["faster_than"] == 100, p
 p = board.place(b, "qwen36-al", K5070, 58.0, machine="u5070")
 assert p["m"] == 1 and p["faster_than"] is None and p["others"] == [55.0], p
+# one machine with two runs and nobody else: no "other" machine like it (its own median is not a neighbour)
+b1 = board.build([], [run(K5070, 50, machine="solo", sid="s00000000s01", rid="qwen35-9b"), run(K5070, 52, machine="solo", sid="s00000000s02", rid="qwen35-9b")], MODELS, 60.0)
+assert board.place(b1, "qwen35-9b", K5070, 50.0, machine="solo") == {"others": [], "m": 0, "faster_than": None}
 # the first on an entry: signed in, by when it was received; the outlier (earlier, signed in) never; the box never
 e3060 = b["entries"]["RTX 3060 12 GB"]
 assert e3060["credit"]["sid"] == "s00000000002" and e3060["credit"]["badge"] == "FIRST ON THIS CARD", e3060["credit"]

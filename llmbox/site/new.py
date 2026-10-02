@@ -48,11 +48,10 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
     pred = eci.predictor(table, anchors, ref_cap) if ref_cap else None
     kv = "q8_0"
 
-    def shp(sh: E.ModelShape) -> dict:
-        return {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes + sh.output_tied, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
-                "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used,
-                "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv), "cpuEff": sh.expert_cpu_eff,
-                "kvB": sh.kv_bytes_per_token(kv), "ctx": sh.context_length or 32768, "k2": 1, "kd": 1, "deepK": 32}
+    def shp(sh: E.ModelShape) -> dict:   # what plan.js reads, as the model pages have it (data.js_shape: one copy, held by test_parity)
+        from .data import js_shape
+        from .. import fit as F
+        return js_shape(sh, kv, sh.context_length or 32768, F.Calibration(deep_k=32))
 
     def expected(repo: str):
         hit = eci.match(repo, table) if pred else None

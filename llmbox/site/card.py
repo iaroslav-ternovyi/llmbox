@@ -99,13 +99,27 @@ def spec(board: dict, sid: str, records: list[dict], models: dict, site: str, no
         place = {"kind": "first", "text": f"the first {entry} on llmbox" if "USER" not in badge else "llmbox's own PC measured it before"}
     else:
         place = {"kind": "first", "text": f"the first with this model on {hwclass.label(cls)}"}
-    quality = None
-    if q and "anonymous" not in sub.get("flags", []) and meta.get("range") and meta.get("cap"):
-        s = q.get("summary") or {}
-        lo, hi = s.get("capability_ci95") or [None, None]
-        k = meta["score"] / meta["cap"]
-        if lo is not None and hi is not None and lo * k <= meta["range"][1] and hi * k >= meta["range"][0]:
-            quality = f"quality: {meta['score']:.0f}% of Claude Opus 5.5 · this run agrees ✓"
+    # quality: only a run that counts (the quality record's own flags: sent with an account, the server's tasks, answers
+    # that read like this model's), compared with the model's published range
+    quality, q_state = None, None
+    if q:
+        qflags = (q.get("submission") or {}).get("flags") or []
+        s = q.get("summary") if isinstance(q.get("summary"), dict) else {}
+        ci = s.get("capability_ci95")
+        lo, hi = ci if isinstance(ci, list) and len(ci) == 2 and all(isinstance(x, (int, float)) for x in ci) else (None, None)
+        if "anonymous" in qflags:
+            q_state = "anonymous"
+        elif {"self-seeded", "outlier"} & set(qflags):
+            q_state = "held"
+        elif not (meta.get("range") and meta.get("cap") and meta.get("score") is not None):
+            q_state = "unpublished"
+        elif lo is None:
+            q_state = "grading"
+        else:
+            k = meta["score"] / meta["cap"]
+            q_state = "agrees" if lo * k <= meta["range"][1] and hi * k >= meta["range"][0] else "differs"
+            if q_state == "agrees":
+                quality = f"quality: {meta['score']:.0f}% of Claude Opus 5.5 · this run agrees ✓"
     best = ent.get("best")
     if best and best["rid"] == rid:
         last = "llmbox's pick for this machine"
@@ -119,7 +133,7 @@ def spec(board: dict, sid: str, records: list[dict], models: dict, site: str, no
     backend = cls.rsplit("|", 1)[-1].upper() if "|" in cls else ""
     tag = build_tag((sp.get("runtime") or {}).get("llama_cpp_build"))
     return {"v": 1, "id": sid, "hardware": hardware, "model": model, "quant": quant, "t2": round(run["t2"]),
-            "deep": round(run["deep"]) if run.get("deep") else None, "badge": badge, "place": place, "quality": quality,
+            "deep": round(run["deep"]) if run.get("deep") else None, "badge": badge, "place": place, "quality": quality, "q_state": q_state,
             "last": last, "outlier": outlier, "site": site.split("://", 1)[-1].rstrip("/"), "path": f"/r/{sid}",
             "build": " · ".join(x for x in (f"llama.cpp {tag}" if tag else "llama.cpp", backend, f"as of {received[:10] or (now or '')[:10]}") if x),
             "drawn": now or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
@@ -257,12 +271,18 @@ def draw(board: dict, records: dict, models: dict, site: str, out_dir: str, now:
             stats["skipped"] += 1
             continue
         sp = os.path.join(CARDS, f"{sid}.json")
-        c = json.load(open(sp)) if os.path.exists(sp) else spec(board, sid, records.get(sid) or [], models, site, now)
+        try:
+            c = json.load(open(sp)) if os.path.exists(sp) else spec(board, sid, records.get(sid) or [], models, site, now)
+        except Exception as e:   # noqa: BLE001 - one run's data must not stop the other cards
+            print(f"card {sid}: not drawn: {type(e).__name__}: {e}")
+            stats["skipped"] += 1
+            continue
         if c is None:
             stats["waiting"] += 1
             continue
-        if not os.path.exists(sp):   # frozen at the first draw: the numbers as they were when it was posted
-            json.dump(c, open(sp, "w"), indent=1)
+        if not os.path.exists(sp):   # frozen at the first draw: the numbers as they were when it was posted (whole or not at all)
+            json.dump(c, open(sp + ".part", "w"), indent=1)
+            os.replace(sp + ".part", sp)
         try:
             data = render(svg(c))   # drawn first: a failure must not leave an empty file that looks drawn
             open(png + ".part", "wb").write(data)

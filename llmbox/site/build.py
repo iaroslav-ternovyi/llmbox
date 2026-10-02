@@ -161,10 +161,10 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
     "removed" page of each run taken off. Returns (the board, files written, {page: its card as social preview},
     noindex pages)."""
     import json
-    from .. import fit as F, registry
+    from .. import fit as F, registry, server
     from ..public import site as _site
     from . import board as B, card as C
-    from .run import removed_page, user_run_page
+    from .run import _alt, removed_page, unlisted_page, user_run_page
     gone = C.removed()
 
     def ours(rec):   # a speed or quality record of a listed model, with the file the model list names
@@ -172,14 +172,19 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
         f = os.path.basename((rec.get("model") or {}).get("file") or (rec.get("model") or {}).get("path") or "")
         return rid in files and (not f or not files[rid] or f == files[rid])
     box = [r for _p, r in report.results.files(host) if r.get("kind") == "speed" and ours(r)]
-    # people's accepted records: each carries the submission it came in (one without is not a person's run here)
-    people = [r for _p, r in report.results.files("community")
-              if ours(r) and (r.get("submission") or {}).get("id") and r["submission"]["id"] not in gone]
-    models = []
+    # people's accepted records: each carries the submission it came in, and passes the intake's check as it is today
+    # (a file accepted under an older, looser check must not stop every build)
+    community = [r for _p, r in report.results.files("community") if isinstance(r, dict) and (r.get("submission") or {}).get("id")]
+    sane = [r for r in community if server.check(r) is None]
+    if len(sane) < len(community):
+        print(f"board: {len(community) - len(sane)} community record(s) left out: they fail the intake's check")
+    people = [r for r in sane if ours(r) and r["submission"]["id"] not in gone]
+    models, published = [], {}
     for rid in order:
         try:
             p = registry.published(host, rid)
             models.append((dict(meta.get(rid) or {}, id=rid), p, F.shape_for(p)))
+            published[rid] = p
         except (OSError, ValueError, SystemExit) as e:
             print(f"board: {rid} left out: {e}")
     b = B.build(box, [r for r in people if r.get("kind") == "speed"], models)
@@ -199,19 +204,34 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
     for sid in sorted(b["runs"]):
         if not re.fullmatch(r"[0-9a-f]{12}", sid or "") or sid in gone:
             continue
-        live = C.spec(b, sid, recs.get(sid) or [], meta, site, wait=False)
-        if not live:
-            continue
-        fp = os.path.join(C.CARDS, f"{sid}.json")
-        frozen = json.load(open(fp)) if os.path.exists(fp) else None
-        state = ("drawn" if os.path.exists(os.path.join(rdir, f"{sid}.png")) else "failed" if os.path.exists(os.path.join(C.CARDS, f"{sid}.failed"))
-                 else "retrying" if os.path.exists(os.path.join(C.CARDS, f"{sid}.tries")) or st.get("unavailable") else "waiting")
         p = os.path.join(rdir, f"{sid}.html")
-        open(p, "w", encoding="utf-8").write(user_run_page(sid, b, recs[sid], live, frozen, state, machines, site))
+        try:   # each run on its own: one that cannot be shown keeps its last page and stops nothing else
+            live = C.spec(b, sid, recs.get(sid) or [], meta, site, wait=False)
+            if not live:
+                continue
+            fp = os.path.join(C.CARDS, f"{sid}.json")
+            frozen = json.load(open(fp)) if os.path.exists(fp) else None
+            state = ("drawn" if os.path.exists(os.path.join(rdir, f"{sid}.png")) else "failed" if os.path.exists(os.path.join(C.CARDS, f"{sid}.failed"))
+                     else "retrying" if os.path.exists(os.path.join(C.CARDS, f"{sid}.tries")) or st.get("unavailable") else "waiting")
+            html_ = user_run_page(sid, b, recs[sid], live, frozen, state, machines, site, published.get(b["runs"][sid]["rid"]))
+            if state == "drawn":
+                images[f"r/{sid}.html"] = (f"r/{sid}.png", _alt(frozen or live))
+        except Exception as e:   # noqa: BLE001 - logged, and the build goes on
+            print(f"r/{sid}: page not rebuilt: {type(e).__name__}: {e}")
+            if os.path.exists(p):
+                written.append(p)
+            continue
+        open(p, "w", encoding="utf-8").write(html_)
         written.append(p)
-        if state == "drawn":
-            from .run import _alt
-            images[f"r/{sid}.html"] = (f"r/{sid}.png", _alt(frozen or live))
+    # an accepted run that is not on the board (its model left the list, it failed today's check): the address it was
+    # given keeps working - its last page, else a short note - rather than falling to the queue page forever
+    for sid in sorted({r["submission"]["id"] for r in community} - set(b["runs"]) - set(gone)):
+        if re.fullmatch(r"[0-9a-f]{12}", sid or ""):
+            p = os.path.join(rdir, f"{sid}.html")
+            if not os.path.exists(p):
+                open(p, "w", encoding="utf-8").write(unlisted_page(sid))
+                noindex.add(f"r/{sid}.html")
+            written.append(p)
     for sid, reason in sorted(gone.items()):
         if re.fullmatch(r"[0-9a-f]{12}", sid):
             p = os.path.join(rdir, f"{sid}.html")

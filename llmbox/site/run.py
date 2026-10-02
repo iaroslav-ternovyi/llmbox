@@ -75,12 +75,15 @@ QUALITY_HELD = {"self-seeded": "its tasks were not the ones the server drew for 
                 "outlier": "its answers read like another model's"}
 
 
-def _server_flags(rec: dict) -> list[str]:
-    """The llama-server flags of the run's recipe, the model as its file name only (the path is the sender's own)."""
+def _server_flags(recipe: dict | None, speed: dict) -> list[str]:
+    """The llama-server flags of the model's published recipe (the site's own, never the sender's: a stranger's recipe
+    could carry a command to run), the model as its file name; the prompt cache at the size this run used."""
     from .. import recipe as rc
+    if not recipe:
+        return []
     try:
-        a = rc.server_args(rc._merge(rc.DEFAULTS, rec.get("recipe") or {}))
-    except (KeyError, TypeError, ValueError):
+        a = rc.server_args(rc._merge(rc.DEFAULTS, recipe))
+    except (KeyError, TypeError, ValueError, IndexError):
         return []
     if "--port" in a:
         i = a.index("--port")
@@ -90,7 +93,7 @@ def _server_flags(rec: dict) -> list[str]:
         a[i] = (a[i] or "").replace("\\", "/").rsplit("/", 1)[-1]
     if "$CRAM" in a:   # "auto": the size the run used, else left to the server's default
         i = a.index("$CRAM")
-        cram = (rec.get("speed") or {}).get("cache_ram_mib")
+        cram = speed.get("cache_ram_mib")
         a[i - 1:i + 1] = ["--cache-ram", str(int(cram))] if isinstance(cram, (int, float)) and cram > 0 else []
     return ["llama-server"] + [str(x) for x in a]
 
@@ -115,10 +118,10 @@ def _alt(c: dict) -> str:
 
 
 def user_run_page(sid: str, board: dict, records: list[dict], live: dict, frozen: dict | None, card_state: str,
-                  machines: list, site: str) -> str:
+                  machines: list, site: str, recipe: dict | None = None) -> str:
     """A person's run. live: the card's values now (card.spec, wait=False); frozen: the values its card was drawn
     with; card_state: drawn / waiting / retrying / failed; machines: the picker entries for "Your machine?" as
-    [name, slug, kind, best model, number, measured, testable]."""
+    [name, slug, kind, best model, number, measured, testable]; recipe: the model's published recipe (its settings)."""
     from .words import CURL
     run = board["runs"][sid]
     sp = next(r for r in records if r.get("kind") == "speed")
@@ -144,20 +147,24 @@ def user_run_page(sid: str, board: dict, records: list[dict], live: dict, frozen
     if c.get("outlier"):
         notes.append('<a href="method.html#trust">how runs are checked →</a>')   # the place line already says why
     strip = _strip(c["place"]["others"], t2) if c["place"]["kind"] == "strip" else ""
-    # quality, in words
+    # quality, in words (card.spec's q_state reads the quality record's own flags)
     qflags = ((q or {}).get("submission") or {}).get("flags") or []
+    state = c.get("q_state")
+    trust = ' · <a href="method.html#trust">how runs are checked →</a>'
     if not q:
         quality = "speed only: this run had no quality test" + (" · sent without an account" if "anonymous" in (sub.get("flags") or []) else "")
-    elif "anonymous" in qflags:
+    elif state == "anonymous":
         quality = "quality not counted: sent without an account · next time: <code>llmbox login</code>"
-    elif held := [QUALITY_HELD[f] for f in qflags if f in QUALITY_HELD]:
-        quality = f'quality held for review: {esc("; ".join(held))} · <a href="method.html#trust">how runs are checked →</a>'
-    elif c.get("quality"):
+    elif state == "held":
+        quality = "quality held for review: " + esc("; ".join(QUALITY_HELD[f] for f in qflags if f in QUALITY_HELD)) + trust
+    elif state == "agrees":
         quality = esc(c["quality"])
+    elif state == "differs":
+        quality = "quality: this run's range does not overlap the model's published score" + trust
+    elif state == "unpublished":
+        quality = "quality: measured; the model has no published score to compare it with yet"
     else:
-        lo, hi = ((q.get("summary") or {}).get("capability_ci95") or [None, None])
-        quality = (f"quality: this run solved {lo * 100:.0f}–{hi * 100:.0f}% of the tasks it drew; it does not match the model's published score"
-                   if lo is not None and hi is not None else "quality: still being graded")
+        quality = "quality: still being graded"
     # 2) the card and the share tools
     img = f"r/{sid}.png"
     fname = f"llmbox-{slug or 'run'}-{t2}tps.png"
@@ -190,10 +197,12 @@ def user_run_page(sid: str, board: dict, records: list[dict], live: dict, frozen
              '<div id="mbest" class="mbest" aria-live="polite"></div>'
              f'<div class="cmd"><code id="cmd">{esc(one)}<br>llmbox test</code><button class="btn solid" data-copy-from="cmd">COPY</button></div>'
              '<p class="q">10 minutes for the speed, 10 more for the quality test; your result gets a page like this one.</p></section>')
-    flags = _server_flags(sp)
+    import shlex
+    flags = _server_flags(recipe, speed)
     settings = (f'<section class="panel"><div class="lbl">Run it with these settings</div>'
                 f'<div class="argv" id="argv">{"".join(f"<span>{esc(x)}</span> " for x in _argv_lines(flags))}</div>'
-                f'<div class="diff"><button class="btn" data-copy-from="argv">COPY SETTINGS</button></div></section>') if flags else ""
+                f'<div class="diff"><button class="btn" data-copy="{esc(shlex.join(flags))}">COPY SETTINGS</button>'
+                ' <span class="q">the published recipe; <code>llmbox install</code> fits it to your machine</span></div></section>') if flags else ""
     tag = (sp.get("runtime") or {}).get("llama_cpp_build")
     from .card import build_tag
     dl = [("32K CONTEXT", f'{run["deep"]:.0f} tok/s' if run.get("deep") else "not measured"),
@@ -221,3 +230,12 @@ def removed_page(sid: str, reason: str) -> str:
             '<p style="margin-top:14px">What runs best on your machine: <a href="index.html">llmbox.pages.dev</a> · '
             '<code>$ llmbox test</code></p></div></section>')
     return _page("llmbox · result removed", "", body, ("pages.css",), base=True)
+
+
+def unlisted_page(sid: str) -> str:
+    """An accepted run the site does not show (its model is no longer on the list, or it carried no speed figure)."""
+    body = ('<section class="panel hd"><div><h1>This result is not shown</h1><p class="q" style="margin-top:8px">It was received, '
+            'but its model is no longer on llmbox\'s list (or the run had no speed measurement), so it has no page here.</p>'
+            '<p style="margin-top:14px">What runs best on your machine: <a href="index.html">llmbox.pages.dev</a> · '
+            '<code>$ llmbox test</code></p></div></section>')
+    return _page("llmbox · result not shown", "", body, ("pages.css",), base=True)

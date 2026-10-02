@@ -93,6 +93,16 @@ assert s["badge"] is None and s["hardware"].startswith("2 × RTX 3090 24 GB") an
 s = spec("999999999999")
 assert s["badge"] == "NOT CONFIRMED" and s["outlier"] and s["place"]["kind"] == "outlier" and "(~28 tok/s)" in s["place"]["text"], s
 assert s["build"].startswith("llama.cpp · ") and "rm -rf" not in json.dumps(s), s   # a malformed build tag is left out
+# the quality line only for a quality run that counts: its own record's flags (the speed record's say nothing about it)
+for flag, state in (("anonymous", "anonymous"), ("self-seeded", "held"), ("outlier", "held")):
+    recs["aaaaaaaaaaaa"][1]["submission"]["flags"] = [flag]
+    s = spec("aaaaaaaaaaaa")
+    assert s["quality"] is None and s["q_state"] == state, (flag, s["quality"], s["q_state"])
+recs["aaaaaaaaaaaa"][1]["submission"]["flags"] = []
+assert spec("aaaaaaaaaaaa")["q_state"] == "agrees" and spec("dddddddddddd")["q_state"] == "differs" and spec("bbbbbbbbbbbb")["q_state"] is None
+recs["aaaaaaaaaaaa"][1]["summary"] = [1, 2, 3]   # malformed (refused at the intake now; older files may have it): no crash
+assert spec("aaaaaaaaaaaa")["q_state"] == "grading"
+recs["aaaaaaaaaaaa"][1]["summary"] = {"capability": 0.81, "capability_ci95": [0.78, 0.84]}
 # a quality run waits for its explanations (up to a day after it was received)
 recs["aaaaaaaaaaaa"][1]["rows"][0]["pending"] = True
 assert spec("aaaaaaaaaaaa") is None

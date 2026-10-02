@@ -58,7 +58,8 @@ def build(box_records: list[dict], community_records: list[dict], models: list[t
         sets.setdefault((r["rid"], r["cls"]), {}).setdefault(r["machine"], []).append(r["t2"])
         if r["ref"]:
             refs.add((r["rid"], r["cls"]))
-    sets = {k: {"values": sorted(st.median(v) for v in ms.values()), "machines": len(ms), "ref": k in refs} for k, ms in sets.items()}
+    sets = {k: {"values": sorted(st.median(v) for v in ms.values()), "machines": len(ms), "ref": k in refs,
+                "by_machine": {m: st.median(v) for m, v in ms.items()}} for k, ms in sets.items()}
     for v in sets.values():
         v["median"] = round(st.median(v["values"]), 1)
 
@@ -116,10 +117,10 @@ def _best(name: str, models: list[tuple], sets: dict, start_bw: float) -> dict |
 def place(board: dict, rid: str, cls: str, t2: float, machine: str | None = None) -> dict:
     """Where a run stands among the machines like it (same recipe, same comparison class), itself left out: M other
     machines, their speeds, and with five or more the share it is faster than."""
-    s = board["sets"].get((rid, cls)) or {"values": [], "machines": 0}
-    others = list(s["values"])
-    if machine is not None and t2 in others:   # its own machine is in the set: take one copy of its figure out
-        others.remove(t2)
+    s = board["sets"].get((rid, cls)) or {"values": [], "machines": 0, "by_machine": {}}
+    # every other machine's median; its own machine is left out whatever its runs were (two runs of 50 and 52 are not
+    # "1 other like it: 51")
+    others = sorted(v for m, v in s.get("by_machine", {}).items() if m != machine) if machine is not None else list(s["values"])
     m = len(others)
     return {"others": others, "m": m, "faster_than": round(100 * sum(1 for v in others if v < t2) / m) if m >= 5 else None}
 
@@ -133,10 +134,10 @@ def events(board: dict, now: str | None = None, path: str = EVENTS) -> tuple[lis
     if os.path.exists(path):
         old = [json.loads(x) for x in open(path) if x.strip()]
     seen = {e["id"] for e in old}
-    last_best = {}   # the best each feed last named: its first item's, then every "new best"
+    last_best = {}   # the best each feed last named: its first item's, then every "new best" (by slug: names may change)
     for e in old:
         if e["kind"] in ("start", "best"):
-            last_best[e["entry"]] = e.get("rid")
+            last_best[e["id"].split("/")[1]] = e.get("rid")
     new, starting = [], set()
     for name, ent in board["entries"].items():
         b = ent.get("best")
@@ -145,8 +146,8 @@ def events(board: dict, now: str | None = None, path: str = EVENTS) -> tuple[lis
             new.append({"id": f"start/{ent['slug']}", "kind": "start", "entry": name, "at": now, "testable": ent["testable"],
                         "measured": ent["machines"] > 0, "machines": ent["machines"], "rid": b and b["rid"], "model": b and b["name"],
                         "tps": b and (b["measured"] or b["predicted"]), "predicted": not (b and b["measured"])})
-        if b and name in last_best and last_best[name] != b["rid"]:
-            new.append({"id": f"best/{ent['slug']}/{b['rid']}/{now[:10]}", "kind": "best", "entry": name, "at": now, "rid": b["rid"],
+        if b and ent["slug"] in last_best and last_best[ent["slug"]] != b["rid"]:
+            new.append({"id": f"best/{ent['slug']}/{b['rid']}/{now}", "kind": "best", "entry": name, "at": now, "rid": b["rid"],
                         "model": b["name"], "score": b["score"], "tps": b["measured"] or b["predicted"], "predicted": not b["measured"]})
     for (rid, cls), v in sorted(board["sets"].items()):
         name = hwclass.display_class(cls)
