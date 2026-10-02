@@ -54,11 +54,11 @@ def run_page(rid: str, rec: dict, ref: dict | None, flags: dict) -> str:
  <div class="acts">{'<button class="btn" id="copy">COPY SETTINGS</button>' if argv else ""}</div></section>
 <section class="panel sum">
  <div><b>{f"{vs:.0f}%" if vs is not None else "—"}</b><span>of Claude Opus 5.5 in this run · range {s["capability_ci95"][0] / s["capability"] * vs if vs else 0:.0f}–{min(100, s["capability_ci95"][1] / s["capability"] * vs) if vs else 0:.0f}</span></div>
- <div><b class="w">{s["solved"]}</b><span>of {s["items"]} tasks solved</span></div>
- <div><b>{f"{sp['decode_tps']:.0f}" if sp.get("decode_tps") else "—"}</b><span>tok/s in a short chat{f" · {float(report._deep(sp)):.0f} with a long context" if report._deep(sp) not in ("-", "") else ""}</span></div>
+ <div><b class="w">{100 * (s["solved"] or 0) / (s["items"] or 1):.0f}%</b><span>of the points on {s["items"]} tasks (partly right counts in part)</span></div>
+ <div><b>{f"{sp['decode_tps']:.0f}" if sp.get("decode_tps") else "—"}</b><span>tok/s in a short chat{f" · {float(report._deep(sp)):.0f} at 32k of context" if report._deep(sp) not in ("-", "") else ""}</span></div>
  <div><b class="w">{f"{2000/bd[0][1]['prefill_tps']:.1f} s" if bd and bd[0][1].get("prefill_tps") else "—"}</b><span>first word at 2k</span></div>
- <div><b class="w">{s["solved_per_hour"]}</b><span>solved tasks per hour</span></div>
- <div><b class="w" style="color:var(--red)">{sum(1 for f in flags.values() if f["cut"]) + sum(1 for f in flags.values() if f["loop"])}</b><span>replies flagged: {sum(1 for f in flags.values() if f["cut"])} out of thinking room, {sum(1 for f in flags.values() if f["loop"])} looped</span></div></section>
+ <div><b class="w">≈{(s["solved_per_hour"] or 0):.0f}</b><span>tasks done an hour, at this speed</span></div>
+ <div><b class="w" style="color:var(--red)">{sum(1 for f in flags.values() if f["cut"]) + sum(1 for f in flags.values() if f["loop"])}</b><span>{"reply" if sum(1 for f in flags.values() if f["cut"] or f["loop"]) == 1 else "replies"} stuck: {sum(1 for f in flags.values() if f["cut"])} ran out of thinking room, {sum(1 for f in flags.values() if f["loop"])} looped</span></div></section>
 <div class="two"><section class="panel sys"><div class="lbl">System</div><dl>
  <dt>GPU</dt><dd>{esc(h.get("gpu"))} · {h.get("vram_gib")} GiB</dd><dt>DRIVER</dt><dd>{esc(h.get("gpu_driver"))} · power limit {esc(h.get("gpu_power_limit_w"))} W</dd>
  <dt>CPU</dt><dd>{esc(h.get("cpu"))}</dd><dt>RAM</dt><dd>{h.get("ram_gib")} GiB · measured {h.get("ram_read_gbs")} GB/s read</dd><dt>OS</dt><dd>{esc(h.get("os"))}</dd>

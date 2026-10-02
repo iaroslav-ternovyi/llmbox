@@ -5,7 +5,7 @@ from __future__ import annotations
 from .. import report
 from .layout import _page
 from .stats import _range_pct
-from .words import _human, _KNAMES, esc, GROUPS, model_name, SHORT, TASK_NAMES, variant
+from .words import _human, _KNAMES, esc, GROUPS, model_name, SHORT, TASK_NAMES, variant, bits_of
 
 
 def _flat_settings(rcp: dict) -> dict:
@@ -35,7 +35,12 @@ def compare_data(rs: list[dict], clouds: list[dict], ranks: dict, local: dict, l
                        "blocks": r["blocks"], "t2": None if cloud else (r.get("speed") or {}).get("decode_tps"),
                        "td": None if cloud or report._deep(r["speed"]) == "-" else float(report._deep(r["speed"])),
                        "depth": [[k, round(d["decode_tps"], 1), round(k * 1000 / d["prefill_tps"], 1) if d.get("prefill_tps") else None] for k, d in bd],
-                       "fam": {f: round(sum(v) / len(v), 2) for f, v in fam.items()}, "set": _flat_settings(rec.get("recipe") or {}) if rec else {},
+                       "fam": {f: round(sum(v) / len(v), 2) for f, v in fam.items()},
+                       # what differs first: the file (its precision and size) and what kind of model it is, then the settings
+                       "set": dict({"file": " · ".join(x for x in (variant(rid, r.get("file")), bits_of(variant(rid, r.get("file"))),
+                                                                     f'{data["recipes"][rid]["size"]} GB' if (data["recipes"].get(rid) or {}).get("size") else "") if x),
+                                    "kind of model": {"uncensored": "uncensored remix"}.get(kind, kind)},
+                                   **_flat_settings(rec.get("recipe") or {})) if rec else {},
                        "rel": rel.get(rid)})
     from ..import suite
     return {"models": models, "groups": GROUPS, "weights": suite.WEIGHTS, "short": SHORT, "tasks": TASK_NAMES,

@@ -68,9 +68,10 @@ function render(a, b) {
     `<div><div class="sc"><span class="dot b"></span>only ${esc(B.name)}</div><ul>${only(B, A).map(f => `<li>${tname(f)}</li>`).join("") || "<li class=q>none</li>"}</ul></div></div>` +
     `<p class="q" style="margin-top:10px">Out of ${shared} kinds of task both were given.</p>`;
   // the settings that differ
-  const keys = [...new Set([...Object.keys(A.set), ...Object.keys(B.set)])].filter(k => A.set[k] !== B.set[k]).sort();
+  const lead = ["file", "kind of model"], keys = [...new Set([...Object.keys(A.set), ...Object.keys(B.set)])].filter(k => A.set[k] !== B.set[k])
+    .sort((a, b) => (lead.indexOf(b) - lead.indexOf(a)) || (a < b ? -1 : 1));   // the file and the kind of model first
   $("#sets").innerHTML = A.cloud || B.cloud ? `<p class="q" style="padding:16px">Cloud models have no local settings.</p>` : keys.length ?
-    `<table><tr><th class="l">SETTING</th><th class="l"><span class="dot a"></span>${esc(A.name)}</th><th class="l"><span class="dot b"></span>${esc(B.name)}</th></tr>` +
+    `<table class="setd"><tr><th class="l">SETTING</th><th class="l"><span class="dot a"></span>${esc(A.name)} <small>${esc(A.quant)}</small></th><th class="l"><span class="dot b"></span>${esc(B.name)} <small>${esc(B.quant)}</small></th></tr>` +
     keys.map(k => `<tr><td class="l">${esc(k)}</td><td class="l amb">${esc(A.set[k] ?? "default")}</td><td class="l">${esc(B.set[k] ?? "default")}</td></tr>`).join("") + "</table>"
     : `<p class="q" style="padding:16px">Same settings.</p>`;
 }

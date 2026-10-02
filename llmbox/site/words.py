@@ -260,7 +260,13 @@ _KNAMES = {"sampling.temp": "Temperature", "sampling.top_p": "Top-p", "sampling.
            "chat.template_kwargs.enable_thinking": "Thinking", "chat.template_kwargs.preserve_thinking": "Keep thinking between turns",
            "chat.template_kwargs.reasoning_effort": "Reasoning effort", "placement.kv_type": "KV cache", "placement.ctx": "Context",
            "antiloop.reasoning_budget": "Reasoning reserve", "antiloop.marker_bias": "Loop-marker bias", "speculative.type": "Speculative decoding",
-           "speculative.draft_max": "Draft tokens"}
+           "speculative.draft_max": "Draft tokens", "placement.fit_target_mib": "VRAM left free (MiB)", "placement.batch": "Batch",
+           "placement.ubatch": "Micro-batch", "placement.slots": "Parallel slots", "placement.kv_unified": "Shared KV across slots",
+           "placement.cache_reuse": "Prompt cache reuse", "placement.flash_attn": "Flash attention", "placement.fit": "Automatic placement",
+           "placement.load_mode": "Load mode", "placement.cache_ram": "Prompt cache in RAM", "placement.cache_ram_headroom_mib": "RAM kept free (MiB)",
+           "placement.kv_offload": "KV cache on the GPU", "sampling.max_tokens": "Longest reply", "antiloop.dry_think_only": "Repeat penalty in thinking only",
+           "antiloop.reasoning_loop": "Loop detector", "antiloop.dry_multiplier": "DRY strength", "antiloop.dry_base": "DRY base",
+           "antiloop.dry_allowed_length": "DRY allowed repeat", "antiloop.dry_penalty_last_n": "DRY window", "chat.jinja": "Model's chat template"}
 
 
 def _human(v) -> str:
