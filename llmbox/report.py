@@ -23,8 +23,10 @@ def latest_probe(recs: list[dict], rid: str, after: str = "") -> dict | None:
 
 
 def with_probe(rec: dict, recs: list[dict]) -> dict:
-    """The suite record with its speed replaced by a newer re-measurement (quality is the suite's; speed is today's)."""
-    p = latest_probe(recs, (rec.get("recipe") or {}).get("id"), rec.get("created", ""))
+    """The suite record with its speed replaced by the recipe's newest 1-stream probe (quality is the suite's; speed is
+    the probe's), whenever one exists: a run's own figure is a token-weighted average over its whole run, a different
+    method, so mixing the two made models of the same architecture look different (Qwen3.6 vs Tiel, 2026-10-02 audit)."""
+    p = latest_probe(recs, (rec.get("recipe") or {}).get("id"))
     if not p:
         return rec
     out = dict(rec, summary=dict(rec["summary"], speed=p["summary"]["speed"]))
