@@ -37,7 +37,8 @@ def _mac_place(name: str) -> tuple[int, int]:
     return gen - 1, col
 
 
-def cell(name: str, ent: dict, users: dict, now: float) -> str:
+def cell(name: str, ent: dict, users: dict, now: float, common: str | None = None) -> str:
+    """common: the model best on most entries; a cell names its model only when it is another one (the map's line says which)."""
     best, testable, n = ent.get("best"), ent["testable"], ent["machines"]
     num, measured = number(best)
     kind = "m" if n else "u" if testable else "x"
@@ -65,7 +66,7 @@ def cell(name: str, ent: dict, users: dict, now: float) -> str:
         u = users.get(cr["user"]) or {}
         title = f' title="first: {esc("@" + u["login"] if u.get("public") and u.get("login") else cr["user"])}"'
     return (f'<a class="cell {kind}" href="hw-{ent["slug"]}.html" data-e="{esc(name)}" data-slug="{ent["slug"]}" aria-label="{esc(name)}: {esc(said)}"{title}>'
-            f'<b class="nm">{esc(name)}</b>{new}<span class="md" title="{esc(model)}">{esc(model)}</span>{ticks}'
+            f'<b class="nm">{esc(name)}</b>{new}<span class="md" title="{esc(model)}">{"" if best and best["rid"] == common else esc(model)}</span>{ticks}'
             f'<span class="n{"" if measured else " pred"}">{esc(num)}{"<small> tok/s</small>" if best else ""}</span></a>')
 
 
@@ -87,19 +88,26 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
     order = [g for g in hwclass.SLUGS]   # the picker's order: NVIDIA by series, then AMD, then Macs, then Ryzen AI Max
     measured = sum(1 for e in ents.values() if e["machines"])
     later = sum(1 for e in ents.values() if not e["testable"])
+    from collections import Counter
+    tops = Counter(e["best"]["rid"] for e in ents.values() if e.get("best"))
+    common = tops.most_common(1)[0][0] if tops else None
+    cb = next((e["best"] for e in ents.values() if (e.get("best") or {}).get("rid") == common), None)
+    lead = (f'<p class="mlead">Best on {tops[common]} of {len(ents)}: <a href="recipe-{esc(common)}.html">{esc(cb["name"])}</a>'
+            + (f' ({cb["score"]:.0f}% of Claude Opus)' if cb.get("score") is not None else "")
+            + '. A cell names a model only where another one is best.</p>') if cb else ""
     tiers = []
     for label, lo, hi in TIERS:
         items = [(n, ents[n]) for n in order if ents[n]["kind"] in ("card", "amd") and lo <= _vram_gb(n) < hi]
-        lis = "".join(f'<li class="{ "m" if e["machines"] else "u" if e["testable"] else "x"}">{cell(n, e, users, now)}</li>' for n, e in items)
+        lis = "".join(f'<li class="{ "m" if e["machines"] else "u" if e["testable"] else "x"}">{cell(n, e, users, now, common)}</li>' for n, e in items)
         tiers.append(f'<div class="tier"><h3 class="sc">{label}</h3><ul class="cells">{lis}</ul>{_fold(items)}</div>')
     macs = [(n, ents[n]) for n in order if ents[n]["kind"] == "mac"]
-    lis = "".join(f'<li class="{"m" if e["machines"] else "u"}" style="grid-row:{_mac_place(n)[0] + 2};grid-column:{_mac_place(n)[1] + 2}">{cell(n, e, users, now)}</li>' for n, e in macs)
+    lis = "".join(f'<li class="{"m" if e["machines"] else "u"}" style="grid-row:{_mac_place(n)[0] + 2};grid-column:{_mac_place(n)[1] + 2}">{cell(n, e, users, now, common)}</li>' for n, e in macs)
     heads = "".join(f'<li class="ch" aria-hidden="true" style="grid-row:1;grid-column:{i + 2}">{c}</li>' for i, c in enumerate(MAC_COLS))
     gens = max(_mac_place(n)[0] for n, _e in macs) + 1   # M1 .. the newest chip in the picker
     rows = "".join(f'<li class="rh" aria-hidden="true" style="grid-row:{g + 2};grid-column:1">M{g + 1}</li>' for g in range(gens))
     tiers.append(f'<div class="tier mac"><h3 class="sc">Mac</h3><ul class="cells chips">{heads}{rows}{lis}</ul>{_fold(macs)}</div>')
     apus = [(n, ents[n]) for n in order if ents[n]["kind"] == "chip"]
-    lis = "".join(f'<li class="x">{cell(n, e, users, now)}</li>' for n, e in apus)
+    lis = "".join(f'<li class="x">{cell(n, e, users, now, common)}</li>' for n, e in apus)
     tiers.append(f'<div class="tier"><h3 class="sc">Ryzen AI Max</h3><ul class="cells">{lis}</ul>{_fold(apus)}</div>')
     other = ""
     if board.get("other"):
@@ -111,6 +119,7 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
  <div class="mhead"><span><b>{measured}</b> of {len(ents)} measured · each new machine fills a cell: <code id="mapcmd">$ llmbox test</code>
   <button class="btn" data-copy-from="mapcmd">COPY</button></span>
   <span class="q">{later} AMD entries open after launch</span><a id="maprss" href="#box">RSS for your card</a></div>
+ {lead}
  <p class="mlegend">Each cell: a graphics card or Mac, the best model for it, and how fast that model writes, in tokens per second (about ¾ of a
  word each; 20 reads comfortably, 50+ feels instant). <span class="fr m"></span> <b>measured</b>: someone ran it on that hardware (×3: on three machines) ·
  <span class="fr u"></span> <b>predicted</b> <span class="n pred">~</span>: worked out from the hardware until someone measures it ·
