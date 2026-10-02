@@ -23,8 +23,8 @@ def asset_pattern(prof: dict) -> tuple[str, str]:
     g = (hw.get("gpus") or [{}])[0]
     arm = "arm64" in (hw.get("os") or "").lower() or "aarch64" in (hw.get("os") or "").lower()
     arch = "arm64" if arm else "x64"
-    if g.get("vendor") == "apple":
-        return rf"^llama-b\d+-bin-macos-{arch}\.tar\.gz$", "Metal (Mac)"
+    if g.get("vendor") == "apple":   # an Apple GPU means Apple silicon, whatever this Python was built for (an x86 one under Rosetta says x86_64)
+        return r"^llama-b\d+-bin-macos-arm64\.tar\.gz$", "Metal (Mac)"
     if g.get("vendor") == "nvidia":
         cuda = float(re.match(r"(\d+\.\d+)", str(hw.get("cuda_driver") or "0.0")).group(1)) if hw.get("cuda_driver") else 0.0
         for v in ("13.4", "12.8"):

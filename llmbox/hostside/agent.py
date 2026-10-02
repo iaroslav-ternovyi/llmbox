@@ -163,6 +163,15 @@ def _pinned(spec: dict) -> list[str]:
     return ["taskset", "-c", spec["affinity"]] if spec.get("affinity") and shutil.which("taskset") else []
 
 
+def _cache_ram(spec: dict) -> int:
+    """llama-server's prompt cache (--cache-ram, MiB): what RAM the model and the headroom leave, 2-48 GB; on a Mac, whose
+    memory is the GPU's and every app's too, at most an eighth of it."""
+    total_mib = _meminfo().get("MemTotal", 0)
+    files_mib = sum(os.path.getsize(f) for f in spec.get("model_files", [])) // 2**20
+    cram = max(2048, min(48000, total_mib - files_mib - int(spec.get("headroom_mib", 4096))))
+    return min(cram, max(2048, total_mib // 8)) if platform.system() == "Darwin" else cram
+
+
 def busy() -> dict:
     running = []
     try:
@@ -175,10 +184,11 @@ def busy() -> dict:
     # by process name: a full-command-line match also caught this agent itself (a probe spec names the llama-server binary);
     # counted with wc: macOS pgrep has no -c
     servers = int(sh("pgrep -x llama-server | wc -l") or 0)
-    # a Linux box under a load of 2 is doing something else; a Mac is someone's working computer, busy only past half its cores
-    limit = max(2.0, (os.cpu_count() or 4) / 2) if platform.system() == "Darwin" else 2.0
+    # a Linux box under a load of 2 is doing something else; a Mac is someone's working computer, never idle (a browser,
+    # a simulator): there only a model already being served makes it busy
+    loaded = load1 > 2.0 and platform.system() != "Darwin"
     return {"llama_swap_running": running, "gpu": util, "load1": round(load1, 2),
-            "llama_server_procs": servers, "busy": bool(running) or servers > 0 or load1 > limit}
+            "llama_server_procs": servers, "busy": bool(running) or servers > 0 or loaded}
 
 
 _BW_C = r"""
@@ -293,9 +303,7 @@ def probe_server(spec: dict) -> dict:
     """spec = {server, args (without --port), affinity, model_files, headroom_mib, depths, gen_tokens, prefill_tokens}"""
     if busy()["busy"] and not spec.get("force"):
         return {"error": "host is busy (model serving or high load) - not measuring"}
-    total_mib = _meminfo().get("MemTotal", 0)
-    files_mib = sum(os.path.getsize(f) for f in spec.get("model_files", [])) // 2**20
-    cram = max(2048, min(48000, total_mib - files_mib - int(spec.get("headroom_mib", 4096))))
+    cram = _cache_ram(spec)
     port = _free_port()
     args = [a.replace("$CRAM", str(cram)) for a in spec["args"]]
     cmd = _pinned(spec) + [spec["server"], "--port", str(port)] + args
@@ -366,9 +374,7 @@ def probe_server(spec: dict) -> dict:
 def serve_start(spec: dict) -> dict:
     """spec = {server, args (without --port/--host), affinity, model_files, headroom_mib, bind, port}: a llama-server
     that outlives this call (its own session), for a run that needs one for a while (llmbox test / run)."""
-    total_mib = _meminfo().get("MemTotal", 0)
-    files_mib = sum(os.path.getsize(f) for f in spec.get("model_files", [])) // 2**20
-    cram = max(2048, min(48000, total_mib - files_mib - int(spec.get("headroom_mib", 4096))))
+    cram = _cache_ram(spec)
     port = int(spec.get("port") or _free_port())
     args = [a.replace("$CRAM", str(cram)) for a in spec["args"]]
     cmd = _pinned(spec) + [spec["server"], "--port", str(port),

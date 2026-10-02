@@ -61,8 +61,11 @@ def plan(rid: str, src: str, target: str, force: bool = False, unload: bool = Fa
     r = rc.load(src, rid)
     same = src == target
     shape = F.shape_for(r, host=h if same else None)
+    cal = F.calibration(r, shape, src)
+    if (prof["hw"].get("gpus") or [{}])[0].get("unified"):   # as llmbox pick: the reference box's factors are about its card and RAM, not a Mac's
+        cal = F.Calibration(deep_k=cal.deep_k)
     f = F.fit(r, shape, hosts.spec(prof), cores=(prof["hw"].get("cpu") or {}).get("cores") or (prof["hw"].get("cpu") or {}).get("threads"),
-              cal=F.calibration(r, shape, src), same_host=same)
+              cal=cal, same_host=same)
     steps = []
     if not f.fits:
         steps.append(Step("fit", "blocked", f"does not fit: {f.reason}; " + "; ".join(f.alternatives)))

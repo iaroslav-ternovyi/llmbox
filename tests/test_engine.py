@@ -19,6 +19,7 @@ pat = lambda p: E.asset_pattern(p)[0]
 assert "cuda-13\\.4-x64" in pat(prof(cuda="13.4")) and "cuda-12\\.8-x64" in pat(prof(cuda="13.3"))
 assert "vulkan-x64" in pat(prof(cuda="12.2")) and "580" in E.asset_pattern(prof(cuda="12.2"))[1], "an old driver: Vulkan, and how to get CUDA"
 assert "macos-arm64" in pat(prof("apple", os_="macOS-15-arm64-arm-64bit"))
+assert "macos-arm64" in pat(prof("apple", os_="macOS-27.0-x86_64-i386-64bit"))   # an x86 Python under Rosetta on Apple silicon
 assert "vulkan" in pat(prof("amd")) and pat(prof(None)).endswith("ubuntu-x64\\.tar\\.gz$")
 
 REL = [{"tag_name": "b200", "assets": [
