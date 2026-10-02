@@ -138,6 +138,31 @@ def hwinfo() -> dict:
     }
 
 
+def _meminfo() -> dict:
+    """MemTotal and MemAvailable in MiB: /proc/meminfo on Linux; on a Mac sysctl hw.memsize and vm_stat (free, inactive
+    and speculative pages: what macOS hands out without swapping)."""
+    if os.path.exists("/proc/meminfo"):
+        return {l.split(":")[0]: int(l.split()[1]) // 1024 for l in open("/proc/meminfo") if l.split(":")[0] in ("MemTotal", "MemAvailable")}
+    import re as _re
+    total = int(sh("sysctl -n hw.memsize") or 0) // 2**20
+    vs = sh("vm_stat")
+    page = int(next(iter(_re.findall(r"page size of (\d+)", vs)), 16384))
+    free = sum(int(n) for k in ("Pages free", "Pages inactive", "Pages speculative") for n in _re.findall(rf"{k}:\s+(\d+)", vs))
+    return {"MemTotal": total, "MemAvailable": free * page // 2**20 if vs else total // 2}
+
+
+def _argv(pid: int | str) -> list[str]:
+    """A process's command line: /proc on Linux, ps elsewhere (a Mac; arguments split at spaces)."""
+    if os.path.exists(f"/proc/{pid}/cmdline"):
+        return open(f"/proc/{pid}/cmdline", "rb").read().decode(errors="replace").split("\0")[:-1]
+    return sh(f"ps -p {int(pid)} -o command=").split()
+
+
+def _pinned(spec: dict) -> list[str]:
+    """taskset for a recipe's CPU affinity where there is one (Linux); macOS has no CPU pinning."""
+    return ["taskset", "-c", spec["affinity"]] if spec.get("affinity") and shutil.which("taskset") else []
+
+
 def busy() -> dict:
     running = []
     try:
@@ -147,10 +172,13 @@ def busy() -> dict:
         pass
     util = sh("nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits")
     load1 = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
-    # by process name: a full-command-line match also caught this agent itself (a probe spec names the llama-server binary)
-    servers = sh("pgrep -xc llama-server || true")
+    # by process name: a full-command-line match also caught this agent itself (a probe spec names the llama-server binary);
+    # counted with wc: macOS pgrep has no -c
+    servers = int(sh("pgrep -x llama-server | wc -l") or 0)
+    # a Linux box under a load of 2 is doing something else; a Mac is someone's working computer, busy only past half its cores
+    limit = max(2.0, (os.cpu_count() or 4) / 2) if platform.system() == "Darwin" else 2.0
     return {"llama_swap_running": running, "gpu": util, "load1": round(load1, 2),
-            "llama_server_procs": int(servers or 0), "busy": bool(running) or int(servers or 0) > 0 or load1 > 2.0}
+            "llama_server_procs": servers, "busy": bool(running) or servers > 0 or load1 > limit}
 
 
 _BW_C = r"""
@@ -215,7 +243,7 @@ def _bandwidth_py(seconds: float) -> dict:
     """RAM speed without a compiler: half the cores copying 512 MiB buffers (memcpy through memoryviews), the bytes
     read and written per second, scaled to the C probe's read figure. Rougher: reported as an estimate."""
     import multiprocessing as mp
-    avail = next((int(l.split()[1]) // 1024 for l in open("/proc/meminfo") if l.startswith("MemAvailable")), 8192) if os.path.exists("/proc/meminfo") else 8192
+    avail = _meminfo().get("MemAvailable") or 8192
     n = max(1, min((os.cpu_count() or 2) // 2, avail // 3072))   # 1 GiB a worker, and a third of what is free at most
     with mp.get_context("spawn").Pool(n) as pool:
         rates = pool.map(_copy_worker, [(512, seconds)] * n)
@@ -265,15 +293,12 @@ def probe_server(spec: dict) -> dict:
     """spec = {server, args (without --port), affinity, model_files, headroom_mib, depths, gen_tokens, prefill_tokens}"""
     if busy()["busy"] and not spec.get("force"):
         return {"error": "host is busy (model serving or high load) - not measuring"}
-    total_mib = 0
-    for line in open("/proc/meminfo"):
-        if line.startswith("MemTotal"):
-            total_mib = int(line.split()[1]) // 1024
+    total_mib = _meminfo().get("MemTotal", 0)
     files_mib = sum(os.path.getsize(f) for f in spec.get("model_files", [])) // 2**20
     cram = max(2048, min(48000, total_mib - files_mib - int(spec.get("headroom_mib", 4096))))
     port = _free_port()
     args = [a.replace("$CRAM", str(cram)) for a in spec["args"]]
-    cmd = ([ "taskset", "-c", spec["affinity"]] if spec.get("affinity") else []) + [spec["server"], "--port", str(port)] + args
+    cmd = _pinned(spec) + [spec["server"], "--port", str(port)] + args
     log_path = tempfile.mktemp(prefix="llmbox-probe-", suffix=".log")
     t0 = time.time()
     proc = subprocess.Popen(cmd, stdout=open(log_path, "w"), stderr=subprocess.STDOUT)
@@ -341,12 +366,12 @@ def probe_server(spec: dict) -> dict:
 def serve_start(spec: dict) -> dict:
     """spec = {server, args (without --port/--host), affinity, model_files, headroom_mib, bind, port}: a llama-server
     that outlives this call (its own session), for a run that needs one for a while (llmbox test / run)."""
-    total_mib = next((int(l.split()[1]) // 1024 for l in open("/proc/meminfo") if l.startswith("MemTotal")), 0)
+    total_mib = _meminfo().get("MemTotal", 0)
     files_mib = sum(os.path.getsize(f) for f in spec.get("model_files", [])) // 2**20
     cram = max(2048, min(48000, total_mib - files_mib - int(spec.get("headroom_mib", 4096))))
     port = int(spec.get("port") or _free_port())
     args = [a.replace("$CRAM", str(cram)) for a in spec["args"]]
-    cmd = (["taskset", "-c", spec["affinity"]] if spec.get("affinity") else []) + [spec["server"], "--port", str(port),
+    cmd = _pinned(spec) + [spec["server"], "--port", str(port),
                                                                                     "--host", spec.get("bind") or "127.0.0.1"] + args
     log_path = os.path.join(tempfile.gettempdir(), f"llmbox-serve-{port}.log")
     proc = subprocess.Popen(cmd, stdout=open(log_path, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
@@ -369,9 +394,7 @@ def serve_start(spec: dict) -> dict:
 def serve_alive(pid: int) -> bool:
     """Still the llama-server serve-start began (after a reboot the pid may be another program's)."""
     try:
-        if os.path.exists(f"/proc/{pid}/cmdline"):
-            return "llama-server" in open(f"/proc/{pid}/cmdline", "rb").read().decode(errors="replace")
-        return "llama-server" in sh(f"ps -p {int(pid)} -o command=")
+        return any("llama-server" in a for a in _argv(pid))
     except OSError:
         return False
 
@@ -419,7 +442,7 @@ def server_settings(target: str) -> dict:
         return out
     for pid in sh("pgrep -x llama-server").split():
         try:
-            argv = open(f"/proc/{pid}/cmdline", "rb").read().decode(errors="replace").split("\0")[:-1]
+            argv = _argv(pid)
         except OSError:
             continue
         if "--port" in argv and argv[argv.index("--port") + 1] == str(port):
@@ -479,8 +502,8 @@ def telemetry_loop(path: str, interval: float) -> None:
         while True:
             g = sh(f"nvidia-smi --query-gpu={q} --format=csv,noheader,nounits", timeout=10).splitlines()
             g = [x.strip() for x in (g[0].split(",") if g else ["", "", "", ""])]
-            mi = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo") if l.split(":")[0] in ("MemTotal", "MemAvailable")}
-            ram_used = (mi.get("MemTotal", 0) - mi.get("MemAvailable", 0)) // 1024
+            mi = _meminfo()
+            ram_used = mi.get("MemTotal", 0) - mi.get("MemAvailable", 0)
             f.write(",".join(str(x) for x in (round(time.time(), 1), *g, _cpu_temp() or "", ram_used, os.getloadavg()[0])) + "\n")
             time.sleep(interval)
 

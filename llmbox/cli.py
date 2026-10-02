@@ -1179,7 +1179,7 @@ def main(argv: list[str] | None = None) -> None:
     so.add_argument("recipes", nargs="*")
     so.set_defaults(fn=cmd_stop)
 
-    te = command("test", "measure a model on this machine and send it: speed, the 40-minute quality test, the upload")
+    te = command("test", "measure a model on this machine and send it: speed, the 10-minute quality test (signed in), the upload")
     te.add_argument("recipe", nargs="?", help="an installed recipe (default: llmbox's pick for this computer, installed first)")
     te.add_argument("--host", help="this machine's name (default: the only one registered)")
     te.add_argument("--full", action="store_true", help="the 40-minute quality test (default: 10 minutes)")

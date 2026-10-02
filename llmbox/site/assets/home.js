@@ -126,12 +126,9 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
     `<p><b>${Math.round(best.vs)}%</b> of Claude Opus · <b>${best.pred ? "~" : ""}${Math.round(best.t2)}</b> tokens/s` +
     (best.td ? `, ${Math.round(best.td)} with a long document` : "") +
     ` · ${why}</p></div>` +
-    (hwNow && hwNow.mac   // llmbox does not run models on a Mac yet: the settings for the apps a Mac has
-      ? `<div class="pkc"><p><a class="btn solid" href="recipe-${best.id}.html#run">SETTINGS FOR LM STUDIO AND OLLAMA</a></p>` +
-        `<p class="q">the file and the settings it was measured with; llmbox itself runs models on Linux + NVIDIA for now</p></div></div>`
-      : `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
-        `<p class="q">installs llmbox and this model, with the settings measured here fitted to your computer, then starts it (Linux + NVIDIA` +
-        (hwNow && (hwNow.amd || hwNow.apu) ? "; on AMD it installs the Vulkan build of llama.cpp, not yet tried on AMD hardware" : "") + `; <a href="install.html">more</a>)</p></div></div>`);
+    `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
+    `<p class="q">installs llmbox and this model, with the settings measured here fitted to your computer, then starts it (Linux or a Mac` +
+    (hwNow && (hwNow.amd || hwNow.apu) ? "; on AMD it installs the Vulkan build of llama.cpp, and timing there comes after launch" : "") + `; <a href="install.html">more</a>)</p></div></div>`;
   if ($("#pickcpy")) $("#pickcpy").onclick = () => (llmboxCount("copy-install/home"), navigator.clipboard) && navigator.clipboard.writeText(cmd).then(() => { $("#pickcpy").textContent = "COPIED"; setTimeout(() => $("#pickcpy").textContent = "COPY", 1500); });
 }
 function render() {
@@ -197,7 +194,7 @@ function readBox() {
   const bw = parseFloat($("#bwn").value) || parseFloat($("#bw").value);
   hwNow = boxFrom(g, parseInt($("#ram").value), bw);
   ["#bw", "#bwn"].forEach(s => $(s).disabled = !!hwNow.uni);   // unified memory: its speed comes with the chip
-  $("#boxnote").textContent = hwNow.mac ? "Mac: rough, for MLX-class engines (llama.cpp on Metal is often slower) - nothing here is measured on a Mac" :
+  $("#boxnote").textContent = hwNow.mac ? "Mac: predicted for llama.cpp on Metal (~), rough until people with this Mac measure it" :
     hwNow.apu ? "Ryzen AI Max: unified memory, the whole model on the GPU; predicted for llama.cpp on Vulkan (~), nothing here is measured on one" :
     hwNow.amd ? "AMD: predicted for llama.cpp on Vulkan (~), fitted to public runs on Radeon cards; nothing here is measured on AMD" :
     sameClass(hwNow) ? "same class as the reference box: measured speeds" : "speeds predicted for this box (~)";

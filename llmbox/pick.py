@@ -122,7 +122,7 @@ def run(host: str | None, use: str, what_if: tuple | None = None, out=print) -> 
     if skip:
         out(f"\ndo not fit: " + ", ".join(f"{x['name']} ({x.get('size_gb') or '?'} GB)" for x in skip))
     if mac:
-        out("\nMac: speeds are rough - llama.cpp on Metal is not measured here yet (llmbox runs models on Linux + NVIDIA for now)")
+        out("\nMac: speeds are rough until people with this Mac measure them (llama.cpp on Metal: llmbox test)")
     n = sum(1 for x in ok if x.get("measured"))
     out(f"\nm = measured on machines like this one ({hwclass.label(cls) if cls else '?'}; {n} of the models), ~ = predicted "
         "from the model's shape and this machine's memory speeds. `llmbox test <id>` measures one and sends it")

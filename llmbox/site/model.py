@@ -151,7 +151,7 @@ def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool |
                       enumerate([("one", "One line"), ("srv", "llama-server"), ("win", "Windows"), ("swap", "llama-swap"), ("lms", "LM Studio"), ("oll", "Ollama")]))
             + "</div>"
             + tab("one", f"{CURL} {SITE_URL}/install.sh | sh -s -- {rid}",
-                  ("The shortest way (Linux + NVIDIA): installs llmbox and llama.cpp, fits these settings to your computer, downloads the model, "
+                  ("The shortest way (Linux or a Mac): installs llmbox and llama.cpp, fits these settings to your computer, downloads the model, "
                    "and starts it - it asks before each step and before sending anything." if (r.get("runtime") or {}).get("engine", "llama.cpp") == "llama.cpp" else
                    f"This model runs on {(r.get('runtime') or {}).get('engine')}, which has no release builds for llmbox to install: build it "
                    "(github.com/ikawrakow/ik_llama.cpp) into ~/ik_llama.cpp first, then this line does the rest."), on=True)

@@ -100,8 +100,6 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
     cls = hwclass.of_host(results.host_fingerprint(prof))
     mac = cls.startswith("apple-")
     engine = prof["hw"].get("runtimes") or []
-    if mac:   # llmbox runs and times models on Linux for now: a Mac gets the plan and the settings for the apps it has
-        plan_only = True
     if not engine and not plan_only:
         from . import engine as eng
         pat, what = eng.asset_pattern(prof)
@@ -150,10 +148,6 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
         out(f"Better for it now: {best['name']} - {best['score'] - have['score']:+.0f} points against {have['name']}"
             + (f", {min(best['t2'], best['td'] or best['t2']) / max(1, min(have['t2'], have['td'] or have['t2'])):.1f}x the speed" if best['t2'] else ""))
     plan(best)
-    if mac:
-        out(f"\nOn a Mac, llmbox picks but does not run models yet. The settings it was measured with, for LM Studio and Ollama:\n"
-            f"  {registry.DEFAULT_URL.rstrip('/')}/recipe-{best['id']}.html#run")
-        return 0
     if plan_only or not engine:
         return 0 if plan_only else 1
     a = _ask("\nInstall and start it?", "y", yes, "ynl")
