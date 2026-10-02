@@ -69,7 +69,8 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
         counted = {c: sum(1 for x in pool if x.get("_run") == c) for c in made}
         hours = sum((x["summary"].get("wall_minutes") or 0) for x in runs) / 60
         rival = next((o for o in order if o != rid), None)
-        w(f"recipe-{rid}.html", recipe_page(rid, rec, ref, {
+        from .words import caveat as _caveat
+        w(f"recipe-{rid}.html", recipe_page(rid, rec, ref, {"caveat": _caveat(host, rid),
             "rs": rs, "clouds": clouds, "ranks": ranks, "med": med, "look": look, "shape": data["recipes"].get(rid), "ref_hw": ref_hw, "ref_box": ref_box,
             "pool_rows": pool, "flags": fl, "runs": runs, "counted": counted, "solved_h": sum(x["summary"].get("solved") or 0 for x in runs) / hours if hours else 0,
             "opt": opts.get(rid), "model_now": now, "on_hf": avail, "cmp": _cmp_href(rid, rival) if rival else "#", "community": cs.get(rid)}))

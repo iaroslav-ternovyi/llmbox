@@ -29,3 +29,5 @@
 .run .cpy{position:absolute;top:34px;right:8px;font-size:11px;padding:4px 10px}.run .rpn{margin:0}
 .run pre.clip{max-height:calc(14 * 1.6em + 24px);overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent);mask-image:linear-gradient(#000 70%,transparent)}
 .run .more{background:none;border:0;color:var(--amber);font:12px var(--mono);padding:6px 0;cursor:pointer}
+/* a result that is not directly comparable: shown with why (a recipe's caveat) */
+.panel.cavp{padding:14px 18px;font-size:14.5px;color:var(--soft);border-color:var(--amber-dim)}.panel.cavp b{color:var(--t-mid);font-weight:600;margin-right:6px}

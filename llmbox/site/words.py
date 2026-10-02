@@ -266,3 +266,13 @@ _GRADING = {   # how each block is graded (from the suite modules' own descripti
     "reasoning": "Multi-step problems with exact answers, several per problem (subtotal, tax, total; every printed line of a traced "
                  "program). Credit per answer.",
 }
+
+
+def caveat(host: str, rid: str) -> str:
+    """Why a model's result is not directly comparable (its recipe's `caveat`, e.g. a template that kept the tools
+    from it): shown beside the result, never a reason to hide it; empty when there is none."""
+    from .. import recipe as rc
+    try:
+        return str(rc.load(host, rid).get("caveat") or "")
+    except (OSError, ValueError):
+        return ""

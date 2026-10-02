@@ -23,7 +23,7 @@ def _pop(label: str, title: str, text: str) -> str:
     return f'<span class="tip">{label}<span class="pop"><b>{esc(title)}</b>{esc(text)}</span></span>'
 
 
-def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dict, sd: dict) -> tuple[str, list[str]]:
+def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dict, sd: dict, caveats: dict | None = None) -> tuple[str, list[str]]:
     """The ranking's header and rows: one line per model (place, name, score with its range, speed, fit, what stands
     out), its uses and blocks opening under the line; Claude as reference rows. Colour and marker as on the chart."""
     med = {b: statistics.median(v) for b in BLOCKS if (v := [r["blocks"][b] for r in local if r["blocks"].get(b) is not None])}
@@ -42,13 +42,15 @@ def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dic
         tip = f"not measurably apart from places {lo}–{hi}" if lo != hi else "measurably apart from every other model"
         col, kind = family((sd["recipes"].get(rid) or {}).get("arch"))[1], _kind(r.get("hf_repo"))
         sub = " · ".join(x for x in (variant(rid, r["file"], full=True), _size(sd["recipes"].get(rid), nm), kind if kind != "release" else "") if x)
+        cav = (caveats or {}).get(rid)
+        cav_html = f"<span class='cav' title='{esc(cav)}'>⚠ not directly comparable</span>" if cav else ""
         body.append(f"<tr class='mr' data-rid='{esc(rid)}' data-g='{grp}'><td class='rk' title='{tip}'>{pl}</td>"
-                    f"<td class='l mod'><div class='mw'>{_marker(col, kind)}<a class='m' href='recipe-{esc(rid)}.html'>{esc(nm)}</a><span class='qt'>{esc(sub)}</span></div></td>"
+                    f"<td class='l mod'><div class='mw'>{_marker(col, kind)}<a class='m' href='recipe-{esc(rid)}.html'>{esc(nm)}</a><span class='qt'>{esc(sub)}</span>{cav_html}</div></td>"
                     f"<td class='sco'>{_pct(r.get('vs_ref'))}</td><td class='spd r'>{_spd(r['speed'])}</td><td class='fit r'>—</td>"
                     f"<td class='l so'>{_stands_out(r['blocks'], med)}</td>"
                     f"<td class='act'><label class='pick2' title='tick two to compare'><input type='checkbox' value='{esc(rid)}' aria-label='compare {esc(nm)}'></label>"
                     f"<button class='exp' aria-expanded='false' aria-label='all block scores of {esc(nm)}'>▾</button></td></tr>")
-        body.append(f"<tr class='prof' data-for='{esc(rid)}' hidden><td colspan='7'>{_profile(r, med, col, ranks[rid])}</td></tr>")
+        body.append(f"<tr class='prof' data-for='{esc(rid)}' hidden><td colspan='7'>{f'<p class=\'cavp\'>⚠ {esc(cav)}</p>' if cav else ''}{_profile(r, med, col, ranks[rid])}</td></tr>")
     # cloud models: reference lines in the order (same tasks, same scale), not places in a ranking of what runs on a box
     for r in clouds:
         note = "cloud · the 100% mark" if ref and r["id"] == ref["id"] else "cloud · for comparison"
@@ -155,7 +157,8 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     q = [j for j in queue_state() if j["model"] not in {r["id"] for r in local}]
     sd = sd or shape_data(local, host)
     names0 = {r["id"]: model_name(r) for r in local}
-    head, body = _ranking(local, clouds, ref, ranks, sd)
+    from .words import caveat
+    head, body = _ranking(local, clouds, ref, ranks, sd, {r["id"]: caveat(host, r["id"]) for r in local})
     qline = _queue_line(q)
     presets = "".join(f'<button class="{"on" if i == 0 else ""}" data-p="{i}" title="{esc(" · ".join(f"{LABEL[b].lower()} {v}" for b, v in w.items()))}">{esc(n)}</button>' for i, (n, w) in enumerate(PRESETS))
     data = dict(_chart_data(sd, local, clouds, ref, ranks, names0), site=SITE_URL)

@@ -36,8 +36,10 @@ def new_page(rs: list[dict], data: dict, host: str, news: str = "") -> str | Non
         except (OSError, ValueError):
             continue
         chains[r["id"]] = C.base_chain(repo)
-        # an anchor must BE the scored model (a quantization of it): a fine-tune of a base is a different model
-        hit = eci.match(repo, table) if not eci.is_remix(repo) else None
+        # an anchor must BE the scored model (a quantization of it): a fine-tune of a base is a different model; and its
+        # score must be comparable (a result with a caveat, e.g. tested without tools, would bend the line)
+        from .words import caveat
+        hit = eci.match(repo, table) if not eci.is_remix(repo) and not caveat(host, r["id"]) else None
         if hit:
             by_base.setdefault(hit[0], (hit[1]["eci"], []))[1].append((r["id"], r["capability"]))
         measured.setdefault(C.key_of(repo), []).append(dict(r, repo=repo))

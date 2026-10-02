@@ -315,6 +315,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
  <h1>{_marker(col, kind, 18)} {esc(nm)} <span class="muted" style="font-weight:500">· {esc(variant(rid, m.get("file"), full=True))}</span></h1>
  <div class="meta">{meta}</div></div>
  <div class="acts"><a class="btn solid" href="#run">RUN IT</a><a class="btn" href="{esc(ctx['cmp'])}">COMPARE</a></div></section>
+{f'<section class="panel cavp"><b>⚠ About this result</b> {esc(ctx["caveat"])}</section>' if ctx.get("caveat") else ""}
 <section class="panel verdict"><div class="tiles">{tiles}</div><p class="say">{_stands_sentence(s["blocks"], med)}</p></section>
 <section class="panel pad"><div class="lbl">Where it ranks</div>{_near_html(rid, rs, ctx["clouds"], ranks, look)}
  <p class="q" style="margin-top:12px">% of Claude Opus 5.5's score on the same tasks. The line is the 95% range: models whose lines overlap are not measurably apart yet.
