@@ -1,7 +1,8 @@
 """The site build's people part (llmbox/site/build.py _people_runs) on made-up community records that pass the intake's
 check: a run gets its page and its settings from the published recipe; a record accepted under an older, looser check
 (a malformed runtime) is left out and stops nothing; a run whose page raises keeps its last page; an accepted run whose
-model left the list keeps its address (its last page, else a short note out of search); a removed run gets its
+model left the list keeps its address (its last page, else a short note out of search); a run with settings of its own
+(llmbox test --set) gets a page that says so and points to the model page's variants; a removed run gets its
 "removed" page. Run: python3 tests/test_people_runs.py"""
 import copy
 import json
@@ -40,7 +41,8 @@ def rec(sid, t2, machine, rid="qwen36-al", file="Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
 community = [rec("aaaaaaaaaaa1", 40, "m1"), rec("aaaaaaaaaaa2", 42, "m2"),
              rec("bbbbbbbbbbb1", 41, "m3", runtime="x"),                                         # accepted under a looser check
              rec("ccccccccccc1", 30, "m4", rid="old-model", file="Old.gguf"),                   # its model left the list
-             rec("ddddddddddd1", 44, "m5"), rec("eeeeeeeeeeee", 39, "m6")]
+             rec("ddddddddddd1", 44, "m5"), rec("eeeeeeeeeeee", 39, "m6"),
+             rec("fffffffffff1", 47, "m7", overrides=["placement.ubatch=1024"])]                # settings of its own (llmbox test --set)
 report.results.files = lambda h: [("x", r) for r in (community if h == "community" else [])]
 out = tempfile.mkdtemp()
 os.makedirs(os.path.join(out, "r"))
@@ -56,6 +58,9 @@ R.user_run_page = page
 meta = {"qwen36-al": {"name": "Qwen3.6-35B-A3B UD-Q4_K_XL", "score": 82.0, "cap": 80.0, "range": [79, 85]}}
 b, written, images, noindex = build._people_runs(out, "box", ["qwen36-al"], meta, {"qwen36-al": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"})
 names = {os.path.relpath(p, out) for p in written}
+v = open(os.path.join(out, "r", "fffffffffff1.html")).read()   # not on the board, not "not shown": its own settings, and where they are voted on
+assert "with its own settings" in v and "ubatch 1024" in v and "llmbox test qwen36-al --set placement.ubatch=1024" in v and "recipe-qwen36-al.html#shared" in v, v[-1500:]
+assert "r/fffffffffff1.html" in noindex and "fffffffffff1" not in b["runs"]
 assert set(b["runs"]) == {"aaaaaaaaaaa1", "aaaaaaaaaaa2", "ddddddddddd1"}, set(b["runs"])   # the malformed and the removed are out
 a = open(os.path.join(out, "r", "aaaaaaaaaaa1.html")).read()
 assert "RTX 3060 12 GB" in a and 'data-copy="llama-server -m Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf' in a and "/home/x" not in a

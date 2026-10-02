@@ -232,6 +232,32 @@ def removed_page(sid: str, reason: str) -> str:
     return _page("llmbox · result removed", "", body, ("pages.css",), base=True)
 
 
+def variant_page(sid: str, rid: str, model: str, recs: list[dict], users: dict | None = None) -> str:
+    """A run that measured other settings for a listed model (llmbox test --set): what it set and measured, and where
+    people try and vote on it (the model page's "Settings people measured"). Not pooled with llmbox's settings."""
+    import shlex
+    from .. import hwclass, social
+    settings = social.parse(next((r.get("overrides") for r in recs if r.get("overrides")), []))[0]
+    sp = next((r for r in recs if r.get("kind") == "speed"), None)
+    h = (sp or recs[0]).get("host") or {}
+    machine = hwclass.display_class(h.get("class") or hwclass.of_host(h)) or h.get("gpu") or "A computer"
+    t2 = ((sp or {}).get("speed") or {}).get("decode_tps")
+    cmd = shlex.join(["llmbox", "test", rid] + [x for f in social.flags(settings) for x in ("--set", f)])
+    user = next(((r.get("submission") or {}).get("user") for r in recs), None)
+    by = ""
+    if user:
+        u = (users or {}).get(user) or {}
+        by = f' · sent by <a href="{esc(user)}.html">{esc(u.get("login") if u.get("public") and u.get("login") else user)}</a>'
+    body = (f'<section class="panel hd rp"><div><div class="crumb"><a href="index.html">Models</a> / <a href="recipe-{esc(rid)}.html">{esc(model)}</a> / run {esc(sid)}</div>'
+            f'<h1>{esc(machine)} runs {esc(model)}' + (f' at <span class="amb">{t2:.0f}</span> tok/s' if t2 else "") + ' with its own settings</h1>'
+            f'<p class="place">{esc(social.describe(settings)) or "settings that are not shared"}{by}</p>'
+            '<p class="q">A run with settings of its own is not pooled with llmbox\'s: it is listed on the model\'s page, where people '
+            f'try it and vote. <a href="recipe-{esc(rid)}.html#shared">Settings people measured →</a></p>'
+            f'<div class="cmd"><code>{esc(cmd)}</code><button class="btn solid" data-copy="{esc(cmd)}">COPY</button></div></div></section>')
+    return _page(f"llmbox · {machine} runs {model} with its own settings", "", body, ("pages.css", "run.css"), ("runpage.js",),
+                 data={"machines": []}, base=True, about=f"{machine} ran {model} with its own settings: {social.describe(settings)}.")
+
+
 def unlisted_page(sid: str) -> str:
     """An accepted run the site does not show (its model is no longer on the list, or it carried no speed figure)."""
     body = ('<section class="panel hd"><div><h1>This result is not shown</h1><p class="q" style="margin-top:8px">It was received, '

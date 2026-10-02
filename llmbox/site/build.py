@@ -175,7 +175,7 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
     from .. import fit as F, registry, server
     from ..public import site as _site
     from . import board as B, card as C
-    from .run import _alt, removed_page, unlisted_page, user_run_page
+    from .run import _alt, removed_page, unlisted_page, user_run_page, variant_page
     gone = C.removed()
 
     def ours(rec):   # a speed or quality record of a listed model, with the file the model list names
@@ -236,10 +236,18 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
         written.append(p)
     # an accepted run that is not on the board (its model left the list, it failed today's check): the address it was
     # given keeps working - its last page, else a short note - rather than falling to the queue page forever
+    from ..hosts import HOME as HOME_
+    from .people import users as _users
+    names = _users(os.path.join(HOME_, "intake", "users.json"))
     for sid in sorted({r["submission"]["id"] for r in community} - set(b["runs"]) - set(gone)):
         if re.fullmatch(r"[0-9a-f]{12}", sid or ""):
             p = os.path.join(rdir, f"{sid}.html")
-            if not os.path.exists(p):
+            mine = recs.get(sid) or []
+            rid = next(((r.get("recipe") or {}).get("id") for r in mine), None)
+            if mine and any(r.get("overrides") for r in mine) and rid in meta:   # a listed model with settings of its own
+                open(p, "w", encoding="utf-8").write(variant_page(sid, rid, meta[rid]["name"], mine, names))
+                noindex.add(f"r/{sid}.html")   # thin on its own: the model page lists it
+            elif not os.path.exists(p):
                 open(p, "w", encoding="utf-8").write(unlisted_page(sid))
                 noindex.add(f"r/{sid}.html")
             written.append(p)
