@@ -10,7 +10,8 @@ feeds and the "first" credit all read it, so they cannot disagree.
      |           machines, else its prediction (~)
      |-> other:  classes outside the picker (several cards, no card, an unlisted one): machines and newest run
      '-> events: what the feeds say - a model measured on an entry for the first time, a new best, the feed's start;
-                 each written once to <HOME>/feeds/events.jsonl and never changed
+                 each written once to <HOME>/feeds/events.jsonl and never changed (what was measured before a feed
+                 started is logged as seen, not shown)
 """
 from __future__ import annotations
 
@@ -50,11 +51,14 @@ def build(box_records: list[dict], community_records: list[dict], models: list[t
     models: (model list entry, recipe, shape) for every model the site lists, as pick.rank_rows takes them."""
     rows = _speed_rows(box_records, True) + _speed_rows(community_records, False)
     sets: dict = {}
+    refs = set()
     for r in rows:
         if r["outlier"] or not r["rid"]:
             continue
         sets.setdefault((r["rid"], r["cls"]), {}).setdefault(r["machine"], []).append(r["t2"])
-    sets = {k: {"values": sorted(st.median(v) for v in ms.values()), "machines": len(ms)} for k, ms in sets.items()}
+        if r["ref"]:
+            refs.add((r["rid"], r["cls"]))
+    sets = {k: {"values": sorted(st.median(v) for v in ms.values()), "machines": len(ms), "ref": k in refs} for k, ms in sets.items()}
     for v in sets.values():
         v["median"] = round(st.median(v["values"]), 1)
 
@@ -133,12 +137,13 @@ def events(board: dict, now: str | None = None, path: str = EVENTS) -> tuple[lis
     for e in old:
         if e["kind"] in ("start", "best"):
             last_best[e["entry"]] = e.get("rid")
-    new = []
+    new, starting = [], set()
     for name, ent in board["entries"].items():
         b = ent.get("best")
         if f"start/{ent['slug']}" not in seen:
+            starting.add(name)
             new.append({"id": f"start/{ent['slug']}", "kind": "start", "entry": name, "at": now, "testable": ent["testable"],
-                        "measured": ent["machines"] > 0, "rid": b and b["rid"], "model": b and b["name"],
+                        "measured": ent["machines"] > 0, "machines": ent["machines"], "rid": b and b["rid"], "model": b and b["name"],
                         "tps": b and (b["measured"] or b["predicted"]), "predicted": not (b and b["measured"])})
         if b and name in last_best and last_best[name] != b["rid"]:
             new.append({"id": f"best/{ent['slug']}/{b['rid']}/{now[:10]}", "kind": "best", "entry": name, "at": now, "rid": b["rid"],
@@ -146,8 +151,9 @@ def events(board: dict, now: str | None = None, path: str = EVENTS) -> tuple[lis
     for (rid, cls), v in sorted(board["sets"].items()):
         name = hwclass.display_class(cls)
         if name and f"measured/{hwclass.SLUGS[name]}/{rid}" not in seen and not any(e["id"] == f"measured/{hwclass.SLUGS[name]}/{rid}" for e in new):
+            # measured before its feed started: the first item says so, the event is logged as seen and not shown
             new.append({"id": f"measured/{hwclass.SLUGS[name]}/{rid}", "kind": "measured", "entry": name, "at": now, "rid": rid,
-                        "tps": v["median"], "machines": v["machines"]})
+                        "tps": v["median"], "machines": v["machines"], "seed": name in starting})
     return old + new, new
 
 

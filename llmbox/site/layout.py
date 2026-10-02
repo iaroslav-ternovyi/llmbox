@@ -49,10 +49,11 @@ def _err_attrs() -> str:
 
 
 def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data=None, links: dict | None = None,
-          about: str | None = None, base: bool = False) -> str:
+          about: str | None = None, base: bool = False, head: str = "") -> str:
     """A page: the header (tabs, the visitor's box), the body, the footer. Stylesheets and scripts are shared files
     (assets/); a page's own numbers go inline as DATA, before its scripts. base: links resolve from the site's root (a
-    page in a folder, r/<id>, and 404.html, which Pages serves at any missing address); such a page has no #anchors."""
+    page in a folder, r/<id>, and 404.html, which Pages serves at any missing address); such a page has no #anchors.
+    head: more of the head (a page's feed link)."""
     links = dict(TAB_LINKS, **(links or {}))
     nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "NEW", "COMPARE", "METHOD"))
     styles = "".join(f'<link rel="stylesheet" href="{asset_url(c)}">' for c in ("fonts.css", "osc.css") + tuple(css))
@@ -65,7 +66,7 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
             f'<title>{esc(title)}</title><meta name="description" content="{esc(about or ABOUT)}">'
             '<link rel="icon" href="favicon.ico" sizes="32x32"><link rel="icon" href="icon.svg" type="image/svg+xml">'
             '<link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="manifest" href="manifest.webmanifest">'
-            f'<link rel="preload" href="plex-mono-400-latin.woff2" as="font" type="font/woff2" crossorigin>{styles}</head><body>'
+            f'<link rel="preload" href="plex-mono-400-latin.woff2" as="font" type="font/woff2" crossorigin>{styles}{head}</head><body>'
             '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
             '<div class="wrap"><header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>'
             f'<nav class="tabs" aria-label="sections">{nav}</nav><a class="boxchip" id="boxchip" href="index.html#box" title="the box speeds and fit are shown for; change it on the home page">'

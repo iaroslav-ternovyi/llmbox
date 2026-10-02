@@ -87,6 +87,7 @@ allv, new = board.events(b, "2026-10-15T00:00:00Z", path=log)
 kinds = sorted({e["kind"] for e in new})
 assert kinds == ["measured", "start"] and sum(e["kind"] == "start" for e in new) == 65, kinds
 assert {e["id"] for e in new if e["kind"] == "measured"} >= {"measured/rtx-3060-12gb/qwen36-al", "measured/rtx-5070-12gb/qwen35-9b"}
+assert all(e["seed"] for e in new if e["kind"] == "measured")   # measured before the feeds started: logged, not shown
 start = next(e for e in new if e["id"] == "start/rtx-3060-12gb")
 assert start["measured"] and start["rid"] == "qwen36-al" and start["tps"] == 40.0 and not start["predicted"], start
 assert next(e for e in new if e["id"] == "start/rx-7900-xtx-24gb")["testable"] is False
@@ -98,5 +99,8 @@ _all, new3 = board.events(b3, "2026-10-17T00:00:00Z", path=log)
 best_events = [e for e in new3 if e["kind"] == "best"]
 assert best_events and all(e["rid"] == "qwen35-9b" for e in best_events) and len(best_events) == len({e["entry"] for e in best_events}), best_events
 board.append(new3, log)
+b4 = board.build(box, people + [run(K3060, 33, rid="qwen35-9b", machine="m1", sid="s0000000new1", at="2026-10-18T10:00:00")], better, 60.0)
+new4 = board.events(b4, "2026-10-18T00:00:00Z", path=log)[1]
+assert [(e["id"], e["seed"]) for e in new4 if e["kind"] == "measured"] == [("measured/rtx-3060-12gb/qwen35-9b", False)], new4   # after: shown
 assert [e for e in board.events(b3, "2026-10-18T00:00:00Z", path=log)[1] if e["kind"] == "best"] == []
 print("all passed")

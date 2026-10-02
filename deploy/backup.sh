@@ -4,7 +4,7 @@
 #   RESTIC_REPOSITORY=sftp:uXXXXX@uXXXXX.your-storagebox.de:llmbox   (or s3:..., with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)
 #   RESTIC_PASSWORD=...   (kept somewhere else too: without it the backup cannot be read)
 # What: the intake (accounts, submissions, the salt the handles are made with - lose it and every handle changes),
-# people's accepted results, and the visit counts. SQLite files are copied with SQLite's own backup first, so a copy
+# people's accepted results, the result cards' numbers, the feeds' events, and the visit counts. SQLite files are copied with SQLite's own backup first, so a copy
 # taken while the server writes is still whole.
 #   backup.sh            back up, then keep 14 daily, 8 weekly, 12 monthly
 #   backup.sh check      restore the latest into a temporary folder and check every database in it (run it once a month)
@@ -32,8 +32,11 @@ case "${1:-backup}" in
   backup)
     restic cat config >/dev/null 2>&1 || restic init
     snapshot_dbs
+    # each card's numbers as first posted and the removed runs; the feeds' event log (once the site build made them:
+    # this runs as root, and a folder made here would be root's)
+    extra=(); for d in cards feeds; do [ -d "$DATA/$d" ] && extra+=("$DATA/$d"); done
     restic backup --tag llmbox --exclude "$DATA/intake/intake.db*" --exclude "$DATA/intake/inbox" \
-      "$STAGE" "$DATA/intake" "$DATA/results/community"
+      "$STAGE" "$DATA/intake" "$DATA/results/community" ${extra[@]+"${extra[@]}"}
     restic forget --tag llmbox --keep-daily 14 --keep-weekly 8 --keep-monthly 12 --prune
     ;;
   check)

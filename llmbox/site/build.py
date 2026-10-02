@@ -89,8 +89,9 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
                 "uses": {n: round(v, 1) for n, bs in GROUPS if (v := _wavg(r.get("blocks_vs_ref"), bs)) is not None}}
     meta = {r["id"]: _meta(r) for r in rs}
     written += registry.export(host, order, out_dir, meta)   # recipes/: what `llmbox recipe pull` installs
-    run_pages, images, noindex = _people_runs(out_dir, host, order, meta, {rid: os.path.basename((local[rid].get("model") or {}).get("file") or "") for rid in order})
+    board, run_pages, images, noindex = _people_runs(out_dir, host, order, meta, {rid: os.path.basename((local[rid].get("model") or {}).get("file") or "") for rid in order})
     written += run_pages
+    written += _entries(out_dir, board, meta)
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
     w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
     from .install import account_page, install_page, privacy_page, terms_page
@@ -132,9 +133,29 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     return written
 
 
-def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: dict) -> tuple[list[str], dict, set]:
+def _entries(out_dir: str, board: dict, meta: dict) -> list[str]:
+    """A page and a feed per picker entry (hw.py); the feeds' new events are logged once both are written."""
+    from ..hosts import HOME
+    from ..public import site as _site
+    from . import board as B
+    from .hw import feed, hw_page
+    from .people import users
+    site, us = _site(), users(os.path.join(HOME, "intake", "users.json"))
+    events, new = B.events(board)
+    os.makedirs(os.path.join(out_dir, "feeds"), exist_ok=True)
+    out = []
+    for name, e in board["entries"].items():
+        for path, text in ((f"hw-{e['slug']}.html", hw_page(name, board, meta, us, site)), (f"feeds/{e['slug']}.xml", feed(name, board, events, meta, site))):
+            open(os.path.join(out_dir, path), "w", encoding="utf-8").write(text)
+            out.append(os.path.join(out_dir, path))
+    B.append(new)
+    return out
+
+
+def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: dict) -> tuple[dict, list[str], dict, set]:
     """People's runs: the board (llmbox/site/board.py), each run's card (card.py) and page r/<id>.html, and the
-    "removed" page of each run taken off. Returns (files written, {page: its card as social preview}, noindex pages)."""
+    "removed" page of each run taken off. Returns (the board, files written, {page: its card as social preview},
+    noindex pages)."""
     import json
     from .. import fit as F, registry
     from ..public import site as _site
@@ -191,4 +212,4 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
             open(p, "w", encoding="utf-8").write(removed_page(sid, reason))
             written.append(p)
             noindex.add(f"r/{sid}.html")
-    return written, images, noindex
+    return b, written, images, noindex
