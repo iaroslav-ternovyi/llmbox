@@ -117,6 +117,9 @@ footer{margin-top:28px;color:var(--faint);font-size:12px;display:flex;justify-co
 @media (max-width:900px){
   .wrap{padding:16px 16px 40px}
   .plate{flex-wrap:wrap;gap:10px}.tabs{margin-left:0}
+  /* a phone: brand and GET LLMBOX, then every tab across the width, then the box and sign-in */
+  .plate .brand{order:1}.plate .getbtn{order:2;margin-left:auto}.plate .tabs{order:3;width:100%;justify-content:space-between;gap:0}
+  .plate .tabs a{padding:10px 4px;letter-spacing:.06em;font-size:11.5px}.plate .boxchip{order:4;margin-left:0}.plate .signin{order:5;margin-left:auto}
   .bars{grid-template-columns:110px minmax(0,1fr);row-gap:8px}.bars .ft{grid-column:2;margin-bottom:8px}
   footer{flex-direction:column}
 }
@@ -124,3 +127,4 @@ footer{margin-top:28px;color:var(--faint);font-size:12px;display:flex;justify-co
 .getbtn:hover{text-decoration:none;filter:brightness(1.1)}
 .signin{font-size:11.5px;letter-spacing:.12em;color:var(--muted);padding:5px 4px;white-space:nowrap}.signin:hover{color:var(--ink);text-decoration:none}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:480px){.brand small{display:none}}
