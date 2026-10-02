@@ -66,6 +66,7 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
             f'<title>{esc(title)}</title><meta name="description" content="{esc(about or ABOUT)}">'
             '<link rel="icon" href="favicon.ico" sizes="32x32"><link rel="icon" href="icon.svg" type="image/svg+xml">'
             '<link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="manifest" href="manifest.webmanifest">'
+            f'<link rel="preload" href="plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>'
             f'<link rel="preload" href="plex-mono-400-latin.woff2" as="font" type="font/woff2" crossorigin>{styles}{head}</head><body>'
             '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
             '<div class="wrap"><header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>'
