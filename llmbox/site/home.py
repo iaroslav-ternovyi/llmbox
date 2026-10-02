@@ -23,18 +23,6 @@ def _pop(label: str, title: str, text: str) -> str:
     return f'<span class="tip">{label}<span class="pop"><b>{esc(title)}</b>{esc(text)}</span></span>'
 
 
-def _settings_worth(host: str, local: list[dict], names0: dict) -> str:
-    """What llmbox's settings are worth: the biggest measured gains over stock llama.cpp, same model, same box."""
-    opts = {k: v for k, v in optimize_records(host).items() if k in {r["id"] for r in local}}
-    gain = lambda o: o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1
-    top = sorted(opts.items(), key=lambda kv: -gain(kv[1]))[:4]
-    return ("" if not top or gain(top[0][1]) < 0.15 else
-            '<section class="panel feed optp"><div class="lbl">What the settings are worth</div><p class="q nf0">Same model, same PC: stock llama.cpp → llmbox settings.</p><ul>'
-            + "".join(f'<li><a href="recipe-{esc(rid)}.html">{esc(names0[rid])}</a> <span class="fv">{o["summary"]["stock"]["decode"]:.0f} → {o["summary"]["llmbox"]["decode"]:.0f} tok/s</span>'
-                      f'<em>{gain(o) * 100:+.0f}%</em></li>' for rid, o in top)
-            + '</ul><p class="q nf"><a href="method.html#settings">all models →</a></p></section>')
-
-
 def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dict, sd: dict) -> tuple[str, list[str]]:
     """The ranking's header and rows: one line per model (place, name, score with its range, speed, fit, what stands
     out), its uses and blocks opening under the line; Claude as reference rows. Colour and marker as on the chart."""
@@ -167,10 +155,8 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     q = [j for j in queue_state() if j["model"] not in {r["id"] for r in local}]
     sd = sd or shape_data(local, host)
     names0 = {r["id"]: model_name(r) for r in local}
-    optpanel = _settings_worth(host, local, names0)
     head, body = _ranking(local, clouds, ref, ranks, sd)
     qline = _queue_line(q)
-    feed = _feed(host, q, local, clouds, suite_version, tier)
     presets = "".join(f'<button class="{"on" if i == 0 else ""}" data-p="{i}" title="{esc(" · ".join(f"{LABEL[b].lower()} {v}" for b, v in w.items()))}">{esc(n)}</button>' for i, (n, w) in enumerate(PRESETS))
     data = dict(_chart_data(sd, local, clouds, ref, ranks, names0), site=SITE_URL)
     body = f"""
@@ -199,8 +185,6 @@ the best model for it, how fast it answers, how close it gets to Claude, and one
  <div class="tw"><table class="rank"><thead>{head}</thead><tbody>{''.join(body)}</tbody></table></div>
  <p class="rnote">Places by score. A dashed line between rows: every model above it is measurably better than the ones below; inside a group the order is not settled yet.
  Click a row for its nine block scores.</p>{_unranked(host, local)}{qline}</section>
-<div class="below">{optpanel}<section class="panel feed"><div class="lbl">Latest results</div><ul>{''.join(feed)}</ul></section>
- {_news_panel({r["id"] for r in local})}</div>
 """
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "index.html")
@@ -259,3 +243,15 @@ On a Mac both are the same unified memory.</dd>
 </dl></div></details>"""
 
 
+def latest_panel(host: str, rs: list[dict], suite_version: str, tier: str) -> str:
+    """The latest results comparable with the ranking (on the hardware page)."""
+    local = [r for r in rs if r["host"].get("id") != "cloud" and not r.get("partial")]
+    clouds = [r for r in rs if r["host"].get("id") == "cloud" and not r.get("partial")]
+    q = [j for j in queue_state() if j["model"] not in {r["id"] for r in local}]
+    feed = _feed(host, q, local, clouds, suite_version, tier)
+    return f'<section class="panel feed"><div class="lbl">Latest results</div><ul>{"".join(feed)}</ul></section>' if feed else ""
+
+
+def news_panel(rs: list[dict]) -> str:
+    """What's new out there (on the NEW page)."""
+    return _news_panel({r["id"] for r in rs if r["host"].get("id") != "cloud"})

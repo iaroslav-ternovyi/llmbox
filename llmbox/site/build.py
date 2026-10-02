@@ -95,7 +95,8 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     from .hwmap import hardware_page as hardware_index   # (hardware_page is a model's page on other computers)
     from .people import users as _users
     from ..hosts import HOME as _HOME
-    w("hardware.html", hardware_index(board, _users(os.path.join(_HOME, "intake", "users.json"))))
+    from .home import latest_panel
+    w("hardware.html", hardware_index(board, _users(os.path.join(_HOME, "intake", "users.json")), latest=latest_panel(host, all_rs, suite_version, tier)))
     written.append(home(out_dir, host, suite_version, tier, all_rs, data,
                         (sum(1 for e in board["entries"].values() if e["machines"]), len(board["entries"]))))
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
@@ -111,7 +112,8 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     for name, html_ in people_pages({r["id"]: model_name(r) for r in rs}, cs, users(os.path.join(HOME, "intake", "users.json"))).items():
         w(name, html_)
     try:
-        np_ = new_page(rs, data, host)
+        from .home import news_panel
+        np_ = new_page(rs, data, host, news_panel(rs))
     except Exception as e:   # the list needs Hugging Face; the rest of the site must not depend on it
         np_ = None
         print(f"new.html skipped: {e}")

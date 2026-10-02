@@ -9,7 +9,7 @@ from .stats import _axis_of, _range_pct
 from .words import _quant, esc, family, model_name
 
 
-def new_page(rs: list[dict], data: dict, host: str) -> str | None:
+def new_page(rs: list[dict], data: dict, host: str, news: str = "") -> str | None:
     """What came out in the last six months that runs on the visitor's box: releases, fine-tunes and remixes pulled by
     enough people (llmbox/candidates.py), each with the file this box runs well (4-bit first, a smaller quantization
     when the 4-bit file does not fit), its predicted speed, and its score - measured here when it was, otherwise the
@@ -123,7 +123,7 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
             "straight line through models that have both: " + "; ".join(f"{esc(n)}: ECI {e:.0f} = {c / ref_cap * 100:.0f}%" for n, e, c in anchors)
             + ". A fine-tune or remix gets its base model's range: training can move it either way. A 3- or 2-bit file scores lower than the 4-bit "
             "one the range is for. ECI data: Epoch AI, 'Capabilities &amp; benchmarking', epoch.ai/benchmarks, CC BY 4.0.</p></section>") if pred else ""
-    body += note
+    body += note + news
     return _page("llmbox · new models", "NEW", body, ("pages.css", "new.css"), ("plan.js", "new.js"),
                  dict(ref=data["ref"], gpus=data["gpus"], ramKinds=data["ramKinds"], rows=rows, eciReady=bool(pred), ax=_axis_of([r.get("vs_ref") for r in rs])),
                  about="New local AI models from the last six months: which file fits your graphics card or Mac, how fast it runs, measured or expected quality.")

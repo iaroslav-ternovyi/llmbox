@@ -116,12 +116,12 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
  {other}</section>'''
 
 
-def hardware_page(board: dict, users: dict, now: float | None = None) -> str:
-    """hardware.html: the map on its own page."""
+def hardware_page(board: dict, users: dict, now: float | None = None, latest: str = "") -> str:
+    """hardware.html: the map on its own page, then the latest results."""
     from .layout import _page
     body = ('<section class="panel hd"><div><h1>What runs on each graphics card and Mac</h1>'
             '<p class="lede">One cell per card or Mac: the best model that fits it and how fast it answers. A number in white was '
             'measured on that hardware; a grey <span class="n pred">~</span> number is predicted until someone measures it.</p></div></section>'
-            + map_panel(board, users, now))
+            + map_panel(board, users, now) + latest)
     return _page("llmbox · hardware: what runs on each graphics card and Mac", "HARDWARE", body, ("pages.css", "map.css"), ("map.js",),
                  about="The best local AI model for every graphics card and Mac, measured by people with one or predicted.")
