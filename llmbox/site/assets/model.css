@@ -65,3 +65,7 @@
  .vb{min-height:44px;min-width:56px}.vcopy{min-height:44px}.lnk{min-height:44px;padding:0 4px}}
 @media (max-width:760px){.runs th:nth-child(2),.runs td:nth-child(2),.runs th:nth-child(4),.runs td:nth-child(4){display:none}}   /* run, box, score, speed fit a phone */
 .runs tr.nc td{color:var(--muted);font-size:12.5px}@media (max-width:760px){.runs tr.nc td:nth-child(2){display:table-cell}}
+/* "Exact settings and why": collapsed; its label is the toggle */
+details.panel.adv>summary.lbl{position:static;display:block;padding:14px 18px;background:none;cursor:pointer;list-style:none;color:var(--amber);min-height:44px}
+details.panel.adv>summary.lbl::-webkit-details-marker{display:none}details.panel.adv>summary.lbl:after{content:" ▸"}details.panel.adv[open]>summary.lbl:after{content:" ▾"}
+.advsum{padding:0 22px 4px;margin:0}

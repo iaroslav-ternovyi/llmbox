@@ -202,7 +202,8 @@ def _near_html(rid: str, rs: list[dict], clouds: list[dict], ranks: dict, look: 
 def _settings_panel(rcp: dict, opt: dict | None) -> str:
     """What the model was measured with, split by what sets the score and what only sets the speed, why, and what the
     settings are worth against llama.cpp's defaults on the same box."""
-    notes = (rcp.get("notes") or {}).get("lines", [])
+    # the recipe's notes minus the draft line `llmbox recipe new` writes ("no score until llmbox bench runs it": it has one now)
+    notes = [n for n in (rcp.get("notes") or {}).get("lines", []) if not n.startswith("Draft by")]
     sam, al, pl = rcp.get("sampling") or {}, rcp.get("antiloop") or {}, rcp.get("placement") or {}
     spc, rt = rcp.get("speculative") or {}, rcp.get("runtime") or {}
     chat = (rcp.get("chat") or {}).get("template_kwargs") or {}
@@ -226,12 +227,14 @@ def _settings_panel(rcp: dict, opt: dict | None) -> str:
                  + (f"<dt>At 32k</dt><dd>{st['deep']:.0f} → <b>{lb['deep']:.0f}</b> tok/s{pct(st['deep'], lb['deep'])}</dd>" if st.get("deep") and lb.get("deep") else "")
                  + (f"<dt>First word, 12k prompt</dt><dd>{12000 / st['prefill']:.1f} → <b>{12000 / lb['prefill']:.1f}</b> s</dd>" if st.get("prefill") and lb.get("prefill") else "")
                  + f"</dl><p class='q'>Stock = <code>llama-server -m model.gguf -c {pl.get('ctx') or 0}</code> with llama.cpp's own defaults, same file, same box, measured back to back.</p></div>")
-    return ('<section class="panel recipe"><div class="lbl">Settings and why</div><div class="rgrid">'
+    return ('<details class="panel recipe adv"><summary class="lbl">Exact settings and why</summary>'
+            '<p class="q advsum">The settings this model was measured with, what they do, and what they are worth here. '
+            '<code>llmbox install</code> and the <a href="#run">Run it yourself</a> panel already use them.</p><div class="rgrid">'
             '<div><div class="sc">Same on every box · these set the score</div><dl>' + "".join(f"<dt>{k}</dt><dd class='val'>{esc(v)}</dd>" for k, v in portable) + "</dl></div>"
             '<div><div class="sc">Fitted to each box · speed only</div><dl>' + "".join(f"<dt>{k}</dt><dd>{esc(v)}</dd>" for k, v in hw) + "</dl>"
             '<p class="q" style="margin-top:10px">values of our test PC; <code>--fit</code> finds them on yours</p></div></div>'
             + (f'<div class="notes"><div class="sc">Why these settings</div><ul>{"".join(f"<li>{esc(n)}</li>" for n in notes)}</ul></div>' if notes else "")
-            + worth + "</section>")
+            + worth + "</details>")
 
 
 def _shared_panel(rid: str, vs: list[dict], community: list | None, users: dict, ours: dict, k: float | None) -> str:
