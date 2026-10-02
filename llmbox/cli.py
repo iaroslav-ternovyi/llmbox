@@ -505,16 +505,19 @@ def cmd_serve(a: argparse.Namespace) -> None:
     server.serve(a.data, port=a.port, bind=a.bind, on_accept=(lambda ids: _rebuild_site(a.rebuild, a.deploy)) if a.rebuild else None)
 
 
-def _rebuild_site(out: str, deploy: str | None = None) -> None:
-    """Rebuild the site; then publish it with the deploy command ({site} = the folder), e.g. wrangler pages deploy."""
+def _rebuild_site(out: str, deploy: str | None = None) -> bool:
+    """Rebuild the site; then publish it with the deploy command ({site} = the folder), e.g. wrangler pages deploy.
+    True when the site went out (or there is nothing to deploy with), False when the upload failed."""
     import shlex
     import subprocess
     from . import site
     site.build(out)
     print(f"site rebuilt in {out}", flush=True)
-    if deploy:
-        r = subprocess.run(deploy.replace("{site}", shlex.quote(os.path.expanduser(out))), shell=True, capture_output=True, text=True, timeout=600)
-        print(f"deploy: {'ok' if r.returncode == 0 else 'FAILED ' + (r.stderr or r.stdout)[-400:]}", flush=True)
+    if not deploy:
+        return True
+    r = subprocess.run(deploy.replace("{site}", shlex.quote(os.path.expanduser(out))), shell=True, capture_output=True, text=True, timeout=600)
+    print(f"deploy: {'ok' if r.returncode == 0 else 'FAILED ' + (r.stderr or r.stdout)[-400:]}", flush=True)
+    return r.returncode == 0
 
 
 def cmd_speed(a: argparse.Namespace) -> None:

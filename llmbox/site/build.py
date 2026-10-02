@@ -17,7 +17,7 @@ from .model import recipe_page
 from .new import new_page
 from .run import run_page
 from .stats import rank_ranges
-from .words import _kind, BLOCKS, family, set_variants
+from .words import _kind, BLOCKS, esc, family, set_variants
 
 
 def build(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick") -> list[str]:
@@ -107,9 +107,13 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
         print(f"new.html skipped: {e}")
     if np_:
         w("new.html", np_)
-    w("404.html", _page("llmbox · page not found", "", '<section class="panel hd"><div><h1>Page not found</h1><p class="q" style="margin-top:8px">'
+    from ..submit import DEFAULT_SERVER as _api
+    # Pages serves 404.html at any missing address; at /r/<id> it is a run sent a moment ago: queue.js says where it stands
+    w("404.html", _page("llmbox · page not found", "", '<section class="panel hd" id="notfound"><div><h1>Page not found</h1><p class="q" style="margin-top:8px">'
                         'The model or run may have been renamed. <a href="index.html">The ranking</a> · <a href="new.html">new models</a> · '
-                        '<a href="compare.html">compare</a> · <a href="method.html">how scores work</a></p></div></section>', ("pages.css",)))
+                        '<a href="compare.html">compare</a> · <a href="method.html">how scores work</a></p></div></section>'
+                        f'<section class="panel hd" id="queue" hidden data-api="{esc(_api.rstrip("/"))}"><div><h1>Your result is on its way</h1>'
+                        '<p class="q" id="qline" aria-live="polite" style="margin-top:8px"></p></div></section>', ("pages.css",), ("queue.js",), base=True))
     from .publish import finish
     written += finish(out_dir, written)   # canonical, social preview, CSP per page; sitemap.xml, robots.txt, _headers
     # pages of earlier builds this one did not write (a run that no longer counts, a renamed recipe): only the site's own

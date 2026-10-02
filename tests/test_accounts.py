@@ -83,7 +83,7 @@ except SystemExit as e:
 good = copy.deepcopy(real)
 good["id"], good["suite"]["seed0"] = "alice-run", 7000 + 1000 * submit.fresh_seed(url)
 speed["id"] = "alice-speed"
-submit.send(submit.bundle([good, speed]), url)                      # signed in
+signed = submit.send(submit.bundle([good, speed]), url)             # signed in
 key = account.key_for(url)
 account.logout(url)
 anon = copy.deepcopy(real)
@@ -171,8 +171,14 @@ except SystemExit as e:
     assert "401" in str(e)
 ghw.shutdown()
 
+os.makedirs(os.path.join(home, "cards"), exist_ok=True)   # the frozen card of the signed-in run, drawn by an earlier build
+open(os.path.join(home, "cards", f"{signed['id']}.json"), "w").write("{}")
 gone = account.forget(url)
 assert gone["deleted_results"] == 2, gone
+# its page is replaced by a "removed" one (the reason only) and its card goes
+assert not os.path.exists(os.path.join(home, "cards", f"{signed['id']}.json"))
+removed = [json.loads(x) for x in open(os.path.join(home, "cards", "removed.jsonl"))]
+assert [(x["id"], x["reason"]) for x in removed] == [(signed["id"], "owner")], removed
 left = {r["id"] for _p, r in results.files(server.COMMUNITY)}
 assert left == {"anon-run"}, left
 assert ("k2-medium", "box") not in irt.pool(("community",)), "an anonymous run alone does not count"

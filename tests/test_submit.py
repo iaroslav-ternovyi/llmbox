@@ -56,6 +56,21 @@ assert intake.ingest() == [res["id"], res2["id"]]
 
 st = json.loads(urllib.request.urlopen(f"{url}/api/v1/runs/{res['id']}").read())
 assert st["status"] == "accepted", st
+# what the site's queue page (r/<id> before it exists) reads: where a received run stands and when it should be live;
+# an accepted one waits for the next publish, a failed publish says delayed and keeps it for the next try, a successful
+# one marks it published and the waiting fields go
+assert res["page"] == f"r/{res['id']}" and res["ahead"] == 0 and res["live_at"].endswith("Z") and res["site_within_min"] >= 1, res
+assert st["page"] == f"r/{res['id']}" and st["published"] is None and st["live_at"].endswith("Z") and st["delayed"] is False, st
+def boom(ids):
+    raise OSError("upload failed")
+left, _t = server.publish(intake, [[res["id"]]], boom)
+assert left == [[res["id"]]] and intake.status(res["id"])["delayed"] is True and not intake.status(res["id"])["published"]
+left, _t = server.publish(intake, left, lambda ids: False)   # the deploy command failed
+assert left == [[res["id"]]] and intake.status(res["id"])["delayed"] is True
+left, _t = server.publish(intake, left, lambda ids: True)
+st = intake.status(res["id"])
+assert left == [] and st["published"] and "live_at" not in st and "delayed" not in st, st
+assert intake.status(res2["id"])["delayed"] is False   # the last publish worked
 st2 = intake.status(res2["id"])
 assert [d["status"] for d in st2["detail"]] == ["rejected", "accepted"] and st2["detail"][1]["flags"] == ["outlier"], st2
 filed = [r for _p, r in results.files(server.COMMUNITY)]
@@ -75,8 +90,20 @@ r_ok = submit.send(submit.bundle([dict(rec, id="after-the-bad-ones")]), url)
 done = intake.ingest()
 assert r_ok["id"] in done and raw_bad[1]["id"] in done and r_bad["id"] in done, (done, raw_bad)
 assert intake.status(raw_bad[1]["id"])["status"] == "rejected" and intake.status(r_ok["id"])["status"] == "accepted"
+assert "page" not in intake.status(raw_bad[1]["id"]) and "live_at" not in intake.status(raw_bad[1]["id"])   # no page to wait for
 assert all(d["status"] == "rejected" for d in intake.status(r_bad["id"])["detail"]), intake.status(r_bad["id"])
 assert not os.path.exists("/private/tmp/x-speed-" + str(rec["recipe"]["id"]) + ".json")
+# a result card the site build gave up on: health is 503 for a day, so the uptime monitor alerts
+import urllib.error  # noqa: E402
+os.makedirs(os.path.join(home, "cards"))
+open(os.path.join(home, "cards", "abcdef012345.failed"), "w").write("rsvg-convert: no IBM Plex Sans")
+try:
+    urllib.request.urlopen(f"{url}/api/v1/health")
+    raise AssertionError("health was ok with a failed card")
+except urllib.error.HTTPError as e:
+    assert e.code == 503 and json.loads(e.read()) == {"ok": False, "cards_failed_24h": 1}
+os.utime(os.path.join(home, "cards", "abcdef012345.failed"), (0, 0))   # more than a day ago: ok again
+assert json.loads(urllib.request.urlopen(f"{url}/api/v1/health").read()) == {"ok": True}
 server.PER_HOUR = 2
 try:
     submit.send(b, url)

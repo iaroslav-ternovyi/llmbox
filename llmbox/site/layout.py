@@ -49,9 +49,10 @@ def _err_attrs() -> str:
 
 
 def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data=None, links: dict | None = None,
-          about: str | None = None) -> str:
+          about: str | None = None, base: bool = False) -> str:
     """A page: the header (tabs, the visitor's box), the body, the footer. Stylesheets and scripts are shared files
-    (assets/); a page's own numbers go inline as DATA, before its scripts."""
+    (assets/); a page's own numbers go inline as DATA, before its scripts. base: links resolve from the site's root (a
+    page in a folder, r/<id>, and 404.html, which Pages serves at any missing address); such a page has no #anchors."""
     links = dict(TAB_LINKS, **(links or {}))
     nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "NEW", "COMPARE", "METHOD"))
     styles = "".join(f'<link rel="stylesheet" href="{asset_url(c)}">' for c in ("fonts.css", "osc.css") + tuple(css))
@@ -60,6 +61,7 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
     scripts = ((f"<script>const DATA = {json.dumps(data).replace('</', '<\\/')};</script>" if data is not None else "") + counter
                + "".join(f'<script src="{asset_url(j)}"{_err_attrs() if j == "box.js" else ""}></script>' for j in ("box.js",) + tuple(js)))
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            + ('<base href="/">' if base else "") +
             f'<title>{esc(title)}</title><meta name="description" content="{esc(about or ABOUT)}">'
             '<link rel="icon" href="favicon.ico" sizes="32x32"><link rel="icon" href="icon.svg" type="image/svg+xml">'
             '<link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="manifest" href="manifest.webmanifest">'

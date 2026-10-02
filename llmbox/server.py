@@ -1,8 +1,10 @@
 """`llmbox serve`: the intake of submitted measurements (stdlib only, like the rest of llmbox).
 
   POST /api/v1/seed        {client} -> {seed}: the seed a quality test (`llmbox test`) draws its tasks from
-  POST /api/v1/runs        a gzip JSON bundle from `llmbox submit` -> 202 {id, status, url}
-  GET  /api/v1/runs/<id>   the submission's status: received / accepted / rejected (with the reason per record)
+  POST /api/v1/runs        a gzip JSON bundle from `llmbox submit` -> 202 {id, status, url, page, ahead, live_at}
+  GET  /api/v1/runs/<id>   the submission's status: received / accepted / rejected (with the reason per record), and
+                           for the site's queue page (r/<id> before it exists): published (when its page went out),
+                           live_at (when it should) and delayed (the last publish failed)
   POST /api/v1/login/github {access_token} from `llmbox login` (GitHub device flow) -> {key, handle}: the server checks
                            who the token belongs to (GET api.github.com/user), keeps the GitHub id, issues its own key
                            and never keeps the token
@@ -14,7 +16,7 @@
                            secret in $LLMBOX_GITHUB_SECRET) and back to /callback, which issues a key and returns to the
                            site page with a one-time ticket in the #fragment (no cookie: the site and the API are two
                            origins); POST /api/v1/login/web/redeem {ticket} -> {key, handle}
-  GET  /api/v1/health      ok
+  GET  /api/v1/health      ok; 503 while a result card could not be drawn in the last day (the uptime monitor alerts)
 
 Bundles are stored as sent (<data>/inbox/<id>.json.gz) and listed in <data>/intake.db. `ingest()` (a thread of the
 server, or `llmbox serve --ingest-once`) checks each record and files the accepted ones as results of the pseudo
@@ -62,7 +64,8 @@ CREATE TABLE IF NOT EXISTS seeds (seed INTEGER PRIMARY KEY, client TEXT, issued 
 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, github_id INTEGER UNIQUE, login TEXT, handle TEXT UNIQUE,
   public INTEGER DEFAULT 0, created TEXT);
 CREATE TABLE IF NOT EXISTS keys (hash TEXT PRIMARY KEY, user_id INTEGER, created TEXT, last_used TEXT);
-CREATE TABLE IF NOT EXISTS web (token TEXT PRIMARY KEY, kind TEXT, value TEXT, expires REAL)"""
+CREATE TABLE IF NOT EXISTS web (token TEXT PRIMARY KEY, kind TEXT, value TEXT, expires REAL);
+CREATE TABLE IF NOT EXISTS publishes (at REAL, ok INTEGER, n INTEGER)"""
 GH_AUTHORIZE = "https://github.com/login/oauth/authorize"
 GH_TOKEN = "https://github.com/login/oauth/access_token"
 # site pages a web sign-in may return to (the public site; the local one for development); $LLMBOX_SITE_ORIGINS adds more
@@ -79,8 +82,11 @@ class Intake:
         self.lock = threading.Lock()
         with self._db() as c:
             c.executescript(DB_SCHEMA)
-            if "user_id" not in {r[1] for r in c.execute("PRAGMA table_info(submissions)")}:
+            cols = {r[1] for r in c.execute("PRAGMA table_info(submissions)")}
+            if "user_id" not in cols:
                 c.execute("ALTER TABLE submissions ADD COLUMN user_id INTEGER")
+            if "published" not in cols:   # when the site that shows this submission went out
+                c.execute("ALTER TABLE submissions ADD COLUMN published TEXT")
         sp = os.path.join(self.data, "salt")   # handles are hashes of the GitHub id with this server's own salt
         if not os.path.exists(sp):
             import secrets
@@ -268,13 +274,17 @@ class Intake:
             if (r.get("submission") or {}).get("user") == user["handle"]:
                 os.remove(p)
                 gone += 1
+        removed = []
         with self.lock, self._db() as c:
-            for (sid,) in c.execute("SELECT id FROM submissions WHERE user_id = ?", (user["id"],)).fetchall():
+            for sid, st in c.execute("SELECT id, status FROM submissions WHERE user_id = ?", (user["id"],)).fetchall():
                 with contextlib.suppress(OSError):
                     os.remove(os.path.join(self.data, "inbox", f"{sid}.json.gz"))
+                if st == "accepted":   # it had a page: the page says it was removed, its card goes
+                    removed.append(sid)
             c.execute("DELETE FROM submissions WHERE user_id = ?", (user["id"],))
             c.execute("DELETE FROM keys WHERE user_id = ?", (user["id"],))
             c.execute("DELETE FROM users WHERE id = ?", (user["id"],))
+        withdraw(removed, "owner")
         with open(os.path.join(self.data, "erased.txt"), "a") as f:   # a run still being checked, or a stale copy, stays out
             f.write(user["handle"] + "\n")
         with contextlib.suppress(Exception):
@@ -324,7 +334,7 @@ class Intake:
                 c.execute("INSERT INTO submissions (id, received, client, addr, bytes, records, status, reason, detail, user_id) "
                           "VALUES (?,?,?,?,?,?,?,?,?,?)", (sid, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), client, a, len(raw),
                                                            len(b["records"]), "received", "", "[]", (user or {}).get("id")))
-        return 202, {"id": sid, "status": "received", "url": f"/api/v1/runs/{sid}", **self.queue(sid)}
+        return 202, {"id": sid, "status": "received", "url": f"/api/v1/runs/{sid}", "page": f"r/{sid}", **self.queue(sid)}
 
     def seed(self, raw: bytes, addr: str = "") -> tuple[int, dict]:
         """A fresh seed for this install's next quality test (the tasks cannot be prepared in advance)."""
@@ -355,19 +365,50 @@ class Intake:
             return ok
 
     def queue(self, sid: str) -> dict:
-        """Where a received submission stands: how many are checked before it, and roughly when the site shows it (a
-        quality run is re-graded in the sandbox, a few minutes each; the site is published at most every PUBLISH_EVERY_S)."""
+        """Where a received submission stands: how many are checked before it (a quality run is re-graded in the sandbox,
+        a few minutes each), and when the site should show it: the first publish after the check (at most every
+        PUBLISH_EVERY_S), plus the build and upload."""
         with self._db() as c:
             r = c.execute("SELECT rowid FROM submissions WHERE id = ?", (sid,)).fetchone()   # arrival order (timestamps are to the second)
             ahead = c.execute("SELECT count(*) FROM submissions WHERE status = 'received' AND rowid < ?", (r[0],)).fetchone()[0] if r else 0
-        return {"ahead": ahead, "site_within_min": 4 * (ahead + 1) + PUBLISH_EVERY_S // 60}
+        return {"ahead": ahead, **self._live(time.time() + CHECK_S * (ahead + 1))}
+
+    def _live(self, checked: float) -> dict:
+        """When a submission checked by `checked` (epoch seconds) should be on the site: live_at (UTC, for the site's queue
+        page, which shows it in the visitor's own time) and site_within_min (for the CLI)."""
+        last, _ok = self.last_publish()
+        at = max(checked, last + PUBLISH_EVERY_S) + BUILD_S
+        return {"live_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(at)), "site_within_min": max(1, round((at - time.time()) / 60))}
+
+    def last_publish(self) -> tuple[float, bool]:
+        """(when, whether it worked) of the last publish attempt; (0, True) before the first."""
+        with self._db() as c:
+            r = c.execute("SELECT at, ok FROM publishes ORDER BY rowid DESC LIMIT 1").fetchone()
+        return (r[0], bool(r[1])) if r else (0.0, True)
+
+    def published(self, ids: list[str], ok: bool) -> None:
+        """A publish attempt (the serve loop, after the site build and its upload): on success the submissions it carried
+        are live, so their queue pages stop waiting; on failure every waiting page says the publish is delayed."""
+        now = time.time()
+        with self._db() as c:
+            c.execute("INSERT INTO publishes VALUES (?,?,?)", (now, int(ok), len(ids)))
+            if ok and ids:
+                c.executemany("UPDATE submissions SET published = ? WHERE id = ? AND published IS NULL",
+                              [(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)), i) for i in ids])
+            c.execute("DELETE FROM publishes WHERE rowid NOT IN (SELECT rowid FROM publishes ORDER BY rowid DESC LIMIT 100)")
 
     def status(self, sid: str) -> dict | None:
         with self._db() as c:
-            r = c.execute("SELECT id, received, records, status, reason, detail FROM submissions WHERE id = ?", (sid,)).fetchone()
+            r = c.execute("SELECT id, received, records, status, reason, detail, published FROM submissions WHERE id = ?", (sid,)).fetchone()
         if not r:
             return None
-        return dict(r, detail=json.loads(r["detail"] or "[]"), **(self.queue(sid) if r["status"] == "received" else {}))
+        out = dict(r, detail=json.loads(r["detail"] or "[]"))
+        if r["status"] != "rejected":
+            out["page"] = f"r/{sid}"
+            if not r["published"]:
+                out.update(self.queue(sid) if r["status"] == "received" else self._live(time.time()))
+                out["delayed"] = not self.last_publish()[1]
+        return out
 
     def ingest(self, save_host: str = COMMUNITY, predict=None) -> list[str]:
         """Check every received submission and file its accepted records; returns the submission ids done."""
@@ -460,6 +501,30 @@ class Intake:
             rec["verified"]["off"] = far
             flags.append("outlier")
         return rec, None, flags
+
+
+def withdraw(sids: list[str], reason: str) -> None:
+    """Runs taken off the site: at its owner's request (account erasure, reason "owner") or after review ("review").
+    Each one's frozen card spec (<HOME>/cards/<id>.json) is deleted and its id listed in cards/removed.jsonl with the
+    reason only, so the next build replaces r/<id>.html with a short "removed" page and deletes r/<id>.png."""
+    if not sids:
+        return
+    d = os.path.join(HOME, "cards")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "removed.jsonl"), "a") as f:
+        for sid in sids:
+            for ext in (".json", ".failed"):
+                with contextlib.suppress(OSError):
+                    os.remove(os.path.join(d, sid + ext))
+            f.write(json.dumps({"id": sid, "reason": reason, "at": time.strftime("%Y-%m-%d")}) + "\n")
+
+
+def cards_failed(within_s: int = 86400) -> int:
+    """Cards the site build gave up on (<HOME>/cards/<id>.failed, written after its third failed try) in the last day:
+    the health check reports them so the uptime monitor raises an alert."""
+    import glob
+    now = time.time()
+    return sum(1 for p in glob.glob(os.path.join(HOME, "cards", "*.failed")) if now - os.path.getmtime(p) < within_s)
 
 
 def sandboxed() -> bool:
@@ -637,8 +702,9 @@ def handler(intake: Intake):
                 return self._redirect(*intake.web_start(self._api(), q.get("return", "")))
             if u.path == "/api/v1/login/web/callback":
                 return self._redirect(*intake.web_callback(self._api(), q.get("code", ""), q.get("state", "")))
-            if self.path == "/api/v1/health":
-                return self._json(200, {"ok": True})
+            if self.path == "/api/v1/health":   # not ok (503) while a result card could not be drawn in the last day
+                n = cards_failed()
+                return self._json(503, {"ok": False, "cards_failed_24h": n}) if n else self._json(200, {"ok": True})
             if self.path == "/api/v1/me":
                 u = intake.user_of(self.headers.get("Authorization"))
                 return self._json(*intake.me(u)) if u else self._json(401, {"error": "not signed in (llmbox login)"})
@@ -693,6 +759,22 @@ def _code_version() -> str:
 # a publish (site build + upload) at most this often: a rush of submissions would otherwise publish every 30 s and use
 # up the host's deployment allowance; what arrives in between goes out together
 PUBLISH_EVERY_S = int(os.environ.get("LLMBOX_PUBLISH_EVERY_S", "900"))
+CHECK_S = 240    # one submission's check, a quality run's re-grade included (an estimate for waiting times)
+BUILD_S = 120    # a site build and its upload
+
+
+def publish(intake: Intake, waiting: list[list[str]], on_accept) -> tuple[list[list[str]], float]:
+    """One publish of everything accepted since the last: on_accept(ids) builds and uploads the site (False, or an
+    exception, when the upload failed); the attempt is recorded for the queue pages. A failed publish keeps its
+    submissions for the next try, one interval later. Returns (still waiting, when this attempt was made)."""
+    batch = [i for x in waiting for i in x]
+    try:
+        ok = on_accept(batch) is not False   # an on_accept that returns nothing counts as published
+    except Exception as e:
+        print(f"publish error: {e}", flush=True)
+        ok = False
+    intake.published(batch, ok)
+    return ([] if ok else [batch]), time.time()
 
 
 def serve(data: str, port: int = 8767, bind: str = "127.0.0.1", every_s: int = 30, on_accept=None,
@@ -714,8 +796,7 @@ def serve(data: str, port: int = 8767, bind: str = "127.0.0.1", every_s: int = 3
                     with contextlib.suppress(OSError):
                         os.remove(req)
                 if waiting and on_accept and time.time() - last >= publish_every_s:
-                    on_accept([i for x in waiting for i in x])
-                    waiting, last = [], time.time()
+                    waiting, last = publish(intake, waiting, on_accept)
             except Exception as e:   # one bad bundle must not stop the intake
                 print(f"ingest error: {e}", flush=True)
             if started and _code_version() != started:
