@@ -5,6 +5,8 @@
   --bg:#0E0F0C; --panel:#121310; --ink:#E8E4D8; --soft:#cfcabb; --muted:#9a9689; --faint:#85817a;   /* muted 6.1:1, faint 4.8:1 on the panels (WCAG AA for small text) */
   --amber:#FFB000; --amber-dim:#7a5a14; --amber-faint:#3a2d0c; --red:#ff5a36; --red-dim:#6b2a1a;
   --line:#2a2b24; --line2:#1f201b; --grid:#15160f; --edge:#6b685f;   /* edge: a form control's border, 3.5:1 */
+  --input:#0b0c09; --pop:#17180f; --you:rgba(255,176,0,.05);   /* a field or code block; a popover; the visitor's own row */
+  --ref:#8b877b; --coral:#e0826a; --amber-hi:#ffd27a;   /* the reference model; slower / worse; the live dot */
   --t-hi:#FFB000; --t-mid:#c9a255; --t-lo:#ff5a36;
   --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace; --cond:"IBM Plex Sans Condensed","Arial Narrow",sans-serif;
   color-scheme:dark;
@@ -21,7 +23,8 @@ a:hover{text-decoration:underline;text-underline-offset:3px}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 .wrap{max-width:1320px;margin:0 auto;padding:22px 32px 56px}
 .cond{font-family:var(--cond)}
-table,code,pre,kbd,.mono,.tabs,.btn,.boxchip,.getbtn,.signin,.sc,.panel>.lbl,.crumb,footer{font-family:var(--mono)}
+table,code,pre,kbd,.mono,.tabs,.btn,.boxchip,.getbtn,.signin,.sc,.panel>.lbl,.crumb,footer,
+.nhd,.hh,.tag,.nt,.v,.pop b,.cell .new,.cell .yt,.tested,.vb,.lnk{font-family:var(--mono)}   /* uppercase labels outside tables too */
 button,input,select,textarea{font:inherit;color:inherit}
 .sc{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
 .glow{text-shadow:0 0 12px rgba(255,176,0,.45)}
@@ -57,7 +60,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .v.ok:before{content:"✓ ";color:var(--amber)} .v.bad:before{content:"✗ ";color:var(--red)}
 /* hover tooltips on score names */
 .tip{position:relative;border-bottom:1px dotted var(--faint);cursor:help}
-.tip .pop{display:none;position:absolute;z-index:20;top:calc(100% + 10px);left:-10px;width:330px;padding:14px 16px;background:#17180f;border:1px solid var(--amber-dim);
+.tip .pop{display:none;position:absolute;z-index:20;top:calc(100% + 10px);left:-10px;width:330px;padding:14px 16px;background:var(--pop);border:1px solid var(--amber-dim);
   box-shadow:0 12px 32px rgba(0,0,0,.6);text-transform:none;letter-spacing:0;font-size:12.5px;line-height:1.55;color:var(--soft);white-space:normal;text-align:left;font-weight:400}
 .tip:hover .pop,.tip:focus .pop,.tip.open .pop{display:block}
 .pop b{display:block;color:var(--amber);font-weight:500;letter-spacing:.12em;font-size:11px;margin-bottom:6px;text-transform:uppercase}
@@ -70,7 +73,7 @@ th{font-weight:400;font-size:11px;letter-spacing:.12em;color:var(--muted);text-a
 th.l,td.l{text-align:left}
 td{padding:11px 8px;border-bottom:1px solid var(--line2);text-align:center;vertical-align:middle}
 td .m{font:600 16px var(--cond);color:var(--ink)}
-tr.sel td{background:rgba(255,176,0,.04)}
+tr.sel td{background:var(--you)}
 /* speed bars (context depth): label | bar(s) | first word */
 .bars{display:grid;grid-template-columns:170px minmax(0,1fr) 170px;row-gap:14px;column-gap:18px;align-items:center}
 .bars .k{font:600 15px var(--cond)}.bars .k small{display:block;font:400 11px var(--mono);color:var(--muted)}
@@ -86,12 +89,12 @@ tr.sel td{background:rgba(255,176,0,.04)}
 .fp .trk s{position:absolute;top:-4px;bottom:-4px;width:1px;background:var(--line2)}
 .fp .trk i{position:absolute;top:6px;height:2px;opacity:.5}
 .fp .trk b{position:absolute;top:2px;width:10px;height:10px;margin-left:-5px;border-radius:50%}
-.fp .trk b.rf{top:-6px;height:26px;width:0;margin:0;border-radius:0;border-left:1px dashed #8b877b}
+.fp .trk b.rf{top:-6px;height:26px;width:0;margin:0;border-radius:0;border-left:1px dashed var(--ref)}
 .fp .trk em{position:absolute;left:14px;top:-1px;font:normal 11px var(--mono);color:var(--red)}
 .axis span{position:absolute;bottom:0;transform:translateX(-50%);font-size:10.5px;letter-spacing:0;color:var(--faint)}
-.so span{display:block;white-space:nowrap}.so .up{color:var(--amber)}.so .dn{color:#e0826a}.so .ev{color:var(--faint)}
+.so span{display:block;white-space:nowrap}.so .up{color:var(--amber)}.so .dn{color:var(--coral)}.so .ev{color:var(--faint)}
 .bt{display:block;position:relative;height:4px;background:var(--line)}.bt i{position:absolute;left:0;top:0;bottom:0;opacity:.8}.bt.big{height:7px}
-.bt u{position:absolute;top:-4px;height:12px;width:2px;background:var(--ink);opacity:.55}.bt s{position:absolute;top:-4px;height:12px;width:0;border-left:2px dotted #8b877b}
+.bt u{position:absolute;top:-4px;height:12px;width:2px;background:var(--ink);opacity:.55}.bt s{position:absolute;top:-4px;height:12px;width:0;border-left:2px dotted var(--ref)}
 .bt.big u,.bt.big s{top:-3px;height:13px}
 .groups{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 32px}
 div.gh,details.gh>summary{display:grid;grid-template-columns:minmax(0,1fr) 38px;column-gap:10px;row-gap:6px;align-items:center}
@@ -107,7 +110,7 @@ details.bb[open]>summary .bn:after,details.gh[open]>summary .gv:before{content:"
 details.bb>summary .bn:after{content:" ▾"}details.bb[open]>summary .bn:after{content:" ▴"}
 details.bb ul,details.gh ul{margin:8px 0 4px;list-style:none;font-size:12px;color:var(--muted);line-height:1.5}
 details.bb li,details.gh li{padding-left:12px;position:relative;margin-bottom:3px}details.bb li:before,details.gh li:before{content:"›";position:absolute;left:0;color:var(--amber-dim)}
-.glg{margin:16px 0 0}.glg u,.glg s{display:inline-block;position:relative;width:2px;height:10px;margin:0 4px;top:1px}.glg u{background:var(--ink);opacity:.55}.glg s{width:0;border-left:2px dotted #8b877b}
+.glg{margin:16px 0 0}.glg u,.glg s{display:inline-block;position:relative;width:2px;height:10px;margin:0 4px;top:1px}.glg u{background:var(--ink);opacity:.55}.glg s{width:0;border-left:2px dotted var(--ref)}
 @media (max-width:1000px){.groups{grid-template-columns:1fr 1fr}}
 @media (max-width:560px){.groups{grid-template-columns:1fr}}
 .boxchip{margin-left:6px;font-size:11.5px;color:var(--muted);border:1px solid var(--line);padding:4px 10px;white-space:nowrap}
