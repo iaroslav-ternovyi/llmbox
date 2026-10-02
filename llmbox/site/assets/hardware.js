@@ -52,7 +52,7 @@ function draw() {
   $("#hwnote").textContent = `fits on ${nfit} of ${rows.length}`;
   $("#boxlbl").textContent = `Computers · graphics cards with ${Math.round(ram / 1024)} GB RAM at ${rambw} GB/s${saved && !saved.uni ? " (your RAM)" : ""}`;
   $("#boxes").innerHTML = show.map(r => `<div class="hr${r.mine ? " me" : ""}${r.f.fits || r.measured ? "" : " nofit"}"><div class="bn">${r.name}${r.measured ? '<span class="tag m">MEASURED</span>' : r.mine ? '<span class="tag">YOUR BOX</span>' : ""}<small>${r.sub}</small></div>` +
-    (r.t2 ? `<div class="nv">${r.measured ? "" : "~"}${Math.round(r.t2)} tok/s<small>${r.td ? `${Math.round(r.td)} with a long document` : ""}</small></div>` +
+    (r.t2 ? `<div class="nv">${r.measured ? "" : "~"}${Math.round(r.t2)} tok/s<small>${r.td ? `${Math.round(r.td)} at 32k` : ""}</small></div>` +
       `<div class="hb" title="${Math.round(r.f.gf * 100)}% of the model's experts on the graphics card"><i class="${r.measured ? "" : "p"}" style="width:${100 * r.t2 / vmax}%"></i>${r.td ? `<u style="left:${100 * r.td / vmax}%"></u>` : ""}</div>`
       : `<div class="nv q">does not fit</div><div class="hb"></div>`) +
     `<div class="ft">${r.measured || r.f.fits ? `✓ ${Math.round(r.f.ctx / 1024)}k ctx` : '<span class="no">✗ too big</span>'}</div>` +

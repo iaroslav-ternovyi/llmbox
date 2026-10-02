@@ -373,7 +373,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
     tiles = (f"<div><span class='sc'>Score</span><b>{_pct(vs)}</b><span>of Claude Opus 5.5 · range {rlo:.0f}–{rhi:.0f}</span>"
              f"<span>place {pl} of {len(rs)}{f' · tied with {lo}–{hi}' if lo != hi else ''}</span></div>"
              f"<div id='vspd'><span class='sc'>Speed</span><b>{f'{tps:.0f}' if tps else '—'}<small> tok/s</small></b>"
-             f"<span class='sub'>short chat{f' · {float(deep):.0f} with a long document' if deep != '-' else ''}</span><span class='src'>measured on our test PC</span></div>"
+             f"<span class='sub'>short chat{f' · {float(deep):.0f} at 32k of context' if deep != '-' else ''}</span><span class='src'>measured on our test PC</span></div>"
              f"<div id='vfit'><span class='sc'>Fits</span><b>{'✓ ' + str(round(shp['ctx'] / 1024)) + 'k' if shp.get('ctx') else '—'}</b>"
              f"<span class='sub'>context on our test PC</span><span class='src'>{esc(ref_box)}</span></div>"
              f"<div><span class='sc'>Reliability</span><b>{n_cut + n_loop}<small> of {len(pool)}</small></b>"

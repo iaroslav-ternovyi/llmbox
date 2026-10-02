@@ -127,7 +127,7 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
   $("#pick").innerHTML = `<div class="pk"><div><span class="sc">Best for this box${preset ? " · " + esc(use ? use.textContent.toLowerCase() : "") : ""}</span>` +
     `<h2><a href="recipe-${best.id}.html">${esc(best.model || best.name)}</a> <small>${esc(best.quant || "")}</small></h2>` +
     `<p><b>${Math.round(best.vs)}%</b> of Claude Opus · <b>${best.pred ? "~" : ""}${Math.round(best.t2)}</b> tokens/s` +
-    (best.td ? `, ${Math.round(best.td)} with a long document` : "") +
+    (best.td ? `, ${Math.round(best.td)} at 32k of context` : "") +
     ` · ${why}</p></div>` +
     `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
     (/Windows/.test(navigator.userAgent) ? `<p class="win">On Windows the easiest way is <a href="recipe-${best.id}.html#run">LM Studio or Ollama with these settings</a>; the line above needs WSL2.</p>` : "") +
@@ -150,11 +150,11 @@ function render() {
     const mm = hwNow && !sameClass(hwNow) && measuredFor(p.id, hwNow);
     if (mm) {   // people measured this model on machines of this class: their median, not a prediction
       p.t2 = mm[0]; p.td = mm[1]; p.pred = false;
-      row.querySelector(".spd").innerHTML = `<b>${fmt(mm[0])}</b><small>${mm[1] ? fmt(mm[1]) + " long · " : ""}${mm[2]} machine${mm[2] > 1 ? "s" : ""}</small>`;
+      row.querySelector(".spd").innerHTML = `<b>${fmt(mm[0])}</b><small>${mm[1] ? fmt(mm[1]) + " at 32k · " : ""}${mm[2]} machine${mm[2] > 1 ? "s" : ""}</small>`;
       row.querySelector(".fit").innerHTML = sh ? `✓ ${kfmt(forBox(sh, hwNow).ctx)}` : "✓";
     } else if (sh && hwNow && !sameClass(hwNow)) {
       const f = forBox(sh, hwNow); p.t2 = f.t2; p.td = f.td; p.pred = true;
-      row.querySelector(".spd").innerHTML = f.fits ? `<b class="pred">~${fmt(f.t2)}</b><small>~${fmt(f.td)} long</small>` : "—";
+      row.querySelector(".spd").innerHTML = f.fits ? `<b class="pred">~${fmt(f.t2)}</b><small>~${fmt(f.td)} at 32k</small>` : "—";
       row.querySelector(".fit").innerHTML = f.fits ? `✓ ${kfmt(f.ctx)}` : `<span class="no">✗ too big</span>`;
       if (!f.fits) { row.classList.add("nofit"); p.t2 = null; p.nofit = true; }
     } else {

@@ -176,10 +176,11 @@ def _depth_k(key: str) -> float:
 
 
 def _deep(sp: dict) -> str:
-    """slowest decode deep in the context (>= 24k tokens), where long agent sessions and documents spend their time"""
+    """decode 32k tokens into the context (the measurement nearest 32k, 24k-48k): what the site calls "at 32k" everywhere,
+    where a long agent session spends its time. (It was the slowest at 24k or more, the 87k figure, while pages said 32k.)"""
     bd = sp.get("by_depth") or {}
-    v = [d["decode_tps"] for k, d in bd.items() if _depth_k(k) >= 24 and d.get("decode_tps")]
-    return f"{min(v):.1f}" if v else "-"
+    v = [(abs(_depth_k(k) - 32), d["decode_tps"]) for k, d in bd.items() if 24 <= _depth_k(k) < 48 and d.get("decode_tps")]
+    return f"{min(v)[1]:.1f}" if v else "-"
 
 
 def text_table(rs: list[dict]) -> str:

@@ -129,23 +129,27 @@ def solve(r: dict, shape: E.ModelShape, hw: E.HostSpec, measured_tps: float, dep
     return (k, term) if 0.2 <= k <= 5 else (ratio, "")
 
 
-def calibration(r: dict, shape: E.ModelShape, ref_host: str) -> Calibration:
-    """Ratio measured / predicted on the box where this recipe was measured (newest result with a speed figure)."""
+def calibration(r: dict, shape: E.ModelShape, ref_host: str, at_k: int | None = None) -> Calibration:
+    """Ratio measured / predicted on the box where this recipe was measured (newest result with a speed figure).
+    at_k: calibrate the deep figure on the measured depth nearest this many thousand tokens (default: the deepest);
+    the site's "at 32k" takes 32."""
     from . import hosts, registry, report, results
     if ref_host == registry.REGISTRY or r.get("reference"):   # a published recipe: its reference measurement travels with it
-        return registry.calibration(r, shape)
-    recs = [x for x in results.load_all(ref_host) if (x.get("recipe") or {}).get("id") == r["id"]
+        return registry.calibration(r, shape, at_k=at_k)
+    allrecs = results.load_all(ref_host)
+    recs = [x for x in allrecs if (x.get("recipe") or {}).get("id") == r["id"]
             and ((x.get("summary") or {}).get("speed") or {}).get("decode_tps")]
     if not recs:
         return Calibration()
-    rec = max(recs, key=lambda x: x.get("created", ""))
+    # the newest probe when there is one, as the site's speeds (report.with_probe): one method for every model
+    rec = report.latest_probe(allrecs, r["id"]) or max(recs, key=lambda x: x.get("created", ""))
     sp = rec["summary"]["speed"]
     hw = hosts.spec(hosts.load(ref_host))
     ctx, kv = r["placement"]["ctx"] or shape.context_length, r["placement"]["kv_type"]
     k2, term = solve(r, shape, hw, sp["decode_tps"], 2000, ctx=ctx, kv_type=kv)
     deep = [(report._depth_k(k), d["decode_tps"]) for k, d in (sp.get("by_depth") or {}).items()
             if report._depth_k(k) >= 24 and d.get("decode_tps")]
-    dk, dv = max(deep) if deep else (88, None)
+    dk, dv = (min(deep, key=lambda x: abs(x[0] - at_k)) if at_k else max(deep)) if deep else (88, None)
     kd, t2 = solve(r, shape, hw, dv, int(dk * 1000), term=term or None, ctx=ctx, kv_type=kv) if dv else (k2, term)
     if t2 != term:   # one form for both figures: the deep one could not be solved on the same side
         kd = k2

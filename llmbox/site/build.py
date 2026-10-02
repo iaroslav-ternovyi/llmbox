@@ -185,7 +185,19 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
         rid = (rec.get("recipe") or {}).get("id")
         f = os.path.basename((rec.get("model") or {}).get("file") or (rec.get("model") or {}).get("path") or "")
         return rid in files and (not f or not files[rid] or f == files[rid])
-    box = [r for _p, r in report.results.files(host) if r.get("kind") == "speed" and ours(r)]
+    # our test PC: per model the same figure the home and model pages show, its newest probe after tuning
+    # (report.with_probe); the speed records of models without a probe as before
+    allbox = [r for _p, r in report.results.files(host)]
+    box = []
+    for rid in files:
+        p = report.latest_probe(allbox, rid)
+        if p:
+            sp = p["summary"]["speed"]
+            box.append({"kind": "speed", "host": p.get("host") or {}, "recipe": {"id": rid}, "model": p.get("model") or {},
+                        "created": p.get("created", ""), "speed": {"decode_tps": sp["decode_tps"], "prefill_tps": sp.get("prefill_tps"),
+                        "depth": [{"depth": int(report._depth_k(k) * 1000), "decode_tps": d.get("decode_tps")} for k, d in (sp.get("by_depth") or {}).items()]}})
+        else:
+            box += [r for r in allbox if r.get("kind") == "speed" and ours(r) and (r.get("recipe") or {}).get("id") == rid]
     # people's accepted records: each carries the submission it came in, and passes the intake's check as it is today
     # (a file accepted under an older, looser check must not stop every build)
     community = [r for _p, r in report.results.files("community") if isinstance(r, dict) and (r.get("submission") or {}).get("id")]

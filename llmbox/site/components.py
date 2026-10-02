@@ -33,7 +33,7 @@ def _pct(v: float | None) -> str:
 
 def _spd(sp: dict) -> str:
     tps, deep = sp.get("decode_tps"), report._deep(sp)
-    return f"<b>{tps:.0f}</b><small>{'' if deep == '-' else f'{float(deep):.0f} long'}</small>" if tps else "—"
+    return f"<b>{tps:.0f}</b><small>{'' if deep == '-' else f'{float(deep):.0f} at 32k'}</small>" if tps else "—"
 
 
 def _stands_out(blocks: dict, med: dict) -> str:

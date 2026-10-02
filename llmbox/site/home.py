@@ -31,7 +31,7 @@ def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dic
             + _pop("SCORE ↕", "Score · % of Claude Opus 5.5", "How close the model gets to Claude Opus 5.5 on the same tasks (Opus = 100%). "
                    "The dot is the score, the line its 95% range: models whose lines overlap are not measurably apart yet. Click to sort.")
             + "</span></div></th><th class='r' data-sort='speed'>" + _pop("TOK/S ↕", "Speed on your box", "Tokens per second while writing the answer, "
-            "in a short chat (big number) and with a long document in context (small). Measured on our test PC, predicted for the box you pick. Click to sort.")
+            "in a short chat (big number) and with 32k tokens of context already in (small). Measured on our test PC, predicted for the box you pick. Click to sort.")
             + "</th><th class='r'>" + _pop("FITS", "Does it fit?", "Whether the model and its context fit in the graphics card plus RAM of the box you pick, "
             "and the largest context that does.") + "</th><th class='l'>" + _pop("STANDS OUT", "Stands out", "Blocks where the model scores at least "
             "6 points above (▲) or below (▼) the typical (median) local model here. Click a row for all nine.") + "</th><th><span class='sr'>compare</span></th></tr>")
@@ -233,7 +233,7 @@ LM Studio or Ollama, on Linux, Windows or macOS.</li></ol>
 <dl class="gl">
 <dt>tok/s</dt><dd>Tokens per second, how fast the answer appears. A token is about &frac34; of a word. 20 reads comfortably; a coding agent feels quick from about 50.</dd>
 <dt>Context</dt><dd>How much text the model keeps in view at once: the chat, your files, a document. 256k tokens is roughly a 500-page book.
-A bigger context needs more memory, and answers get slower as it fills up (the &ldquo;long&rdquo; speed).</dd>
+A bigger context needs more memory, and answers get slower as it fills up (the answers get slower as it fills up (the &ldquo;long&rdquo; speed)ldquo;at 32kanswers get slower as it fills up (the &ldquo;long&rdquo; speed)rdquo; speed).</dd>
 <dt>Quant (Q4_K_M, UD-Q4_K_XL, IQ3_XXS)</dt><dd>The model&rsquo;s numbers stored in fewer bits so it fits in memory. 4-bit (Q4) is the usual choice:
 about a quarter of the original size for a small loss. Q3 and Q2 fit smaller boxes and lose more; Q6 and Q8 lose almost nothing.</dd>
 <dt>MoE, &ldquo;35B-A3B&rdquo;</dt><dd>Mixture of experts: 35 billion parameters in total, but only 3 billion work on each token. It needs memory for all of them

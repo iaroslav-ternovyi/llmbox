@@ -79,7 +79,7 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
             continue
         files[r["id"]] = os.path.basename(rec["model"].get("file") or rec["model"].get("path") or "")
         sh = F.shape_for(rec, host=hosts.host_of(prof))
-        cal = F.calibration(rec, sh, host)
+        cal = F.calibration(rec, sh, host, at_k=32)   # the deep figure everywhere on the site is "at 32k"
         kv, ctx = rec["placement"]["kv_type"], rec["placement"]["ctx"] or sh.context_length
         out[r["id"]] = dict(js_shape(sh, kv, ctx, cal), size=round((sh.total_bytes or 0) / 1e9, 1), arch=sh.arch,
                             params=int(sh.total_params * (1 - (sh.mtp_bytes or 0) / sh.total_bytes)) if sh.total_bytes else 0,
