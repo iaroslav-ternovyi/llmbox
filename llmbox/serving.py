@@ -31,7 +31,8 @@ def start(host_name: str, rid: str, port: int | None = None) -> dict:
     i = args.index("--port")
     args = args[:i] + args[i + 2:]
     local = not prof.get("ssh")
-    spec = {"server": r["runtime"]["server"], "args": args, "affinity": r["runtime"]["cpu_affinity"],
+    from . import engine
+    spec = {"server": engine.ensure_server(host_name, dict(r, id=rid)), "args": args, "affinity": r["runtime"]["cpu_affinity"],
             "model_files": model_files(r["model"]["path"]), "headroom_mib": r["placement"]["cache_ram_headroom_mib"],
             "bind": "127.0.0.1" if local else "0.0.0.0", "port": port}
     m = h.agent("serve-start", json.dumps(spec), timeout=1200)

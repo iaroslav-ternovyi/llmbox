@@ -53,7 +53,8 @@ def measure(host_name: str, rid: str, overrides: list[str] | None = None, depths
     args = recipe.server_args(r)
     i = args.index("--port")
     args = args[:i] + args[i + 2:]
-    spec = {"server": r["runtime"]["server"], "args": args, "affinity": r["runtime"]["cpu_affinity"],
+    from . import engine
+    spec = {"server": engine.ensure_server(host_name, dict(r, id=rid)), "args": args, "affinity": r["runtime"]["cpu_affinity"],
             "model_files": model_files(r["model"]["path"]), "headroom_mib": r["placement"]["cache_ram_headroom_mib"],
             "depths": depths or [32000], "gen_tokens": 400, "prefill_tokens": 12000, "repeats": repeats, "sampling": sampling or {}}
     m = h.agent("probe-server", json.dumps(spec), timeout=3600)

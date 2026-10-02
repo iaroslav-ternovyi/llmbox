@@ -8,6 +8,7 @@ its llama-server like any other."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import urllib.request
@@ -77,3 +78,34 @@ def install(h, prof: dict, out=print, stream: bool = False) -> str:
     v = h.run(f"{path} --version 2>&1 | head -2", timeout=60).stdout.strip().replace("\n", " | ")
     out(f"installed {path} (sha256 checked) - {v[:120]}")
     return path
+
+
+def ensure_server(host_name: str, r: dict, out=print) -> str:
+    """The recipe's llama-server, found again when it is gone (its folder deleted, a build removed): another build the
+    host has, else - when the missing one was llmbox's own download - the official build installed again. The recipe file
+    is pointed at it, so the next run does not look again. Raises SystemExit when there is none."""
+    from . import hosts, install as inst, recipe as rc
+    path = r["runtime"]["server"]
+    prof = hosts.load(host_name)
+    h = hosts.host_of(prof)
+    if h.run(f"test -x {shlex.quote(path)}", timeout=30).returncode == 0:
+        return path
+    out(f"llama.cpp is no longer at {path}: looking for it again")
+    engine = r["runtime"].get("engine") or "llama.cpp"
+    prof = hosts.detect(host_name, prof.get("ssh"), measure=False)
+    new = inst.server_for(prof, engine)
+    if not new and "/.llmbox/engines/" in path and engine == "llama.cpp":
+        install(h, prof, out=out)
+        prof = hosts.detect(host_name, prof.get("ssh"), measure=False)
+        new = inst.server_for(prof, engine)
+    if not new:
+        raise SystemExit(f"llama-server is no longer at {path} and this computer has no other {engine} build: "
+                         "`llmbox` installs the official one")
+    p = os.path.join(rc.recipes_dir(host_name), f"{r.get('id')}.toml")
+    if os.path.exists(p):   # the server line as written (an extended recipe's base keeps its own)
+        text = open(p).read()
+        moved = text.replace(f"server = {json.dumps(path, ensure_ascii=False)}", f"server = {json.dumps(new, ensure_ascii=False)}")   # as fit.to_toml writes it
+        if moved != text:
+            open(p, "w").write(moved)
+    out(f"using {new}")
+    return new
