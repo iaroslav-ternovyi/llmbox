@@ -118,14 +118,19 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
   const first = ok.reduce((a, b) => (b.vs > a.vs ? b : a)), top = pool.reduce((a, b) => (b.vs > a.vs ? b : a));
   const long = p => Math.min(p.t2, p.td || p.t2);
   const quick = pool.filter(p => p !== top && rng(p)[1] >= rng(top)[0] && p.vs >= top.vs - 5 && long(p) >= 1.3 * long(top));
-  const best = quick.length ? quick.reduce((a, b) => (long(b) > long(a) ? b : a)) : top;
-  const why = best === top && first !== top ? `the best score among the models that write at reading speed here (20+ tok/s); ${esc(first.model || first.name)} scores higher at ~${Math.round(first.t2)} tok/s` :
+  let best = quick.length ? quick.reduce((a, b) => (long(b) > long(a) ? b : a)) : top;
+  // as llmbox pick: an uncensored remix on top gives way to the official release it is not measurably apart from
+  const official = best === top && top.kind === "uncensored" ?
+    pool.filter(p => p !== top && p.kind !== "uncensored" && rng(p)[1] >= rng(top)[0] && p.vs >= top.vs - 5 && long(p) >= 0.9 * long(top)) : [];
+  if (official.length) best = official.reduce((a, b) => (b.vs > a.vs ? b : a));
+  const why = official.length ? `not measurably apart from the best score (${esc(top.model || top.name)}, an uncensored remix), and the official release` :
+    best === top && first !== top ? `the best score among the models that write at reading speed here (20+ tok/s); ${esc(first.model || first.name)} scores higher at ~${Math.round(first.t2)} tok/s` :
     best === top ? "the best score among the models that fit" + (usable.length ? "" : "; nothing here reaches 20 tok/s, so it suits jobs you leave running more than a chat") :
     `${Math.round(top.vs - best.vs)} points below the best score, not measurably apart from it, and ${(long(best) / long(top)).toFixed(1)}× as fast here`;
   const cmd = `curl --proto '=https' --tlsv1.2 -fsSL ${DATA.site}/install.sh | sh -s -- ${best.id}`;   // words.CURL
   const use = document.querySelector(".seg button.on");
   $("#pick").innerHTML = `<div class="pk"><div><span class="sc">Best for this box${preset ? " · " + esc(use ? use.textContent.toLowerCase() : "") : ""}</span>` +
-    `<h2><a href="recipe-${best.id}.html">${esc(best.model || best.name)}</a> <small>${esc(best.quant || "")}</small></h2>` +
+    `<h2><a href="recipe-${best.id}.html">${esc(best.model || best.name)}</a> <small>${esc(best.quant || "")}</small>${best.kind === "uncensored" ? ' <span class="tag">uncensored remix</span>' : ""}</h2>` +
     `<p><b>${Math.round(best.vs)}%</b> of Claude Opus · <b>${best.pred ? "~" : ""}${Math.round(best.t2)}</b> tokens/s` +
     (best.td ? `, ${Math.round(best.td)} at 32k of context` : "") +
     ` · ${why}</p></div>` +
@@ -239,3 +244,5 @@ $("#find").addEventListener("input", () => {   // find a model: rows whose name,
   document.querySelectorAll(".rank tr.mr").forEach(tr => { const hit = !q || tr.textContent.toLowerCase().includes(q) || (fam[tr.dataset.rid] || "").includes(q);
     tr.hidden = !hit; if (!hit) { const pr = document.querySelector(`tr.prof[data-for="${tr.dataset.rid}"]`); pr.hidden = true; tr.classList.remove("open"); } });
 });
+// a first visit: the newcomer's guide starts open (closed for good once seen)
+try { const nb = document.querySelector("details.newbie"); if (nb && !localStorage.getItem("llmbox-seen")) { nb.open = true; localStorage.setItem("llmbox-seen", "1"); } } catch (e) {}

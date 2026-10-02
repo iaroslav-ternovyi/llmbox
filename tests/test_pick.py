@@ -31,3 +31,12 @@ assert b["id"] == "mid" and "reading speed" in why and "Big scores higher at ~7"
 b, why = _p.choose([_slow, dict(_fast, t2=12.0, td=10.0)])
 assert b["id"] == "big" and "nothing here reaches 20" in why, (b, why)
 print("usable-speed pick ok")
+
+# an uncensored remix on top gives way to the official release it is not measurably apart from
+_remix = {"id": "cyber", "name": "Cyber", "use_score": 89, "t2": 56.0, "td": 56.0, "tied": False, "kind": "uncensored"}
+_off = {"id": "tiel", "name": "Tiel", "use_score": 87, "t2": 59.0, "td": 60.0, "tied": True, "kind": "fine-tune"}
+b, why = _p.choose([_remix, _off])
+assert b["id"] == "tiel" and "uncensored remix" in why, (b, why)
+b, why = _p.choose([_remix, dict(_off, tied=False)])
+assert b["id"] == "cyber", (b, why)   # measurably worse: the remix stays
+print("official over a tied remix ok")

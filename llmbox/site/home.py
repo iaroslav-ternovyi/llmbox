@@ -136,7 +136,7 @@ def _trust(local: list[dict]) -> str:
     """The proof in one line: how much is measured, how it is graded, that it is open, that nothing leaves unasked."""
     answers = sum(r.get("answers") or 0 for r in local)
     runs = sum(r.get("runs") or 0 for r in local)
-    return (f"<b>{len(local)}</b> models · <b>{answers:,}</b> answers from <b>{runs}</b> runs, graded by programs, not by another AI · "
+    return (f"<b>{len(local)}</b> models · <b>{answers:,}</b> answers from <b>{runs}</b> runs, graded by programs (one block by a fixed small reader model, not a judge AI) · "
             f'<a href="https://github.com/iaroslav-ternovyi/llmbox">open source</a> · nothing is sent from your computer without your yes · '
             f'<a href="method.html">how it works</a>')
 
@@ -166,6 +166,8 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
 <h1 class="q1">What should I run on my box?</h1>
 <p class="lede">Pick your graphics card or Mac. You get the local AI model that runs best on it, how fast it answers, how close
 it gets to Claude, and one line that installs it. Every model is graded on real work and timed on real PCs.</p>
+<p class="scope">Scored on the work people do with a local model at a computer: coding, agents and tool calls, tech questions,
+long documents and writing. Chat, role-play and images are not scored.</p>
 <p class="trust">{_trust(local)}</p>
 {NEWBIE}
 <section class="boxbar" id="box"><span class="sc">Your box</span>
@@ -185,6 +187,8 @@ it gets to Claude, and one line that installs it. Every model is graded on real 
  <div class="rhead"><div class="seg" role="group" aria-label="rank by"><span class="sc">Rank by</span>{presets}</div>
   <input id="find" type="search" placeholder="find a model" aria-label="find a model by name, quant or family" autocomplete="off">
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
+ <p class="rlegend"><b>Score</b> = % of Claude Opus 5.5's result on the same tasks · <b>tok/s</b> = how fast it writes (20 reads comfortably; the small number: with 32k tokens already in) ·
+ <b>Fits</b> = runs on your box, and how much text it can hold (256k ≈ a 500-page book) · <b>▲ ▼</b> = blocks where it is clearly better / worse than most models</p>
  <div class="tw"><table class="rank"><thead>{head}</thead><tbody>{''.join(body)}</tbody></table></div>
  <p class="rnote">Places by score. A dashed line between rows: every model above it is measurably better than the ones below; inside a group the order is not settled yet.
  Click a row for its nine block scores.</p>{_unranked(host, local)}{qline}</section>

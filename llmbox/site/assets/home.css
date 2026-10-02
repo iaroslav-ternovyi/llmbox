@@ -98,3 +98,6 @@
 /* a result that is not directly comparable: shown with why (a recipe's caveat) */
 .mw .cav{grid-column:2}.cav{display:block;font:500 11px var(--mono);letter-spacing:.04em;color:var(--t-mid);margin-top:2px;cursor:help}.cavp{font-size:13px;color:var(--soft);margin:4px 0 10px}
 .pkc .win{font-size:13px;color:var(--soft);margin:0 0 8px}
+.scope{font-size:13.5px;color:var(--soft);max-width:860px;margin:-4px 0 10px}
+.rlegend{font-size:12.5px;color:var(--muted);margin:4px 16px 10px;line-height:1.7}.rlegend b{color:var(--soft);font-weight:500}
+.pk h2 .tag{font:500 10px var(--mono);letter-spacing:.1em;color:var(--t-mid);border:1px solid var(--amber-dim);padding:1px 6px;vertical-align:4px;margin-left:6px;text-transform:uppercase}

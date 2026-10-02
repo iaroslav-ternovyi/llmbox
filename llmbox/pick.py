@@ -15,7 +15,7 @@ from . import fit as F
 from . import hosts, hwclass, recipe as rc, registry
 
 LONG = 32000
-USES = {"all": None, "coding": "Coding", "agents": "Agents & tools", "ask": "Ask & learn", "docs": "Documents & writing"}
+USES = {"all": None, "coding": "Coding", "agents": "Agents & tools", "ask": "Tech Q&A", "docs": "Documents & writing"}
 
 
 def index() -> dict:
@@ -51,6 +51,15 @@ def choose(ok: list[dict]) -> tuple[dict, str]:
     if quick:
         b = max(quick, key=long)
         return b, f"{top['use_score'] - b['use_score']:.0f} points below the best score, not measurably apart from it, and {long(b) / long(top):.1f}x as fast here"
+    # an uncensored remix on top: the official release instead when the two are not measurably apart, a few points at most,
+    # and about as fast (someone who wants the remix finds it one row down, named as such)
+    if top.get("kind") == "uncensored":
+        alt = [x for x in ok[1:] if x.get("kind") != "uncensored" and x.get("tied") and x["use_score"] >= top["use_score"] - CLOSE
+               and long(x) >= 0.9 * long(top)]
+        if alt:
+            b = max(alt, key=lambda x: x["use_score"])
+            return b, (f"not measurably apart from the best score ({top.get('name') or top['id']}, an uncensored remix), "
+                       "and the official release")
     if skipped:
         return top, (f"the best score among the models that write at reading speed here ({USABLE_TPS:.0f}+ tok/s); "
                      f"{skipped.get('name') or skipped['id']} scores higher at ~{skipped['t2']:.0f} tok/s")

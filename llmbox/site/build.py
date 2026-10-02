@@ -92,7 +92,9 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     def _meta(r):   # what llmbox pick shows: % of Opus with its 95% range, and per use
         k = (r.get("vs_ref") or 0) / r["capability"] if r.get("capability") else 0
         from .words import caveat as _cv
+        from .words import _kind as _kd
         return {"name": f'{model_name(r)} {variant(r["id"], r.get("file"))}', "score": r.get("vs_ref"), "cap": r.get("capability"), "caveat": _cv(host, r["id"]),
+                "kind": _kd(r.get("hf_repo")),
                 # speeds people measured, per hardware class: [short, @32k, @80k, machines] (llmbox pick shows its own class)
                 "measured": {c["class"]: [c["t2"], c["t32"], c["t80"], c["machines"]] for c in cs.get(r["id"], [])},
                 "range": [round(r["ci"][0] * k, 1), round(r["ci"][1] * k, 1)] if r.get("ci") and k else None,

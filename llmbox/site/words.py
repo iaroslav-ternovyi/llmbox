@@ -166,7 +166,7 @@ SHORT = {"agentic": "agentic coding", "code": "code", "tools": "tools", "techhel
 # suite weights). What the suite does not measure is said next to them: the biggest uses of chatbots (advice, chat) and
 # of open-weight models (roleplay) are not in it (docs/fast-test.md: OpenAI's usage data, OpenRouter's open-model tokens).
 GROUPS = [("Coding", ["agentic", "code"]), ("Agents & tools", ["tools"]),
-          ("Ask & learn", ["techhelp", "knowledge", "explain", "reasoning"]), ("Documents & writing", ["longctx", "writing"])]
+          ("Tech Q&A", ["techhelp", "knowledge", "explain", "reasoning"]), ("Documents & writing", ["longctx", "writing"])]
 
 
 NOT_MEASURED = "everyday advice and chat, roleplay and fiction, images and voice"
@@ -174,7 +174,7 @@ NOT_MEASURED = "everyday advice and chat, roleplay and fiction, images and voice
 
 GROUP_TIPS = {"Coding": "Fixing bugs in real multi-file projects, keeping up with a request that changes turn by turn, and single functions from a spec. Hidden tests decide.",
               "Agents & tools": "Calling business tools correctly on messy data (a CRM, invoices, payments) under a written policy. Wrong or extra calls cost points.",
-              "Ask & learn": "Exact answers about your machine and projects (configs, logs, SQL, git, shell), developer facts, saying \"I don't know\", explaining a system so a reader can use it, multi-step problems.",
+              "Tech Q&A": "Exact answers about your machine and projects (configs, logs, SQL, git, shell), developer facts, saying \"I don't know\", explaining a system so a reader can use it, multi-step problems.",
               "Documents & writing": "Exact answers from a long document with later corrections, and writing under constraints a program checks: minutes, rewrites, translations of UI strings."}
 
 
