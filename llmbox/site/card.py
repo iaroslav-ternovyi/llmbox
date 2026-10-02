@@ -134,7 +134,9 @@ def _t(x, y, s, px, fill, family=COND, weight=500, anchor="start", spacing=0.0) 
 def _lines(text: str, px: float, width: float, most: int) -> list[str]:
     """Words onto at most `most` lines of the width (about half the font size per character); the last one cut short."""
     per, lines, cur = max(8, int(width / (0.5 * px))), [], ""
-    for w in norm(text, 200).split(" "):
+    # a number stays with its unit ("~28 tok/s", "32 GB", "45–65 GB/s"): a no-break space between them
+    text = re.sub(r"(\d) (tok/s|GB/s|GB|k\b)", "\\1\u00a0\\2", norm(text, 200))
+    for w in text.split(" "):
         if cur and len(cur) + 1 + len(w) > per:
             lines.append(cur)
             cur = w
@@ -172,7 +174,7 @@ def svg(c: dict) -> str:
                  + (f'<tspan dx="12" fill="{MUTED}">{esc(quant)}</tspan>' if quant else "") + "</text>")
     num = str(int(c["t2"]))
     parts.append(_t(M - 6, 400, num, 210, INK if c.get("outlier") else AMBER, family=MONO, weight=500))
-    parts.append(_t(M + len(num) * 126 + 10, 400, "tok/s", 34, MUTED))
+    parts.append(_t(M + len(num) * 126 - 2, 400, "tok/s", 34, MUTED))   # the digits' side bearings make the gap
     parts.append(_t(M, 446, "short chat" + (f" · {c['deep']} at 32k context" if c.get("deep") else ""), 30, SOFT))
     x0, x1 = 600, W - M
     pl = c["place"]

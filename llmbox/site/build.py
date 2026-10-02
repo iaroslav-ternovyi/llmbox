@@ -172,7 +172,9 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
         f = os.path.basename((rec.get("model") or {}).get("file") or (rec.get("model") or {}).get("path") or "")
         return rid in files and (not f or not files[rid] or f == files[rid])
     box = [r for _p, r in report.results.files(host) if r.get("kind") == "speed" and ours(r)]
-    people = [r for _p, r in report.results.files("community") if ours(r) and (r.get("submission") or {}).get("id") not in gone]
+    # people's accepted records: each carries the submission it came in (one without is not a person's run here)
+    people = [r for _p, r in report.results.files("community")
+              if ours(r) and (r.get("submission") or {}).get("id") and r["submission"]["id"] not in gone]
     models = []
     for rid in order:
         try:
