@@ -25,6 +25,7 @@ STANDARD_BUDGET = 40.0    # minutes: a reference-box quality test (llmbox bench 
 SPREAD_MAX = 25.0         # % between a probe's runs at one depth before its figure is called unreliable
 ERRORS_MAX = 0.10         # share of a run's answers lost to errors before the run is questioned
 RUNS_APART = 15.0         # points between two runs of one model (% of Opus) worth a look
+VRAM_IDLE_MAX = 1024      # MiB of the card left idle with the model loaded, without a written reason (the box method)
 BACKUP_MARK = "last-backup"
 
 
@@ -136,6 +137,11 @@ def check_tests(host: str = "box") -> list[dict]:
                                                + "; ".join(f"{x['flag']} {x['recipe']} -> {x['run']}" for x in d[:3]), "re-test, or record why"))
             if not _trace_dir(r):
                 out.append(_f("info", "tests", f"{rid}: the run from {r['created'][:16]} has no saved thinking: its loops are not checked"))
+        v = (max(runs, key=lambda r: r["created"]).get("vram") or {})
+        notes = " ".join(((_recipe(host, rid).get("notes") or {}).get("lines") or []))
+        if (v.get("idle_mib") or 0) > VRAM_IDLE_MAX and not re.search(r"idle|VRAM (left|free)|headroom", notes, re.I):
+            out.append(_f("warn", "speed", f"{rid}: {v['idle_mib']} MiB of {v.get('total_mib')} MiB VRAM idle with the model loaded, and its notes say no reason",
+                          "spend it (context, KV type, quant) or write why not in the recipe's notes"))
         caps = [((r.get("summary") or {}).get("capability_this_run") or (r.get("summary") or {}).get("capability"), r["created"]) for r in runs]
         caps = [(c, w) for c, w in caps if c is not None]
         k = (row.get("vs_ref") or 0) / row["capability"] if row.get("capability") else 0
@@ -167,6 +173,14 @@ class _Explained(list):
         if m and f["level"] != "error" and self.why(m.group(1)):
             f = dict(f, level="info", what=f["what"] + " (its caveat says why)", fix="")
         super().append(f)
+
+
+def _recipe(host: str, rid: str) -> dict:
+    from . import recipe as rc
+    try:
+        return rc.load(host, rid)
+    except (OSError, ValueError):
+        return {}
 
 
 _ON_BOX: dict = {}
