@@ -33,8 +33,8 @@ def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dic
             + "</span></div></th><th class='r' data-sort='speed'>" + _pop("TOK/S ↕", "Speed on your box", "Tokens per second while writing the answer, "
             "in a short chat (big number) and with 32k tokens of context already in (small). Measured on our test PC, predicted for the box you pick. Click to sort.")
             + "</th><th class='r'>" + _pop("FITS", "Does it fit?", "Whether the model and its context fit in the graphics card plus RAM of the box you pick, "
-            "and the largest context that does.") + "</th><th class='l'>" + _pop("STANDS OUT", "Stands out", "Blocks where the model scores at least "
-            "6 points above (▲) or below (▼) the typical (median) local model here. Click a row for all nine.") + "</th><th><span class='sr'>compare</span></th></tr>")
+            "and the largest context that does.") + "</th><th class='l'>" + _pop("VS MOST MODELS", "Stronger / weaker than most", "Blocks where the model scores at least "
+            "6 points above (stronger) or below (weaker) the typical (median) local model here. Click a row for all nine.") + "</th><th><span class='sr'>compare</span></th></tr>")
     body = []
     for r in local:
         rid, nm = r["id"], model_name(r)
@@ -194,7 +194,7 @@ long documents and writing. Chat, role-play and images are not scored.</p>
   <input id="find" type="search" placeholder="find a model" aria-label="find a model by name, quant or family" autocomplete="off">
   <div class="cmp"><span class="q" id="cmpn">tick two models to compare</span><a class="btn" id="cmpgo" aria-disabled="true">COMPARE</a></div></div>
  <p class="rlegend"><b>Score</b> = % of Claude Opus 5.5's result on the same tasks · <b>tok/s</b> = how fast it writes (20 reads comfortably; the small number: with 32k tokens already in) ·
- <b>Fits</b> = runs on your box, and how much text it can hold (256k ≈ a 500-page book; a bigger one costs some speed, so more RAM can show a bigger context and a lower tok/s) · <b>▲ ▼</b> = blocks where it is clearly better / worse than most models</p>
+ <b>Fits</b> = runs on your box, and how much text it can hold (256k ≈ a 500-page book; a bigger one costs some speed, so more RAM can show a bigger context and a lower tok/s) · <b>stronger / weaker</b> = the kinds of task where it is clearly better / worse than most local models</p>
  <div class="tw"><table class="rank"><thead>{head}</thead><tbody>{''.join(body)}</tbody></table></div>
  <p class="rnote">Places by score. A dashed line between rows: every model above it is measurably better than the ones below; inside a group the order is not settled yet.
  Click a row for its nine block scores.</p>{_unranked(host, local)}{qline}</section>

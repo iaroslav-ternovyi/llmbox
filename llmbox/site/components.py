@@ -40,8 +40,8 @@ def _stands_out(blocks: dict, med: dict) -> str:
     """The blocks where a model is clearly above or below the typical local model (the median), two of each at most."""
     up, dn, behind = _stand_words(blocks, med)
     if behind:
-        return '<span class="dn">▼ behind on every block</span>'
-    out = ([f'<span class="up">▲ {" · ".join(SHORT[b] for b in up)}</span>'] if up else []) + ([f'<span class="dn">▼ {" · ".join(SHORT[b] for b in dn)}</span>'] if dn else [])
+        return '<span class="dn">weaker on every block</span>'
+    out = ([f'<span class="up">stronger: {", ".join(SHORT[b] for b in up)}</span>'] if up else []) + ([f'<span class="dn">weaker: {", ".join(SHORT[b] for b in dn)}</span>'] if dn else [])
     return "".join(out) or '<span class="ev">even, close to typical</span>'
 
 
