@@ -49,7 +49,9 @@ function scatter(pts) {   // up = closer to Claude Opus, right = faster on the b
   // the series lines are obstacles for names too: sample points along them
   Object.values(series).filter(s => s.length > 1).forEach(s => { for (let i = 1; i < s.length; i++) {
     const [a, b] = [s[i - 1], s[i]]; for (let t = 0.15; t < 0.9; t += 0.1) { const x = X(a.t2 + (b.t2 - a.t2) * t), y = Y(a.vs + (b.vs - a.vs) * t); boxes.push([x - 3, y - 3, x + 3, y + 3]); } } });
-  order.forEach(p => { const x = X(p.t2), y = Y(p.vs), txt = labelOf(p) + (p.vs < ymin ? ` ${Math.round(p.vs)}%` : ""), w = txt.length * 7.7 + 4;   // IBM Plex Mono at 12.5: ~7.5 units a character
+  const top5 = new Set(loc.slice().sort((a, b) => b.vs - a.vs).slice(0, 5).map(p => p.id));
+  order.forEach(p => { if (narrow && !front.has(p.id) && !top5.has(p.id)) return;   // a phone: the best trade-offs and the top five only
+    const x = X(p.t2), y = Y(p.vs), txt = labelOf(p) + (p.vs < ymin ? ` ${Math.round(p.vs)}%` : ""), w = txt.length * 7.7 + 4;   // IBM Plex Mono at 12.5: ~7.5 units a character
     const spots = [[x + 11, y + 4, "start"], [x - 11, y + 4, "end"], [x, y - 13, "middle"], [x, y + 21, "middle"],
                    [x + 10, y - 9, "start"], [x + 10, y + 17, "start"], [x - 10, y - 9, "end"], [x - 10, y + 17, "end"]];
     for (const [tx, ty, an] of spots) {
@@ -65,7 +67,8 @@ function scatter(pts) {   // up = closer to Claude Opus, right = faster on the b
     `<span class="k"><svg width="22" height="10"><line x1="0" y1="5" x2="22" y2="5" stroke="#8b877b" stroke-width="2"/></svg>same model, other quant</span></div>`;
   return legend + `<svg viewBox="0 0 ${W} ${H}" class="scatter2" font-family="IBM Plex Mono" role="img" aria-label="score against speed">${g}` +
     `<text x="${(L + R) / 2}" y="${H - 8}" text-anchor="middle" class="axt">tokens per second on your box →</text>` +
-    `<text transform="translate(16 ${(T + B) / 2}) rotate(-90)" text-anchor="middle" class="axt">↑ share of Claude Opus 5.5's score</text></svg><div class="ctip" hidden></div>`;
+    (narrow ? "" : `<text transform="translate(16 ${(T + B) / 2}) rotate(-90)" text-anchor="middle" class="axt">↑ share of Claude Opus 5.5's score</text>`) +
+    `</svg><div class="ctip" hidden></div>`;
 }
 function hoverScatter(pts) {   // a model's point or name: its details in a tip, the others step back
   const box = document.querySelector("#scatter"), tip = box.querySelector(".ctip"), by = Object.fromEntries((pts || []).map(p => [p.id, p]));

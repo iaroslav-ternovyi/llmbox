@@ -188,7 +188,7 @@ long documents and writing. Chat, role-play and images are not scored.</p>
  <div id="scatter">{_scatter(local)}</div>
  <p class="cap">Each point is a model with the settings it was measured with. Higher = closer to Claude Opus 5.5 on the same tasks;
  further right = faster on the box you picked above. Bright points are the best trade-offs: no other model is both smarter and faster.
- Point at a model for its range and speed, click it for its page. <a href="method.html">How scores work</a></p></section>
+ Point at a model for its range and speed, click (on a phone, tap) it for its page. <a href="method.html">How scores work</a></p></section>
 <section class="panel rankp"><div class="lbl">Ranking <span class="faint">· suite v{esc(suite_version)}{" · preliminary: runs of this version are still coming in" if "-dev" in suite_version else ""}</span></div>
  <div class="rhead"><div class="seg" role="group" aria-label="rank by"><span class="sc">Rank by</span>{presets}</div>
   <input id="find" type="search" placeholder="find a model" aria-label="find a model by name, quant or family" autocomplete="off">
