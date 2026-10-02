@@ -70,13 +70,24 @@ def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = 
          engines: set | None = None) -> list[dict]:
     """cls: this machine's hardware class (llmbox/hwclass.py): where people measured a model on the same class, their
     median replaces the prediction (measured=machines)."""
-    rows = []
+    items = []
     for e in index()["recipes"]:
         try:
             r = rc.load(registry.REGISTRY, e["id"])
-            shape = F.shape_for(r)
+            items.append((e, r, F.shape_for(r)))
         except (OSError, ValueError, SystemExit) as ex:
-            rows.append(dict(e, fits=False, why=f"cannot read the model: {ex}"))
+            items.append((e, None, f"cannot read the model: {ex}"))
+    return rank_rows(hw, cores, items, use, cls, mac, engines)
+
+
+def rank_rows(hw: E.HostSpec, cores: int | None, items: list[tuple], use: str = "all", cls: str | None = None,
+              mac: bool = False, engines: set | None = None) -> list[dict]:
+    """rank() over given models: items are (model list entry, recipe, shape), or (entry, None, why it cannot be read).
+    The site's map ranks its own build's models for each picker entry with it, as `llmbox pick` would there."""
+    rows = []
+    for e, r, shape in items:
+        if r is None:
+            rows.append(dict(e, fits=False, why=shape))
             continue
         # the reference box's measured/predicted ratio is about an NVIDIA card streaming experts over PCIe: not a Mac's
         ref = registry.calibration(r, shape)   # a Mac keeps only its depth: the box's factors are about its card and RAM
