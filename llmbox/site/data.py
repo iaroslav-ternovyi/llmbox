@@ -54,12 +54,15 @@ def gpu_classes() -> dict:
 
 
 def js_shape(sh, kv: str, ctx: int, cal) -> dict:
+    from .. import estimate as E
     """What plan.js reads about a model (the pages' DATA): estimate.plan's inputs from its GGUF shape, the KV type and
     context of its recipe, and its calibration on the reference box. tests/test_parity.py holds the two to each other."""
     return {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
             "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used, "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv),
             "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "swaB": sh.kv_swa_bytes(kv, 1), "swaW": sh.swa_window, "ctx": ctx,
-            "k2": round(cal.k2, 4), "kd": round(cal.kd, 4), "term": cal.term, "deepK": cal.deep_k}
+            "k2": round(cal.k2, 4), "kd": round(cal.kd, 4), "term": cal.term, "deepK": cal.deep_k,
+            # Metal's attention at depth (estimate.metal_attention_s): the work per context token, the cost per unit of it
+            "qF": sh.q_dims()[0], "qS": sh.q_dims()[1], "attPs": E.metal_attention_ps(sh.k_len), "attPsS": E.metal_attention_ps(sh.k_swa_len or sh.k_len)}
 
 
 def shape_data(local: list[dict], host: str = "box") -> dict:

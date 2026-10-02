@@ -28,6 +28,15 @@ RAM_EFFICIENCY = 0.80
 #   CUDA's MoE efficiency with a fixed part between the two public Radeon AI PRO R9700 runs (#19890)
 DECODE = {("cuda", False): (0.90, 0.035), ("cuda", True): (0.72, 0.060), ("metal", False): (0.90, 0.14), ("metal", True): (0.80, 0.10),
           ("vulkan", False): (0.80, 0.022), ("vulkan", True): (0.72, 0.050)}
+# Metal's attention at depth is compute-bound, not bandwidth-bound: each token of context costs every query head's width,
+# in picoseconds per (query head x head width) per context token on an M2 Max (400 GB/s, 38 GPU cores), by head width.
+# Measured 2026-10-02 with llama-bench b11344, flash attention, q8_0 KV: Qwen3.5-9B (width 256) 20.6 at 16k and 32k,
+# Gemma-3-12B (256, windowed layers counted) 19.8, Llama-3.2-3B (128) 3.2, Gemma-4-E2B (512 global, 256 windowed) 21.4;
+# what the KV reads already explain is taken out (tests/fixtures/metal_depth.json). From 256 up the cost per unit levels
+# off; at 128 it is ~6x lower. CUDA shows nothing like it: the box loses 14% at 35k on Qwen3.5-9B, the M2 Max 52% at
+# 32k. Other chips scale by their bandwidth, which tracks their GPU cores within a generation.
+METAL_ATTN_PS = ((128, 3.2), (256, 20.3), (512, 21.4))
+METAL_ATTN_REF_GBS = 400.0
 # older NVIDIA generations reach less of their bandwidth (same tables: Ampere ~0.88, Turing ~0.85, Pascal ~0.6)
 GPU_GENERATION = (("RTX 50", 1.0), ("RTX 40", 1.0), ("RTX PRO", 1.0), ("RTX 30", 0.88), ("RTX A", 0.88), ("A100", 0.88), ("A40", 0.88),
                   ("RTX 20", 0.85), ("TITAN RTX", 0.85), ("T4", 0.85), ("GTX 16", 0.75), ("GTX 10", 0.6), ("TITAN X", 0.6))
@@ -86,6 +95,9 @@ class ModelShape:
     swa_window: int = 0
     kv_full_dim: int = 0              # sum over growing-KV layers of kv_heads * (k_len + v_len), per-layer exact
     kv_swa_dim: int = 0               # the same over the sliding-window layers (their own head count / key length)
+    q_full_dim: int = 0               # sum over growing-KV layers of query heads * key length: attention's work per context
+    q_swa_dim: int = 0                # token (Metal's depth cost); the same over the sliding-window layers
+    k_swa_len: int = 0                # the sliding-window layers' key length where it differs (Gemma 4: 256 vs 512)
     expert_cpu_eff: float = 1.0       # relative CPU dequant speed of the expert quant type (IQ* are slower)
     context_length: int = 0
     total_params: int = 0
@@ -95,6 +107,14 @@ class ModelShape:
     @property
     def is_moe(self) -> bool:
         return self.n_expert > 1 and self.expert_bytes > 0
+
+    def q_dims(self) -> tuple[float, float]:
+        """(q_full_dim, q_swa_dim); a shape read before they were recorded: from its attention layers at a typical 3 query
+        heads per KV head (Llama 3: 3, Qwen3.5: 4, Gemma 3: 2)."""
+        if self.q_full_dim or self.q_swa_dim:
+            return float(self.q_full_dim), float(self.q_swa_dim)
+        per_layer = 3 * self.kv_heads * self.k_len
+        return float((self.attn_layers - self.swa_layers) * per_layer), float(self.swa_layers * per_layer)
 
     def _kv_per_layer(self, kv_type: str) -> float:
         b = KV_BYTES.get(kv_type, 2.0)
@@ -119,7 +139,10 @@ SPARSE_ARCHES = {"qwen4exp", "gemma4", "gemma3n"}
 
 
 def stale(cached: dict) -> bool:
-    return cached.get("arch") in SPARSE_ARCHES and "sparse_bytes" not in cached
+    """A cached shape to read again: one that lacks a field its kind of model needs."""
+    return (cached.get("arch") in SPARSE_ARCHES and "sparse_bytes" not in cached) or \
+        ("q_full_dim" not in cached and bool(cached.get("attn_layers"))) or \
+        ("k_swa_len" not in cached and bool(cached.get("swa_layers")))
 
 
 def analyze(headers: list[GGUFHeader]) -> ModelShape:
@@ -204,6 +227,11 @@ def analyze(headers: list[GGUFHeader]) -> ModelShape:
     if not mla_dim:
         s.kv_full_dim = sum(int(heads[i] or 0) * (k_len + v_len) for i in range(n_layers) if has_attn[i] and not swa[i])
         s.kv_swa_dim = sum(int(heads[i] or 0) * (ks + vs) for i in range(n_layers) if has_attn[i] and swa[i])
+    qh = h0.get("attention.head_count", 0)
+    qh = qh if isinstance(qh, list) else [int(qh or 0)] * n_layers
+    s.q_full_dim = sum(int(qh[i] or 0) * k_len for i in range(min(n_layers, len(qh))) if has_attn[i] and not swa[i])
+    s.q_swa_dim = sum(int(qh[i] or 0) * ks for i in range(min(n_layers, len(qh))) if has_attn[i] and swa[i])
+    s.k_swa_len = ks if ks != k_len else 0
     if win and any(swa[i] and has_attn[i] for i in range(n_layers)):
         s.swa_window, s.swa_layers = win, sum(1 for i in range(n_layers) if swa[i] and has_attn[i])
     embed_params = sum(t.n_elements for t in tensors if t.name == "token_embd.weight" or t.name.startswith("per_layer_token_embd"))
@@ -292,7 +320,8 @@ def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv
     def parts(d: int) -> tuple:
         kv_read = s.kv_bytes_per_token(kv_type) * d + s.kv_swa_bytes(kv_type, d)
         return (cpu_k * per_token_cpu / (hw.ram_bw_gbs * 1e9 * RAM_EFFICIENCY * s.expert_cpu_eff),
-                gpu_k * (per_token_gpu + kv_read) / (hw.vram_bw_gbs * 1e9 * eff * hw.gpu_eff), s.n_layers * ovh / 1000)
+                gpu_k * (per_token_gpu + kv_read) / (hw.vram_bw_gbs * 1e9 * eff * hw.gpu_eff) + metal_attention_s(s, hw, d),
+                s.n_layers * ovh / 1000)
 
     def tps(d: int) -> float:
         return 1 / sum(parts(d))
@@ -300,6 +329,26 @@ def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv
     return Plan(ctx=ctx, slots=slots, kv_type=kv_type, fits=fits, reason=reason, gpu_expert_frac=gpu_frac,
                 vram_used_mib=vram_used, ram_used_mib=ram_used, decode_tps=tps(0),
                 decode_tps_at_depth=tps(min(depth, ctx)), depth=min(depth, ctx), parts=parts(min(depth, ctx)))
+
+
+def metal_attention_ps(head_width: int) -> float:
+    """METAL_ATTN_PS at a head width: geometric between the measured widths, the nearest measured one outside them."""
+    t = METAL_ATTN_PS
+    if head_width <= t[0][0]:
+        return t[0][1]
+    for (w0, p0), (w1, p1) in zip(t, t[1:]):
+        if head_width <= w1:
+            return p0 * (p1 / p0) ** ((head_width - w0) / (w1 - w0))
+    return t[-1][1]
+
+
+def metal_attention_s(s: ModelShape, hw: HostSpec, d: int) -> float:
+    """Seconds a token spends in attention `d` tokens into the context on a Mac, beyond reading the KV cache."""
+    if hw.backend != "metal" or d <= 0:
+        return 0.0
+    qf, qs = s.q_dims()
+    chip = METAL_ATTN_REF_GBS / (hw.vram_bw_gbs * hw.gpu_eff) * 1e-12
+    return chip * (metal_attention_ps(s.k_len) * qf * d + metal_attention_ps(s.k_swa_len or s.k_len) * qs * min(d, s.swa_window or d))
 
 
 def max_context(s: ModelShape, hw: HostSpec, kv_type: str = "q8_0", ubatch: int = 2048, floor_frac: float = 0.95) -> int:

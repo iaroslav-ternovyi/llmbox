@@ -13,8 +13,11 @@ function plan(sh, hw, ctx, depth, buf = 2100, cpuK = 1, gpuK = 1) {   // buf: co
   // Vulkan (AMD): 80% + 0.022 ms dense (seven Radeon cards and a Ryzen AI Max+), MoE as CUDA's with 0.05 ms
   const [eff, ovh] = hw.mac ? (sh.moe ? [0.8, 0.1] : [0.9, 0.14]) : hw.backend === "vulkan" ? (sh.moe ? [0.72, 0.05] : [0.8, 0.022])
                      : sh.moe ? [0.72, 0.06] : [0.9, 0.035];
+  // a Mac's attention at depth is compute-bound (estimate.metal_attention_s): per context token, the model's query work
+  // at its head width's cost, measured on a 400 GB/s M2 Max and scaled by the chip's bandwidth
+  const att = d => hw.backend === "metal" && d > 0 && sh.attPs ? 400 / (hw.vrambw * (hw.gen || 1)) * 1e-12 * (sh.attPs * sh.qF * d + (sh.attPsS || sh.attPs) * sh.qS * Math.min(d, sh.swaW || d)) : 0;
   const tps = d => 1 / (cpuK * perCpu / (hw.rambw * 1e9 * 0.8 * sh.cpuEff) + gpuK * (perGpu + sh.kvB * d + (sh.swaB || 0) * (d ? Math.min(sh.swaW, d) : sh.swaW)) / (hw.vrambw * 1e9 * eff * (hw.gen || 1))
-                        + sh.layers * ovh / 1000);
+                        + att(d) + sh.layers * ovh / 1000);
   return { fits, gf, ramUsed, buf, vram: Math.min(hw.vram, gpuFixed + (sh.moe ? sh.exp * gf * mib : sh.embed * mib)), t2: tps(2000), td: tps(Math.min(depth, ctx)) };
 }
 function sameClassAs(hw, r) { return hw.gpu === r.gpu && Math.abs(hw.rambw - r.rambw) / r.rambw < 0.15 && hw.ram >= r.ram * 0.9; }

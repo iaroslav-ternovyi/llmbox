@@ -66,17 +66,24 @@ def shape_for(r: dict, host=None) -> E.ModelShape:
     m = r["model"]
     fname = os.path.basename(m.get("file") or m.get("path") or "")
     cp = os.path.join(SHAPES, fname + ".json")
-    if fname and os.path.exists(cp) and not E.stale(json.load(open(cp))):
-        return E.ModelShape(**json.load(open(cp)))
+    cached = json.load(open(cp)) if fname and os.path.exists(cp) else None
+    if cached and not E.stale(cached):
+        return E.ModelShape(**cached)
     sh = None
     if m.get("hf_repo") and m.get("file"):
         from . import hf
-        f = next((f for f in hf.list_gguf(m["hf_repo"]) if f.name == m["file"] or os.path.basename(f.name) == fname), None)
-        if f:
-            sh = E.analyze(hf.read_headers(f))
+        try:
+            f = next((f for f in hf.list_gguf(m["hf_repo"]) if f.name == m["file"] or os.path.basename(f.name) == fname), None)
+            if f:
+                sh = E.analyze(hf.read_headers(f))
+        except (OSError, ValueError, SystemExit):
+            if not cached:   # offline with an older reading: use it
+                raise
     if sh is None and host is not None and m.get("path"):
         from . import speed
         sh = speed.shape_on_host(host, m["path"])
+    if sh is None and cached:   # an older reading (it lacks a newer field, which has a fallback) beats none
+        return E.ModelShape(**cached)
     if sh is None:
         raise SystemExit(f"{r['id']}: cannot read the model header (no cache, not on Hugging Face, no host copy)")
     os.makedirs(SHAPES, exist_ok=True)

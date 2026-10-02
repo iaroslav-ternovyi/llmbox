@@ -27,7 +27,10 @@
     "expert_cpu_eff": 1.0,
     "context_length": 262144,
     "total_params": 8953803264,
-    "active_params": 7936684544
+    "active_params": 7936684544,
+    "q_full_dim": 32768,
+    "q_swa_dim": 0,
+    "k_swa_len": 0
    },
    "kv_type": "q8_0",
    "ctx": 262144,
@@ -64,7 +67,10 @@
     "expert_cpu_eff": 1.0,
     "context_length": 131072,
     "total_params": 11766034176,
-    "active_params": 10759155456
+    "active_params": 10759155456,
+    "q_full_dim": 32768,
+    "q_swa_dim": 163840,
+    "k_swa_len": 0
    },
    "kv_type": "q8_0",
    "ctx": 65536,
@@ -101,7 +107,10 @@
     "expert_cpu_eff": 1.0,
     "context_length": 262144,
     "total_params": 25233142046,
-    "active_params": 3084329742
+    "active_params": 3084329742,
+    "q_full_dim": 40960,
+    "q_swa_dim": 102400,
+    "k_swa_len": 256
    },
    "kv_type": "q8_0",
    "ctx": 262144,
@@ -138,7 +147,10 @@
     "expert_cpu_eff": 1.0,
     "context_length": 262144,
     "total_params": 35505251456,
-    "active_params": 2946429568
+    "active_params": 2946429568,
+    "q_full_dim": 40960,
+    "q_swa_dim": 0,
+    "k_swa_len": 0
    },
    "kv_type": "f16",
    "ctx": 262144,
@@ -175,7 +187,10 @@
     "expert_cpu_eff": 1.0,
     "context_length": 131072,
     "total_params": 20914757184,
-    "active_params": 3608307264
+    "active_params": 3608307264,
+    "q_full_dim": 49152,
+    "q_swa_dim": 49152,
+    "k_swa_len": 0
    },
    "kv_type": "q8_0",
    "ctx": 131072,
@@ -212,7 +227,10 @@
     "expert_cpu_eff": 1.0,
     "context_length": 524288,
     "total_params": 37444792020,
-    "active_params": 5438713556
+    "active_params": 5438713556,
+    "q_full_dim": 196608,
+    "q_swa_dim": 0,
+    "k_swa_len": 0
    },
    "kv_type": "q4_0",
    "ctx": 131072,
@@ -249,7 +267,10 @@
     "expert_cpu_eff": 1.0,
     "context_length": 262144,
     "total_params": 34660610688,
-    "active_params": 2946429568
+    "active_params": 2946429568,
+    "q_full_dim": 40960,
+    "q_swa_dim": 0,
+    "k_swa_len": 0
    },
    "kv_type": "q8_0",
    "ctx": 262144,

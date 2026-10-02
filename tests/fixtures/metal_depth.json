@@ -1,0 +1,152 @@
+{
+ "about": "llama-bench b11344 on an Apple M2 Max (38-core GPU, 32 GB), -ngl 99 -fa 1 -ctk q8_0 -ctv q8_0 -p 0 -n 32/64 -d <depth>, 2026-10-02: decode tok/s by context depth. The shapes are estimate.analyze of each file's header.",
+ "models": {
+  "Llama-3.2-3B-Instruct-Q4_K_M": {
+   "shape": {
+    "arch": "llama",
+    "n_layers": 28,
+    "n_mtp_layers": 0,
+    "attn_layers": 28,
+    "kv_heads": 8,
+    "k_len": 128,
+    "v_len": 128,
+    "mla_kv_dim": 0,
+    "n_expert": 0,
+    "n_expert_used": 0,
+    "total_bytes": 2011527424,
+    "expert_bytes": 0,
+    "nonexpert_bytes": 1688322304,
+    "embed_bytes": 323205120,
+    "sparse_bytes": 0,
+    "mtp_bytes": 0,
+    "recurrent_state_bytes": 0,
+    "swa_layers": 0,
+    "swa_window": 0,
+    "kv_full_dim": 57344,
+    "kv_swa_dim": 0,
+    "q_full_dim": 86016,
+    "q_swa_dim": 0,
+    "k_swa_len": 0,
+    "expert_cpu_eff": 1.0,
+    "context_length": 131072,
+    "total_params": 3212749888,
+    "active_params": 2818747456
+   },
+   "tg": {
+    "0": 114.03,
+    "8192": 70.3,
+    "32768": 42.97
+   }
+  },
+  "Qwen3.5-9B-UD-Q4_K_XL": {
+   "shape": {
+    "arch": "qwen35",
+    "n_layers": 32,
+    "n_mtp_layers": 0,
+    "attn_layers": 8,
+    "kv_heads": 4,
+    "k_len": 256,
+    "v_len": 256,
+    "mla_kv_dim": 0,
+    "n_expert": 0,
+    "n_expert_used": 0,
+    "total_bytes": 5955110912,
+    "expert_bytes": 0,
+    "nonexpert_bytes": 5382981632,
+    "embed_bytes": 572129280,
+    "sparse_bytes": 0,
+    "mtp_bytes": 0,
+    "recurrent_state_bytes": 51904512,
+    "swa_layers": 0,
+    "swa_window": 0,
+    "kv_full_dim": 16384,
+    "kv_swa_dim": 0,
+    "q_full_dim": 32768,
+    "q_swa_dim": 0,
+    "k_swa_len": 0,
+    "expert_cpu_eff": 1.0,
+    "context_length": 262144,
+    "total_params": 8953803264,
+    "active_params": 7936684544
+   },
+   "tg": {
+    "0": 45.94,
+    "8192": 30.55,
+    "16384": 29.95,
+    "32768": 22.01
+   }
+  },
+  "gemma-3-12b-it-UD-Q4_K_XL": {
+   "shape": {
+    "arch": "gemma3",
+    "n_layers": 48,
+    "n_mtp_layers": 0,
+    "attn_layers": 48,
+    "kv_heads": 8,
+    "k_len": 256,
+    "v_len": 256,
+    "mla_kv_dim": 0,
+    "n_expert": 0,
+    "n_expert_used": 0,
+    "total_bytes": 7425661824,
+    "expert_bytes": 0,
+    "nonexpert_bytes": 6599706624,
+    "embed_bytes": 825955200,
+    "sparse_bytes": 0,
+    "mtp_bytes": 0,
+    "recurrent_state_bytes": 0,
+    "swa_layers": 40,
+    "swa_window": 1024,
+    "kv_full_dim": 32768,
+    "kv_swa_dim": 163840,
+    "q_full_dim": 32768,
+    "q_swa_dim": 163840,
+    "k_swa_len": 0,
+    "expert_cpu_eff": 1.0,
+    "context_length": 131072,
+    "total_params": 11766034176,
+    "active_params": 10759155456
+   },
+   "tg": {
+    "0": 30.75,
+    "32768": 16.59
+   }
+  },
+  "gemma-4-E2B-it-Q4_K_M": {
+   "shape": {
+    "arch": "gemma4",
+    "n_layers": 35,
+    "n_mtp_layers": 0,
+    "attn_layers": 35,
+    "kv_heads": 1,
+    "k_len": 512,
+    "v_len": 512,
+    "mla_kv_dim": 0,
+    "n_expert": 0,
+    "n_expert_used": 0,
+    "total_bytes": 3089345632,
+    "expert_bytes": 0,
+    "nonexpert_bytes": 1248046176,
+    "embed_bytes": 226492416,
+    "sparse_bytes": 1614807040,
+    "mtp_bytes": 0,
+    "recurrent_state_bytes": 0,
+    "swa_layers": 28,
+    "swa_window": 512,
+    "kv_full_dim": 7168,
+    "kv_swa_dim": 14336,
+    "q_full_dim": 28672,
+    "q_swa_dim": 57344,
+    "k_swa_len": 256,
+    "expert_cpu_eff": 1.0,
+    "context_length": 131072,
+    "total_params": 4647450147,
+    "active_params": 1895986723
+   },
+   "tg": {
+    "0": 71.48,
+    "32768": 28.29
+   }
+  }
+ }
+}
