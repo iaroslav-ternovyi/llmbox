@@ -182,8 +182,16 @@ document.querySelectorAll(".rank tr.mr").forEach(tr => tr.addEventListener("clic
   if (e.target.closest("a, label, input")) return;
   const pr = document.querySelector(`tr.prof[data-for="${tr.dataset.rid}"]`), open = pr.hidden;
   pr.hidden = !open; tr.classList.toggle("open", open); tr.querySelector(".exp").setAttribute("aria-expanded", String(open)); }));
+const RAM0 = $("#ram").innerHTML;   // the RAM sizes for a PC; a Mac offers only the sizes its chip is sold with
+function ramFor(g) {
+  const was = parseInt($("#ram").value) || 64, sizes = g && g[6];
+  $("#ram").innerHTML = sizes ? sizes.map(s => `<option value="${s}">${s} GB</option>`).join("") : RAM0;
+  $("#ram").value = String(sizes ? macMem(sizes, was) : was);
+  if (!$("#ram").value) $("#ram").value = "64";
+}
 function readBox() {
   const g = DATA.gpus.find(x => x[0] === $("#gpu").value);
+  ramFor(g);
   ["#ram", "#bw", "#bwn"].forEach(s => $(s).disabled = !g);
   if (!g) { hwNow = null; $("#boxnote").textContent = "speeds measured on this box"; try { localStorage.removeItem("llmbox-box"); } catch (e) {} history.replaceState(null, "", location.pathname); render(); return; }
   const bw = parseFloat($("#bwn").value) || parseFloat($("#bw").value);

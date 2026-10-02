@@ -8,6 +8,7 @@ import sqlite3
 from .. import report
 from .. import suite as _suite
 from ..estimate import gpu_generation
+from ..hwclass import AMD_CARDS, APUS, MAC_MEMORY, MACS, NVIDIA_CARDS
 from ..hosts import HOME
 
 
@@ -31,43 +32,14 @@ def queue_state() -> list[dict]:
     return out
 
 
-# common GPUs: VRAM (MiB) and memory bandwidth (GB/s), for the "your box" picker; by generation, then size. The 8 GB
-# cards are here because mixture-of-experts models keep their experts in RAM: a 35B-A3B runs on them.
-GPUS = [("RTX 2080 Ti 11 GB", 11264, 616),
-        ("RTX 3060 12 GB", 12288, 360), ("RTX 3060 Ti 8 GB", 8192, 448), ("RTX 3070 8 GB", 8192, 448), ("RTX 3070 Ti 8 GB", 8192, 608),
-        ("RTX 3080 10 GB", 10240, 760), ("RTX 3080 12 GB", 12288, 912), ("RTX 3080 Ti 12 GB", 12288, 912), ("RTX 3090 24 GB", 24576, 936),
-        ("RTX 3090 Ti 24 GB", 24576, 1008),
-        ("RTX 4060 8 GB", 8188, 272), ("RTX 4060 Ti 8 GB", 8188, 288), ("RTX 4060 Ti 16 GB", 16380, 288), ("RTX 4070 12 GB", 12282, 504),
-        ("RTX 4070 Super 12 GB", 12282, 504), ("RTX 4070 Ti 12 GB", 12282, 504), ("RTX 4070 Ti Super 16 GB", 16376, 672),
-        ("RTX 4080 16 GB", 16376, 717), ("RTX 4080 Super 16 GB", 16376, 736), ("RTX 4090 24 GB", 24564, 1008),
-        ("RTX 5060 8 GB", 8151, 448), ("RTX 5060 Ti 8 GB", 8151, 448), ("RTX 5060 Ti 16 GB", 16311, 448), ("RTX 5070 12 GB", 12227, 672),
-        ("RTX 5070 Ti 16 GB", 16303, 896), ("RTX 5080 16 GB", 16303, 960), ("RTX 5090 32 GB", 32607, 1792),
-        ("RTX PRO 6000 96 GB", 97887, 1792)]
-# AMD cards (llmbox runs the Vulkan build of llama.cpp there): (name, VRAM MiB, GB/s)
-AMD = [("RX 6700 XT 12 GB", 12272, 384), ("RX 6800 XT 16 GB", 16368, 512), ("RX 6900 XT 16 GB", 16368, 512),
-       ("RX 7600 8 GB", 8176, 288), ("RX 7600 XT 16 GB", 16368, 288), ("RX 7700 XT 12 GB", 12272, 432), ("RX 7800 XT 16 GB", 16368, 624),
-       ("RX 7900 GRE 16 GB", 16368, 576), ("RX 7900 XT 20 GB", 20464, 800), ("RX 7900 XTX 24 GB", 24560, 960),
-       ("RX 9060 XT 16 GB", 16304, 320), ("RX 9070 16 GB", 16304, 640), ("RX 9070 XT 16 GB", 16304, 640),
-       ("Radeon AI PRO R9700 32 GB", 32624, 640)]
-# AMD Ryzen AI Max (Strix Halo): unified memory like a Mac, but Linux and the Vulkan build - (name, 0, GB/s, "apu", largest GB)
-APUS = [("Ryzen AI Max+ 395", 0, 256, "apu", 128), ("Ryzen AI Max 390", 0, 256, "apu", 64)]
+# the hardware picker's entries live in hwclass (NVIDIA_CARDS, AMD_CARDS, APUS, MACS): the CLI maps a machine to one too
+GPUS, AMD = NVIDIA_CARDS, AMD_CARDS
 
 
-# Apple Silicon: unified memory, so no VRAM/RAM split - (name, 0, memory bandwidth GB/s, "mac", largest memory GB).
-# Bandwidth: Apple's specs (M5 Pro 307, M5 Max 460 / 614: apple.com newsroom 2026-03). Nothing is measured on a Mac here.
-MACS = [("Mac M1", 0, 68, "mac", 16), ("Mac M1 Pro", 0, 200, "mac", 32), ("Mac M1 Max", 0, 400, "mac", 64), ("Mac M1 Ultra", 0, 800, "mac", 128),
-        ("Mac M2", 0, 100, "mac", 24), ("Mac M2 Pro", 0, 200, "mac", 32), ("Mac M2 Max", 0, 400, "mac", 96), ("Mac M2 Ultra", 0, 800, "mac", 192),
-        ("Mac M3", 0, 100, "mac", 24), ("Mac M3 Pro", 0, 150, "mac", 36), ("Mac M3 Max 30-core GPU", 0, 300, "mac", 96),
-        ("Mac M3 Max 40-core GPU", 0, 400, "mac", 128), ("Mac M3 Ultra", 0, 819, "mac", 512),
-        ("Mac M4", 0, 120, "mac", 32), ("Mac M4 Pro", 0, 273, "mac", 64), ("Mac M4 Max 32-core GPU", 0, 410, "mac", 36),
-        ("Mac M4 Max 40-core GPU", 0, 546, "mac", 128), ("Mac M5", 0, 153, "mac", 32), ("Mac M5 Pro", 0, 307, "mac", 64),
-        ("Mac M5 Max 32-core GPU", 0, 460, "mac", 128), ("Mac M5 Max 40-core GPU", 0, 614, "mac", 128)]
-
-
-# the generation factor plan.js reads: NVIDIA g[3], Mac g[5] (g[3] is "mac" there)
+# the generation factor plan.js reads: NVIDIA g[3], Mac g[5] (g[3] is "mac" there); a Mac's memory sizes g[6]
 # AMD: g[3] the generation factor, g[4] "vulkan"; Ryzen AI Max: g[5] the factor (1)
 GPUS = ([(n, v, b, gpu_generation(n)) for n, v, b in GPUS] + [(n, v, b, 1.0, "vulkan") for n, v, b in AMD]
-        + [m + (gpu_generation(m[0]),) for m in MACS] + [a + (1.0,) for a in APUS])
+        + [m + (gpu_generation(m[0]), MAC_MEMORY[m[0]]) for m in MACS] + [a + (1.0,) for a in APUS])
 
 
 RAM_KINDS = [("DDR4-3200", 40), ("DDR5-5600", 60), ("DDR5-6400", 75), ("DDR5-8000", 88)]

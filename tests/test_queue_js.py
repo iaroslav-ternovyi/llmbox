@@ -40,7 +40,8 @@ assert v["received"]["line"] == "Your result is in the queue · 12 ahead · live
 assert v["accepted"]["line"] == "Your result is checked · live at about 14:35. This page fills in by itself.", v["accepted"]
 assert "Publishing is delayed" in v["delayed"]["line"] and "live at" not in v["delayed"]["line"], v["delayed"]
 assert v["published"] == {"page": True}, v["published"]
-assert v["rejected"]["done"] is True and v["rejected"]["line"].startswith("This result was not accepted: <img"), v["rejected"]   # shown as text
+assert v["rejected"]["done"] is True and v["rejected"]["title"] == "This result was not published" \
+    and v["rejected"]["line"].startswith("It was not accepted: <img"), v["rejected"]   # shown as text
 assert v["unknown"] is None
 # the page sets text only: no innerHTML anywhere in the script
 assert "innerHTML" not in open(JS).read()

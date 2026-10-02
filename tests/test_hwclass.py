@@ -44,4 +44,31 @@ assert H.gpu_chip("Intel(R) Arc(TM) A770 Graphics") == "arc-a770"
 
 fp = {"gpu": "NVIDIA GeForce RTX 5070", "vram_gib": 11.9, "ram_read_gbs": 59.0}
 assert H.of_host(fp) == "rtx-5070-12g|ram-45-65|cuda"
+
+# the picker entry a machine belongs to (the site's map cell, card page and feed): every card is found from what its
+# own driver reports, RAM speed and backend do not matter; Macs by chip, and by GPU cores where the picker splits them
+for name, mib, _bw in H.NVIDIA_CARDS + H.AMD_CARDS:
+    k = H.key(name, mib, 60, vendor="amd" if H.entry_kind(name) == "amd" else "nvidia")
+    assert H.display_class(k) == name, (name, k, H.display_class(k))
+assert H.display_class(H.of_host(fp)) == "RTX 5070 12 GB"
+assert H.display_class(H.key("NVIDIA GeForce RTX 4070 Ti SUPER", 16376, 90)) == "RTX 4070 Ti Super 16 GB"
+assert H.display_class(H.key("Apple M2 Max", 32 * 1024, vendor="apple", apple_gpu_cores=38)) == "Mac M2 Max"
+assert H.display_class(H.key("Apple M3 Max", 128 * 1024, vendor="apple", apple_gpu_cores=40)) == "Mac M3 Max 40-core GPU"
+assert H.display_class(H.key("Apple M3 Max", 96 * 1024, vendor="apple", apple_gpu_cores=30)) == "Mac M3 Max 30-core GPU"
+assert H.display_class(H.key("Apple M3 Max", 96 * 1024, vendor="apple")) is None   # split by cores, cores unknown: other
+assert H.display_class(H.key("AMD Radeon 8060S Graphics", 96 * 1024, 200, vendor="amd")) == "Ryzen AI Max+ 395"
+for other in (H.key("NVIDIA GeForce RTX 3090", 24576, 60, count=2), H.key("", 0, 60, vendor=""),
+              H.key("NVIDIA GeForce RTX 4090 Laptop GPU", 16376, 60), H.key("Intel(R) Arc(TM) A770 Graphics", 16384, 60, vendor="intel")):
+    assert H.display_class(other) is None, other   # several cards, no card, a card the picker does not list: "Other machines"
+assert H.display_class("") is None and H.display_class("nonsense") is None
+
+# 65 entries, each with a fixed address; a Mac's sizes are the ones Apple sells, and a cell takes the one nearest 64 GB
+names = [n for n, *_ in H.NVIDIA_CARDS + H.AMD_CARDS + H.APUS + H.MACS]
+assert len(names) == 65 and set(H.SLUGS) == set(names) and len(set(H.SLUGS.values())) == 65
+assert H.SLUGS["RTX 4070 Ti Super 16 GB"] == "rtx-4070-ti-super-16gb" and H.SLUGS["Ryzen AI Max+ 395"] == "ryzen-ai-max-plus-395"
+assert set(H.MAC_MEMORY) == {m[0] for m in H.MACS} and all(max(H.MAC_MEMORY[m[0]]) == m[4] for m in H.MACS)
+assert (H.mac_memory("Mac M3 Ultra"), H.mac_memory("Mac M3 Max 30-core GPU"), H.mac_memory("Mac M2 Max"), H.mac_memory("Mac M1"),
+        H.mac_memory("Mac M4 Max 32-core GPU")) == (96, 36, 64, 16, 36)
+assert H.mac_memory("Mac M3 Pro", 27) == 18   # a tie goes to the smaller
+assert [H.entry_kind(n) for n in ("RTX 3060 12 GB", "RX 7600 8 GB", "Mac M1", "Ryzen AI Max 390")] == ["card", "amd", "mac", "chip"]
 print("all passed")

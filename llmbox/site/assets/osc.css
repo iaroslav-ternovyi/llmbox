@@ -9,6 +9,7 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}   /* the hidden attribute wins over any display a class sets */
 body{background:var(--bg);color:var(--ink);font:14px/1.5 "IBM Plex Mono",monospace;
   background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:120px 120px}
 a{color:var(--amber);text-decoration:none}

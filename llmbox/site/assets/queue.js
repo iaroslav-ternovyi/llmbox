@@ -4,7 +4,7 @@
 // once it is out. Text from the server goes in as text, never as markup.
 function queueView(st) {   // a status reply (null: no such run) -> {line} to show, {page} once published, or null
   if (!st) return null;   // an address nobody sent: the page stays the ordinary "not found"
-  if (st.status === "rejected") return { line: `This result was not accepted: ${st.reason || "it did not pass the checks"}.`, done: true };
+  if (st.status === "rejected") return { title: "This result was not published", line: `It was not accepted: ${st.reason || "it did not pass the checks"}.`, done: true };
   if (st.published) return { page: true };
   if (st.delayed) return { line: "Your result is checked. Publishing is delayed; it goes out with the next publish. This page fills in by itself." };
   const at = st.live_at ? new Date(st.live_at) : null;
@@ -38,11 +38,12 @@ if (typeof document !== "undefined") (function () {
       show("Your result was just published; the page appears here in a moment.");
       return tries++ < 10 && setTimeout(check, 30000);
     }
-    show(v.line);
+    show(v.line, v.title);
     if (!v.done) setTimeout(check, 60000);
   }
-  function show(text) {
+  function show(text, title) {
     document.getElementById("notfound").hidden = true;
+    if (title) box.querySelector("h1").textContent = title;
     box.hidden = false;
     line.textContent = text;
   }

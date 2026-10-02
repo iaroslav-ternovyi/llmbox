@@ -31,8 +31,11 @@ function forBox(sh, hw) {   // as llmbox fit: the recipe's context if it fits, e
   return Object.assign(p, { ctx, t2: k(sh.term, sh.k2).t2, td: k(sh.term, sh.kd).td });
 }
 function gpuKind(g) { return g[3] === "mac" ? "mac" : g[3] === "apu" ? "apu" : g[4] === "vulkan" ? "amd" : "nv"; }   // a picker entry's kind
+function macMem(sizes, gb) {   // as hwclass.mac_memory: the size the chip is sold with nearest gb, a tie to the smaller
+  return sizes.reduce((a, s) => Math.abs(s - gb) < Math.abs(a - gb) || (Math.abs(s - gb) === Math.abs(a - gb) && s < a) ? s : a);
+}
 function boxFrom(g, ramGB, rambw) {   // a picker entry and the RAM fields -> what plan() needs
-  if (g[3] === "mac" || g[3] === "apu") { const mem = Math.min(ramGB, g[4]) * 1024, mac = g[3] === "mac";
+  if (g[3] === "mac" || g[3] === "apu") { const mem = (g[6] ? macMem(g[6], ramGB) : Math.min(ramGB, g[4])) * 1024, mac = g[3] === "mac";
     // macOS lets the GPU use ~2/3 (small Macs) to 3/4 of unified memory; a Ryzen AI Max up to 96 of its 128 GB
     const vram = mem * (mac && mem < 36864 ? 0.67 : 0.75);
     return { name: g[0], gpu: g[0], mac, apu: !mac, uni: true, backend: mac ? "metal" : "vulkan", mem,
