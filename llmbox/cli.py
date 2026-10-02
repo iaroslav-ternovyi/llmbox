@@ -619,6 +619,23 @@ def cmd_serve(a: argparse.Namespace) -> None:
     server.serve(a.data, port=a.port, bind=a.bind, on_accept=(lambda ids: _rebuild_site(a.rebuild, a.deploy)) if a.rebuild else None)
 
 
+def cmd_audit(a: argparse.Namespace) -> None:
+    """Every check of the saved results and the built site; exit 1 on an error (llmbox/audit.py)."""
+    from . import audit
+    if a.backup:
+        print(f"backup: {audit.backup(a.backup_host)}")
+    found = audit.run(a.host, os.path.expanduser(a.site) if a.site else None)
+    if a.json:
+        print(json.dumps(found, indent=1))
+    else:
+        print(audit.report_text([f for f in found if a.notes or f["level"] != "info"]))
+        notes = sum(1 for f in found if f["level"] == "info")
+        if notes and not a.notes:
+            print(f"({notes} note(s) more: --notes)")
+    if any(f["level"] == "error" for f in found):
+        raise SystemExit(1)
+
+
 def cmd_moderate(a: argparse.Namespace) -> None:
     """The operator's side of comments: what readers reported, and hide / show / delete / ban."""
     from . import server
@@ -1012,7 +1029,7 @@ COMMAND_GROUPS = [
     ("Pick and run a model on your box", ["start", "doctor", "update", "bug", "host", "pick", "scout", "fit", "recipe", "install", "run", "stop", "tune", "optimize"]),
     ("Measure it", ["test", "bench", "queue", "speed", "probe", "loops", "traces"]),
     ("Share and compare", ["login", "whoami", "profile", "submit", "logout", "forget", "serve", "moderate"]),
-    ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
+    ("Scores, results and the site", ["report", "audit", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
     ("Develop the test", ["validate", "snapshot"]),
 ]
 
@@ -1267,6 +1284,15 @@ def main(argv: list[str] | None = None) -> None:
     sv.add_argument("--deploy", help="after a rebuild, run this to publish the site ({site} = the folder), e.g. wrangler pages deploy")
     sv.add_argument("--force-rebuild", action="store_true", help="with --ingest-once: rebuild (and deploy) even when nothing new came in")
     sv.set_defaults(fn=cmd_serve)
+
+    au = command("audit", "check every saved result and the built site: unfinished or untuned tests, speed probes, errors, settings, backups, one speed per model")
+    au.add_argument("--host", default="box", help="the reference box whose results are checked")
+    au.add_argument("--site", help="also check a built site folder (e.g. ~/.llmbox/site)")
+    au.add_argument("--backup", action="store_true", help="first copy results, traces, runs and recipes to --backup-host")
+    au.add_argument("--backup-host", default="box")
+    au.add_argument("--notes", action="store_true", help="also list notes (e.g. runs without saved thinking)")
+    au.add_argument("--json", action="store_true")
+    au.set_defaults(fn=cmd_audit)
 
     mo = command("moderate", "the intake's comments: list what readers reported; hide (with a reason), show, delete; ban an account")
     mo.add_argument("action", choices=["list", "hide", "show", "delete", "ban", "unban"])

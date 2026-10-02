@@ -376,7 +376,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
     tiles = (f"<div><span class='sc'>Score</span><b>{_pct(vs)}</b><span>of Claude Opus 5.5 · range {rlo:.0f}–{rhi:.0f}</span>"
              f"<span>#{pl} of {len(rs)}{f' · statistically tied with #{lo}–#{hi}' if lo != hi else ''}</span></div>"
              f"<div id='vspd'><span class='sc'>Speed</span><b>{f'{tps:.0f}' if tps else '—'}<small> tok/s</small></b>"
-             f"<span class='sub'>short chat{f' · {float(deep):.0f} at 32k of context' if deep != '-' else ''}</span><span class='src'>measured on our test PC</span></div>"
+             f"<span class='sub'>short chat{f' · {float(deep):.0f} at 32k of context' if deep != '-' else ''}</span><span class='src'>{"measured on our test PC" if rec.get("speed_note") else "measured during its quality run on our test PC (no separate speed test)"}</span></div>"
              f"<div id='vfit'><span class='sc'>Fits</span><b>{'✓ ' + str(round(shp['ctx'] / 1024)) + 'k' if shp.get('ctx') else '—'}</b>"
              f"<span class='sub'>context on our test PC</span><span class='src'>{esc(ref_box)}</span></div>"
              f"<div><span class='sc'>Finished</span><b>{(100 * (1 - (n_cut + n_loop) / len(pool)) if pool else 100):.0f}%</b>"

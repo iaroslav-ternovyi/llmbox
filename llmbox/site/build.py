@@ -140,6 +140,13 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
                         '<p class="q" id="qline" aria-live="polite" style="margin-top:8px"></p></div></section>', ("pages.css",), ("queue.js",), base=True))
     from .publish import finish
     written += finish(out_dir, written, images, noindex)   # canonical, social preview, CSP per page; sitemap.xml, robots.txt, _headers
+    try:   # the built site checked as a whole (llmbox/audit.py): printed, never blocking a publish
+        from .. import audit
+        for f in audit.check_site(out_dir):
+            if f["level"] != "info" and "newer than the built site" not in f["what"]:
+                print(f"site check: {f['level']}: {f['what']}")
+    except Exception as e:   # noqa: BLE001 - a check must not stop the build
+        print(f"site check failed: {type(e).__name__}: {e}")
     # pages of earlier builds this one did not write (a run that no longer counts, a renamed recipe): only the site's own
     # kinds of file, so a folder with other things in it keeps them
     keep = {os.path.relpath(p, out_dir) for p in written}
@@ -198,8 +205,14 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
             box.append({"kind": "speed", "host": p.get("host") or {}, "recipe": {"id": rid}, "model": p.get("model") or {},
                         "created": p.get("created", ""), "speed": {"decode_tps": sp["decode_tps"], "prefill_tps": sp.get("prefill_tps"),
                         "depth": [{"depth": int(report._depth_k(k) * 1000), "decode_tps": d.get("decode_tps")} for k, d in (sp.get("by_depth") or {}).items()]}})
-        else:
-            box += [r for r in allbox if r.get("kind") == "speed" and ours(r) and (r.get("recipe") or {}).get("id") == rid]
+        else:   # no probe: the figure of its newest quality run, as the home and model pages show it (with_probe falls back)
+            q = max((r for r in allbox if r.get("kind") == "suite" and (r.get("recipe") or {}).get("id") == rid),
+                    key=lambda r: r.get("created", ""), default=None)   # the same newest run, with or without a figure ("—" there too)
+            if q and ((q.get("summary") or {}).get("speed") or {}).get("decode_tps"):
+                sp = q["summary"]["speed"]
+                box.append({"kind": "speed", "host": q.get("host") or {}, "recipe": {"id": rid}, "model": q.get("model") or {},
+                            "created": q.get("created", ""), "speed": {"decode_tps": sp["decode_tps"], "prefill_tps": sp.get("prefill_tps"),
+                            "depth": [{"depth": int(report._depth_k(k) * 1000), "decode_tps": d.get("decode_tps")} for k, d in (sp.get("by_depth") or {}).items()]}})
     # people's accepted records: each carries the submission it came in, and passes the intake's check as it is today
     # (a file accepted under an older, looser check must not stop every build)
     community = [r for _p, r in report.results.files("community") if isinstance(r, dict) and (r.get("submission") or {}).get("id")]
