@@ -82,7 +82,8 @@ def new_page(rs: list[dict], data: dict, host: str, news: str = "") -> str | Non
         rel = [(rid, (r.get("vs_ref") or 0)) for r in rs for rid in [r["id"]] if rid in chains and roots & set(chains[rid][1:]) and rid not in {m["id"] for m in ms}]
         seen_on = first_seen.get(key)
         rows.append({"repo": c["repo"], "rid": C.recipe_id(c["repo"]), "released": c.get("released") or c.get("created"),
-                     "fresh": bool(seen_on and seen_on >= week_ago),
+                     # NEW THIS WEEK: released in the last seven days (when our watcher first saw it says nothing to a visitor)
+                     "fresh": bool((c.get("released") or c.get("created") or "")[:10] >= week_ago),
                      "dl": c["downloads"], "total": round(sh.total_params / 1e9, 1), "active": round(sh.active_params / 1e9, 1),
                      "kind": lin["kind"], "of": lin.get("of"), "rel": rel, "guess": expected(c["repo"]), "col": family(getattr(sh, "arch", None))[1],
                      "measured": [mrow(m) for m in ms], "bytes0": c["bytes"], "sh": shp(sh),

@@ -13,7 +13,9 @@ $("#nax").innerHTML = axl;
 function pick(r) {   // the file this box runs well: 4-bit first, then the largest 3- or 2-bit file; 32k context or more
   let first = null;
   for (const f of r.ladder) {
-    const k = f.bytes / r.bytes0, sh = Object.assign({}, r.sh, { nonexp: r.sh.nonexp * k, exp: r.sh.exp * k, embed: r.sh.embed * k });
+    // scaled to this file's real size: a shape read from a split file's first part can count a fraction of the weights
+    // (a 97.5 GB file whose parts summed to 68.7 GB "fitted" a 73 GB PC)
+    const k = f.bytes / ((r.sh.nonexp + r.sh.exp + r.sh.embed) || r.bytes0), sh = Object.assign({}, r.sh, { nonexp: r.sh.nonexp * k, exp: r.sh.exp * k, embed: r.sh.embed * k });
     const p = forBox(sh, box);
     if (p.fits && !first) first = { f, p };
     if (p.fits && p.ctx >= 32768) return { f, p };
@@ -42,11 +44,11 @@ function render() {
   const list = rows.filter(r => (!on.has("fit") || r.fits) && on.has(r.kind === "release" || r.kind === "fine-tune" || r.kind === "uncensored" ? r.kind : "release")).sort((a, b) => (k(b) - k(a)) || ((b.dl || 0) - (a.dl || 0)));
   $("#count").textContent = list.length;
   $("#rows").innerHTML = list.map((r, i) => { const name = r.repo.split("/")[1].replace(/-GGUF(-MTP)?$/i, "");
-    const sub = [ago(r.released), `${r.total}B${r.active < r.total ? `, ${r.active}B active` : ""}`, r.of ? `${r.kind} of ${r.of.split("/").pop()}` : r.kind === "release" ? "" : r.kind, r.dl ? `${fmtDl(r.dl)} downloads` : ""].filter(Boolean).join(" · ");
+    const sub = [ago(r.released), `${r.total}B${r.active < 0.7 * r.total ? `, ${r.active}B active` : ""}`, r.of ? `${r.kind} of ${r.of.split("/").pop()}` : r.kind === "release" ? "" : r.kind, r.dl ? `${fmtDl(r.dl)} downloads` : ""].filter(Boolean).join(" · ");
     return `<div class="nr2${r.fits ? "" : " nofit"}"><div class="mw">${marker(r)}<span class="m">${r.m ? `<a href="recipe-${r.m.rid}.html" style="color:inherit">${name}</a>` : name}${r.fresh ? '<span class="tag" title="first listed here in the last 7 days">NEW THIS WEEK</span>' : ""}</span>` +
       `<span class="qt">${sub} · <a href="https://huggingface.co/${r.repo}" rel="noopener">HF</a>${r.rel.length ? `<br>fine-tunes measured: ${r.rel.map(x => `<a href="recipe-${x[0]}.html">${x[0]}</a> ${Math.round(x[1])}%`).join(", ")}` : ""}</span></div>` +
       scoreCell(r) +
-      `<div class="sp r">${r.fits ? `<b>${r.onRef ? Math.round(r.t2) : cap(r.t2)}</b><small>${r.td ? (r.onRef ? "" : "~") + Math.round(r.td) + " at 32k" : ""}${r.onRef ? " · measured" : ""}</small>` : "—"}</div>` +
+      `<div class="sp r">${r.fits ? `<b>${r.onRef ? Math.round(r.t2) : cap(r.t2)}</b><small>${r.td ? (r.onRef ? Math.round(r.td) : cap(r.td)) + " at 32k" : ""}${r.onRef ? " · measured" : ""}</small>` : "—"}</div>` +
       `<div class="fl">${r.fits ? `✓ ${r.c.f.quant} · ${(r.c.f.bytes / 1e9).toFixed(1)} GB<small>${Math.round(r.c.p.ctx / 1024)}k context${r.low ? ` · <span class="low">${bits(r.c.f.quant)}-bit: expect a lower score</span>` : ""}</small>` : `<span class="no">✗ too big</span><small>${r.c.f.quant} · ${(r.c.f.bytes / 1e9).toFixed(1)} GB</small>`}</div>` +
       (r.m ? `<a class="btn go" href="recipe-${r.m.rid}.html">RESULTS →</a>` : `<button class="btn go" data-i="${i}">HOW TO TEST ▾</button>`) +
       (r.m ? "" : `<div class="cmds" id="c${i}" hidden>Draft the recipe for this file, download it, tune the speed, run the 40-minute adaptive test:` +
