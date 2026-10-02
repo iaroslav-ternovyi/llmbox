@@ -63,3 +63,4 @@
 .talk .crules{margin-top:14px;max-width:900px}
 @media (max-width:760px){.var .vruns th:nth-child(4),.var .vruns td:nth-child(4),.var .vruns th:nth-child(6),.var .vruns td:nth-child(6){display:none}
  .vb{min-height:44px;min-width:56px}.vcopy{min-height:44px}.lnk{min-height:44px;padding:0 4px}}
+@media (max-width:760px){.runs th:nth-child(2),.runs td:nth-child(2),.runs th:nth-child(4),.runs td:nth-child(4){display:none}}   /* run, box, score, speed fit a phone */

@@ -31,3 +31,4 @@ pre.cmd{background:var(--input);border:1px solid var(--line);padding:12px 14px;f
 .feed .fv{color:var(--soft);margin-left:6px}.feed .when{display:block;font-size:11px;color:var(--faint)}
 /* a page's opening sentence under its title */
 .hd .lede{margin-top:10px;max-width:68ch;font-size:16px;line-height:1.55;color:var(--soft)}.hd .lede b{color:var(--ink);font-weight:500}
+@media (max-width:760px){.title h1,.hd h1{font-size:26px;line-height:1.15}}   /* as the home title on a phone */
