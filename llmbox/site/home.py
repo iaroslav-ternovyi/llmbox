@@ -161,8 +161,8 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     data = dict(_chart_data(sd, local, clouds, ref, ranks, names0), site=SITE_URL)
     body = f"""
 <h1 class="q1">What should I run on my box?</h1>
-<p class="lede">AI models you can run on your own computer, graded on real work and timed on real PCs. Pick your graphics card or Mac:
-the best model for it, how fast it answers, how close it gets to Claude, and one line that installs and starts it.</p>
+<p class="lede">Pick your graphics card or Mac. You get the local AI model that runs best on it, how fast it answers, how close
+it gets to Claude, and one line that installs it. Every model is graded on real work and timed on real PCs.</p>
 <p class="trust">{_trust(local)}</p>
 {NEWBIE}
 <section class="boxbar" id="box"><span class="sc">Your box</span>
