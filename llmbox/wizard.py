@@ -56,7 +56,9 @@ def _fresh_registry(out) -> None:
 def _machine_line(prof: dict) -> str:
     fp = results.host_fingerprint(prof)
     label = hwclass.label(hwclass.of_host(fp))
-    return label if fp.get("apple_gpu_cores") is not None else f"{label} · {prof['hw']['ram_mib'] / 1024:.0f} GB RAM"   # a Mac's label has its memory
+    from .db import _RAM_SIZES   # the RAM as sold (64 GB), not what the system reports (61.4 GiB): the site says it so
+    ram = min(_RAM_SIZES, key=lambda x: abs(x - prof["hw"]["ram_mib"] / 1024))
+    return label if fp.get("apple_gpu_cores") is not None else f"{label} · {ram} GB RAM"   # a Mac's label has its memory
 
 
 def _newer(out) -> None:

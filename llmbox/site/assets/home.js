@@ -1,7 +1,7 @@
 // the home page: the chart, the ranking by use, the box picker, compare ticks
 const $ = s => document.querySelector(s);
-const fmt = v => v.toFixed(0);
-const kfmt = c => `${Math.round(c / 1024)}k`;
+const fmt = v => String(rnd(v));
+const kfmt = c => `${rnd(c / 1024)}k`;
 function sameClass(hw) { const r = DATA.ref; return hw.gpu === r.gpu && Math.abs(hw.rambw - r.rambw) / r.rambw < 0.15 && hw.ram >= r.ram * 0.9; }
 function weighted(b, w) { let s = 0, n = 0; for (const k in w) { s += (b[k] || 0) * w[k]; n += w[k]; } return n ? s / n : 0; }
 function scatter(pts) {   // up = closer to Claude Opus, right = faster on the box picked. Names sit at their points.
@@ -26,7 +26,7 @@ function scatter(pts) {   // up = closer to Claude Opus, right = faster on the b
   // the cloud models: reference lines, named in the right margin (labels pushed apart when close)
   let lastY = -99;
   cloud.forEach(c => { const y = Y(c.vs), ly = Math.max(y + 4, lastY + 15); lastY = ly;
-    g += `<line x1="${L}" y1="${y}" x2="${R}" y2="${y}" class="ref"/><text x="${R + 8}" y="${ly}" class="refl">${narrow ? c.name.replace("Claude ", "") : c.name} <tspan class="refv">${Math.round(c.vs)}%</tspan></text>`; });
+    g += `<line x1="${L}" y1="${y}" x2="${R}" y2="${y}" class="ref"/><text x="${R + 8}" y="${ly}" class="refl">${narrow ? c.name.replace("Claude ", "") : c.name} <tspan class="refv">${rnd(c.vs)}%</tspan></text>`; });
   // one model in several variants (quants): a line through them, slowest to fastest
   const series = {};
   loc.forEach(p => (series[p.model] = series[p.model] || []).push(p));
@@ -44,19 +44,33 @@ function scatter(pts) {   // up = closer to Claude Opus, right = faster on the b
   // names next to their points: the first free spot of eight around it, the models on the frontier first
   const hit = (b) => b[0] < L + 2 || b[2] > R + 2 || b[1] < T - 14 || b[3] > B + 2 || boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
   const sq = q => (q || "").replace(/^UD-/, "");
-  const labelOf = p => { const s = series[p.model]; if (!s || s.length < 2) return p.model;
-    return s.reduce((a, b) => (b.vs > a.vs ? b : a)) === p ? `${p.model} · ${sq(p.quant)}` : sq(p.quant); };
+  // a model's name rides on the first of its points that finds room (the best one first), its other quants carry the quant
+  // only; a long name that finds no room tries its short form (K2-Horizon-MoVA-36B-A4B -> K2-Horizon) before none
+  const named = new Set(), short = m => m.split("-").slice(0, 2).join("-");
+  const labelsOf = p => { const s = series[p.model], q = s && s.length > 1 ? sq(p.quant) : "";
+    if (named.has(p.model)) return [q];
+    const full = q ? `${p.model} · ${q}` : p.model, sh = q ? `${short(p.model)} · ${q}` : short(p.model);
+    return sh === full ? [full] : [full, sh]; };
   // the series lines are obstacles for names too: sample points along them
   Object.values(series).filter(s => s.length > 1).forEach(s => { for (let i = 1; i < s.length; i++) {
     const [a, b] = [s[i - 1], s[i]]; for (let t = 0.15; t < 0.9; t += 0.1) { const x = X(a.t2 + (b.t2 - a.t2) * t), y = Y(a.vs + (b.vs - a.vs) * t); boxes.push([x - 3, y - 3, x + 3, y + 3]); } } });
   const top5 = new Set(loc.slice().sort((a, b) => b.vs - a.vs).slice(0, 5).map(p => p.id));
   order.forEach(p => { if (narrow && !front.has(p.id) && !top5.has(p.id)) return;   // a phone: the best trade-offs and the top five only
-    const x = X(p.t2), y = Y(p.vs), txt = labelOf(p) + (p.vs < ymin ? ` ${Math.round(p.vs)}%` : ""), w = txt.length * 7.7 + 4;   // IBM Plex Mono at 12.5: ~7.5 units a character
-    const spots = [[x + 11, y + 4, "start"], [x - 11, y + 4, "end"], [x, y - 13, "middle"], [x, y + 21, "middle"],
-                   [x + 10, y - 9, "start"], [x + 10, y + 17, "start"], [x - 10, y - 9, "end"], [x - 10, y + 17, "end"]];
-    for (const [tx, ty, an] of spots) {
-      const x0 = an === "start" ? tx : an === "end" ? tx - w : tx - w / 2, b = [x0, ty - 11, x0 + w, ty + 3];
-      if (!hit(b)) { boxes.push(b); g += `<text x="${tx}" y="${ty}" text-anchor="${an}" class="lb${front.has(p.id) ? " on" : ""}" data-id="${p.id}">${txt}</text>`; return; }
+    const x = X(p.t2), y = Y(p.vs);
+    // eight spots around the point; a point under others (Qwen3.6 behind Bonsai) gets its name further out, on a thin line
+    const ring = k => [[x + 11 * k, y + 4, "start"], [x - 11 * k, y + 4, "end"], [x, y - 13 * k, "middle"], [x, y + 21 * k, "middle"],
+                       [x + 10 * k, y - 9 * k, "start"], [x + 10 * k, y + 17 * k, "start"], [x - 10 * k, y - 9 * k, "end"], [x - 10 * k, y + 17 * k, "end"]]
+      .map(s => s.concat(k));
+    const spots = [...ring(1), ...ring(2.4), ...ring(3.8)];
+    for (const lab of labelsOf(p)) {
+      const txt = lab + (p.vs < ymin ? ` ${rnd(p.vs)}%` : ""), w = txt.length * 7.7 + 4;   // IBM Plex Mono at 12.5: ~7.5 units a character
+      for (const [tx, ty, an, k] of spots) {
+        const x0 = an === "start" ? tx : an === "end" ? tx - w : tx - w / 2, b = [x0, ty - 11, x0 + w, ty + 3];
+        if (!hit(b)) { boxes.push(b); if (lab.startsWith(short(p.model))) named.add(p.model);
+          const lx = an === "start" ? tx - 2 : an === "end" ? tx + 2 : tx, ly = ty < y ? ty + 3 : ty - 11;
+          if (k > 1) g += `<line x1="${x}" y1="${y}" x2="${lx}" y2="${ly}" class="ll" stroke="#8b877b" stroke-width="1" opacity=".6"/>`;
+          g += `<text x="${tx}" y="${ty}" text-anchor="${an}" class="lb${front.has(p.id) ? " on" : ""}" data-id="${p.id}">${esc(txt)}</text>`; return; }
+      }
     }
   });
   const famsUsed = [...new Set(loc.map(p => p.fam))];
@@ -76,9 +90,9 @@ function hoverScatter(pts) {   // a model's point or name: its details in a tip,
   box.querySelectorAll(".pt, .lb").forEach(el => {
     el.addEventListener("mouseenter", () => { const p = by[el.dataset.id]; if (!p) return;
       box.classList.add("hov"); box.querySelectorAll(`[data-id="${p.id}"]`).forEach(x => x.classList.add("on2"));
-      const k = p.vs / p.cap, lo = Math.round(p.ci[0] * k), hi = Math.min(100, Math.round(p.ci[1] * k));
-      tip.innerHTML = `<b>${p.name}</b><span>${p.fam} · ${p.kind}</span><span>score <em>${Math.round(p.vs)}%</em> of Claude Opus (95%: ${lo}-${hi})</span>` +
-        `<span>speed <em>${p.pred ? "~" : ""}${Math.round(p.t2)} tok/s</em>${p.pred ? " predicted for your box" : " measured"}${p.td ? ` · ${Math.round(p.td)} deep in context` : ""}</span>`;
+      const k = p.vs / p.cap, lo = rnd(p.ci[0] * k), hi = Math.min(100, rnd(p.ci[1] * k));
+      tip.innerHTML = `<b>${p.name}</b><span>${p.fam} · ${p.kind}</span><span>score <em>${rnd(p.vs)}%</em> of Claude Opus (95%: ${lo}-${hi})</span>` +
+        `<span>speed <em>${p.pred ? "~" : ""}${rnd(p.t2)} tok/s</em>${p.pred ? " predicted for your box" : " measured"}${p.td ? ` · ${rnd(p.td)} deep in context` : ""}</span>`;
       const r = box.getBoundingClientRect(), e = el.getBoundingClientRect();
       tip.hidden = false; tip.style.left = Math.min(r.width - 280, Math.max(0, e.left - r.left + 18)) + "px"; tip.style.top = (e.top - r.top - 8) + "px"; });
     el.addEventListener("mouseleave", () => { box.classList.remove("hov"); box.querySelectorAll(".on2").forEach(x => x.classList.remove("on2")); tip.hidden = true; });
@@ -104,10 +118,10 @@ function scoreCell(p, ax) {   // a dot at the score, a line over its 95% range; 
   if (p.vs == null || !ax) return "—";   // no reference model on this scale: no percent
   const c = p.cloud ? "#8b877b" : (Object.fromEntries(DATA.families)[p.fam] || "#9AA0A6");
   let g = ""; for (let v = ax.min; v <= 100; v += ax.step) g += `<s style="left:${ax.X(v)}%"></s>`;
-  if (p.cloud) return `<div class="fp"><div class="trk">${g}<b class="rf" style="left:${ax.X(p.vs)}%"></b></div><span class="num">${Math.round(p.vs)}%</span></div>`;
+  if (p.cloud) return `<div class="fp"><div class="trk">${g}<b class="rf" style="left:${ax.X(p.vs)}%"></b></div><span class="num">${rnd(p.vs)}%</span></div>`;
   const k = p.vs / p.cap, lo = p.ci[0] * k, hi = Math.min(100, p.ci[1] * k);
-  return `<div class="fp" title="95% range ${Math.round(lo)}–${Math.round(hi)}%"><div class="trk">${g}<i style="left:${ax.X(lo)}%;width:${ax.X(hi) - ax.X(lo)}%;background:${c}"></i>` +
-    `<b style="left:${ax.X(p.vs)}%;background:${c}"></b>${p.vs < ax.min ? `<em>◂ ${Math.round(p.vs)}%</em>` : ""}</div><span class="num">${Math.round(p.vs)}%</span></div>`;
+  return `<div class="fp" title="95% range ${rnd(lo)}–${rnd(hi)}%"><div class="trk">${g}<i style="left:${ax.X(lo)}%;width:${ax.X(hi) - ax.X(lo)}%;background:${c}"></i>` +
+    `<b style="left:${ax.X(p.vs)}%;background:${c}"></b>${p.vs < ax.min ? `<em>◂ ${rnd(p.vs)}%</em>` : ""}</div><span class="num">${rnd(p.vs)}%</span></div>`;
 }
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function drawPick(pts) {   // the answer first: the best model for the picked box, and the one line that installs it
@@ -126,16 +140,16 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
   const official = best === top && top.kind === "uncensored" ?
     pool.filter(p => p !== top && p.kind !== "uncensored" && rng(p)[1] >= rng(top)[0] && p.vs >= top.vs - 5 && long(p) >= 0.9 * long(top)) : [];
   if (official.length) best = official.reduce((a, b) => (b.vs > a.vs ? b : a));
-  const why = official.length ? `not measurably apart from the best score (${esc(top.model || top.name)}, an uncensored remix), and the official release` :
-    best === top && first !== top ? `the best score among the models that write at reading speed here (20+ tok/s); ${esc(first.model || first.name)} scores higher at ~${Math.round(first.t2)} tok/s` :
+  const why = official.length ? `the official release, tied with the top score (${esc(top.model || top.name)}, an uncensored remix)` :
+    best === top && first !== top ? `the best score among the models that write at reading speed here (20+ tok/s); ${esc(first.model || first.name)} scores higher at ~${rnd(first.t2)} tok/s` :
     best === top ? "the best score among the models that fit" + (usable.length ? "" : "; nothing here reaches 20 tok/s, so it suits jobs you leave running more than a chat") :
-    `${Math.round(top.vs - best.vs)} points below the best score, not measurably apart from it, and ${(long(best) / long(top)).toFixed(1)}× as fast here`;
+    `${rnd(top.vs - best.vs)} points below the best score, not measurably apart from it, and ${(long(best) / long(top)).toFixed(1)}× as fast here`;
   const cmd = `curl --proto '=https' --tlsv1.2 -fsSL ${DATA.site}/install.sh | sh -s -- ${best.id}`;   // words.CURL
   const use = document.querySelector(".seg button.on");
   $("#pick").innerHTML = `<div class="pk"><div><span class="sc">Best for this box${preset ? " · " + esc(use ? use.textContent.toLowerCase() : "") : ""}</span>` +
     `<h2><a href="recipe-${best.id}.html">${esc(best.model || best.name)}</a> <small>${esc(best.quant || "")}</small>${best.kind === "uncensored" ? ' <span class="tag">uncensored remix</span>' : ""}</h2>` +
-    `<p><b>${Math.round(best.vs)}%</b> of Claude Opus · <b>${best.pred ? "~" : ""}${Math.round(best.t2)}</b> tokens/s` +
-    (best.td ? `, ${Math.round(best.td)} at 32k of context` : "") +
+    `<p><b>${rnd(best.vs)}%</b> of Claude Opus · <b>${best.pred ? "~" : ""}${rnd(best.t2)}</b> tokens/s` +
+    (best.td ? `, ${rnd(best.td)} at 32k of context` : "") +
     ` · ${why}</p></div>` +
     `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
     (/Windows/.test(navigator.userAgent) ? `<p class="win">On Windows the easiest way is <a href="recipe-${best.id}.html#run">LM Studio or Ollama with these settings</a>; the line above needs WSL2.</p>` : "") +

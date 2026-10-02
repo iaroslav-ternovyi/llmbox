@@ -58,8 +58,7 @@ def choose(ok: list[dict]) -> tuple[dict, str]:
                and long(x) >= 0.9 * long(top)]
         if alt:
             b = max(alt, key=lambda x: x["use_score"])
-            return b, (f"not measurably apart from the best score ({top.get('name') or top['id']}, an uncensored remix), "
-                       "and the official release")
+            return b, f"the official release, tied with the top score ({top.get('name') or top['id']}, an uncensored remix)"
     if skipped:
         return top, (f"the best score among the models that write at reading speed here ({USABLE_TPS:.0f}+ tok/s); "
                      f"{skipped.get('name') or skipped['id']} scores higher at ~{skipped['t2']:.0f} tok/s")

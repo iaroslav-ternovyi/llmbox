@@ -225,6 +225,24 @@ def task_flags(rec: dict) -> dict:
     return out
 
 
+FEW = 5   # scored answers below which a run shows no score of its own (one 0 left the prior's 55% on its page)
+
+
+def stuck(rows: list[dict], flags) -> dict:
+    """Answers that did not finish, each counted once under its first cause: thinking looped, ran out of thinking room,
+    ran out of time. flags(row) -> its task_flags entry. The model page, the compare page and a run page say the same."""
+    out = {"loop": 0, "cut": 0, "time": 0}
+    for x in rows:
+        f = flags(x) or {}
+        k = "loop" if f.get("loop") else "cut" if f.get("cut") else "time" if x.get("zero") == "time" or "timed out" in str(x.get("error") or "") else None
+        if k:
+            out[k] += 1
+    out["total"] = out["loop"] + out["cut"] + out["time"]
+    out["words"] = ", ".join(w for w in (f"{out['cut']} ran out of thinking room" if out["cut"] else "", f"{out['loop']} looped" if out["loop"] else "",
+                                         f"{out['time']} ran out of time" if out["time"] else "") if w)
+    return out
+
+
 def _vs(rec: dict, ref: dict | None) -> float | None:
     return round(100 * rec["summary"]["capability"] / ref["summary"]["capability"], 1) if ref else None
 

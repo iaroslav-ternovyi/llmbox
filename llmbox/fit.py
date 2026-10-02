@@ -139,10 +139,10 @@ def calibration(r: dict, shape: E.ModelShape, ref_host: str, at_k: int | None = 
     allrecs = results.load_all(ref_host)
     recs = [x for x in allrecs if (x.get("recipe") or {}).get("id") == r["id"]
             and ((x.get("summary") or {}).get("speed") or {}).get("decode_tps")]
-    if not recs:
-        return Calibration()
     # the newest probe when there is one, as the site's speeds (report.with_probe): one method for every model
-    rec = report.latest_probe(allrecs, r["id"]) or max(recs, key=lambda x: x.get("created", ""))
+    rec = report.speed_probe(allrecs, r["id"], ref_host) or max(recs, key=lambda x: x.get("created", ""), default=None)
+    if not rec:
+        return Calibration()
     sp = rec["summary"]["speed"]
     hw = hosts.spec(hosts.load(ref_host))
     ctx, kv = r["placement"]["ctx"] or shape.context_length, r["placement"]["kv_type"]
@@ -153,7 +153,9 @@ def calibration(r: dict, shape: E.ModelShape, ref_host: str, at_k: int | None = 
     kd, t2 = solve(r, shape, hw, dv, int(dk * 1000), term=term or None, ctx=ctx, kv_type=kv) if dv else (k2, term)
     if t2 != term:   # one form for both figures: the deep one could not be solved on the same side
         kd = k2
-    return Calibration(k2, kd, int(dk), f"calibrated on 1 run on {ref_host} ({rec.get('created', '')[:10]})",
+    # the figure is predicted at at_k (what the site labels it), whatever depth the factor was measured at: Ling, measured
+    # at 96k only, showed its 96k speed as "at 32k" on every other box
+    return Calibration(k2, kd, int(at_k or dk), f"calibrated on 1 run on {ref_host} ({rec.get('created', '')[:10]})",
                        {"decode_tps": sp["decode_tps"], "deep_tps": dv, "by_depth": {str(int(round(k))): v for k, v in sorted(deep)}}, term)
 
 

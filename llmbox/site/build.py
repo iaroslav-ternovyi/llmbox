@@ -8,7 +8,7 @@ import statistics
 from .. import report
 from .compare import compare_app, compare_data
 from .components import _cmp_href
-from .data import _model_now, load_records, optimize_records, shape_data, task_flags
+from .data import _model_now, load_records, optimize_records, shape_data, stuck, task_flags
 from .hardware import hardware_page
 from .home import home
 from .layout import _page, copy_assets
@@ -17,7 +17,7 @@ from .model import recipe_page
 from .new import new_page
 from .run import run_page
 from .stats import rank_ranges
-from .words import _kind, BLOCKS, esc, family, set_variants
+from .words import _kind, BLOCKS, esc, family, ram_gb, set_variants
 
 
 def build(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick") -> list[str]:
@@ -39,7 +39,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     recs = load_records(host, suite_version, tier)
     local_run, ref = recs["local"], recs["ref"]
     allrecs = report.results.load_all(host)
-    local = {rid: report.with_probe(rec, allrecs) for rid, rec in local_run.items()}   # speed re-measured after tune; run pages keep their own
+    local = {rid: report.with_probe(rec, allrecs, host) for rid, rec in local_run.items()}   # speed re-measured after tune; run pages keep their own
     ranks = rank_ranges(rs)
     opts = optimize_records(host)
     order = sorted(local, key=lambda k: (-local[k]["summary"]["capability"], k))   # ties by id: recipe pages and the home page name pairs the same way
@@ -51,7 +51,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     med = {b: statistics.median(v) for b in BLOCKS if (v := [r["blocks"][b] for r in rs if r["blocks"].get(b) is not None])}
     look = {r["id"]: (family((data["recipes"].get(r["id"]) or {}).get("arch"))[1], _kind(r.get("hf_repo"))) for r in rs}
     ref_hw = data["ref"]
-    ref_box = f'{ref_hw["gpu"]} + {round(ref_hw["ram"] / 1024)} GB RAM'
+    ref_box = f'{ref_hw["gpu"]} + {ram_gb(ref_hw["ram"] / 1024)} GB RAM'
     from .. import bench
     suite_files = [(pth, x) for pth, x in report.results.files(host) if x.get("kind") == "suite"]
     from .data import community_speeds
@@ -70,7 +70,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
         made = {x.get("_run") for x in pool}
         runs = [bench.rescore(dict(x, _path=pth)) for pth, x in suite_files if (x.get("recipe") or {}).get("id") == rid and x.get("created") in made] or [local_run[rid]]
         fl = {x.get("created"): task_flags(x) for x in runs}
-        rel[rid] = (sum(1 for x in pool if ((fl.get(x.get("_run")) or {}).get(x["id"]) or {}).get("cut") or ((fl.get(x.get("_run")) or {}).get(x["id"]) or {}).get("loop")), len(pool))
+        rel[rid] = (stuck(pool, lambda x: (fl.get(x.get("_run")) or {}).get(x["id"]))["total"], len(pool))
         counted = {c: sum(1 for x in pool if x.get("_run") == c) for c in made}
         from .. import irt as _irt
         skipped = [(x, why) for _p, x in suite_files if (x.get("recipe") or {}).get("id") == rid and (why := _irt.unfinished(x))]
@@ -115,7 +115,19 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
     from .install import account_page, install_page, privacy_page, terms_page
     from ..submit import DEFAULT_SERVER
-    w("install.html", install_page())
+    # the install page's sample session: what `llmbox` says on our test PC today (the board's pick for its card), so
+    # the example never names a model or a number the site no longer shows
+    ent = next((e for n, e in board["entries"].items() if n.startswith(ref_hw["gpu"] + " ")), None)
+    bst = (ent or {}).get("best")
+    row = next((r for r in rs if bst and r["id"] == bst["rid"]), None)
+    example = None
+    if bst and row:
+        from .stats import _range_pct
+        mm = next((x for x in ent.get("models") or [] if x["rid"] == bst["rid"]), {})
+        example = {"machine": f'{bst.get("group_label") or ref_hw["gpu"]} · {ram_gb(ref_hw["ram"] / 1024)} GB RAM', "name": bst["name"],
+                   "score": row.get("vs_ref"), "range": _range_pct(row), "t2": bst.get("measured") or bst.get("predicted"),
+                   "td": mm.get("td"), "ctx": mm.get("ctx"), "why": bst.get("why"), "size": (data["recipes"].get(bst["rid"]) or {}).get("size")}
+    w("install.html", install_page(example))
     w("account.html", account_page(DEFAULT_SERVER.rstrip("/")))
     w("privacy.html", privacy_page())
     w("terms.html", terms_page())
@@ -199,7 +211,7 @@ def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: d
     allbox = [r for _p, r in report.results.files(host)]
     box = []
     for rid in files:
-        p = report.latest_probe(allbox, rid)
+        p = report.speed_probe(allbox, rid, host)
         if p:
             sp = p["summary"]["speed"]
             box.append({"kind": "speed", "host": p.get("host") or {}, "recipe": {"id": rid}, "model": p.get("model") or {},

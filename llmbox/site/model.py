@@ -6,10 +6,10 @@ import os
 
 from .. import report
 from .components import _cmp_href, _depth_bars, _fp_html, _groups_html, _groups_legend, _marker, _pct, _stands_sentence
-from .data import GPUS
+from .data import FEW, GPUS, stuck
 from .layout import _page
 from .stats import _axis_of, _range_pct
-from .words import _ago, _human, _lineage, _name_of, _quant, _size, CURL, esc, model_name, task_name, variant, SITE_URL
+from .words import _ago, _human, _lineage, _name_of, _quant, _size, CURL, esc, model_name, ram_gb, task_name, variant, SITE_URL
 
 
 # flags only the reference box needs (its port manager, RAM budget, core count, load mode)
@@ -306,8 +306,8 @@ def _runs_panel(runs: list[dict], ref: dict | None, counted: dict, skipped: list
         su = x.get("suite") or {}
         rows.append(f"<tr><td class='l'><a href='run-{x['id'][:8]}.html'>{x['id'][:8]}</a><br><span class='q'>{_ago(x.get('created', ''))}</span></td>"
                     f"<td class='l'>v{esc(report.version_of(su))}<br><span class='q'>{'adaptive, ' + str(su.get('budget') or 40) + ' min' if su.get('adaptive') else 'every task once' if not su.get('blocks') else 'blocks: ' + ', '.join(su['blocks'])}</span></td>"
-                    f"<td class='l cfg'>{esc((h.get('gpu') or '').replace('NVIDIA GeForce ', ''))} · {h.get('ram_gib')} GB<br><span class='q'>llama.cpp {esc(rt.get('llama_cpp_build') or '?')}</span></td>"
-                    f"<td>{counted.get(x.get('created'), 0)}</td><td>{_pct(vs)}</td><td>{(s.get('speed') or {}).get('decode_tps') or 0:.0f}</td></tr>")
+                    f"<td class='l cfg'>{esc((h.get('gpu') or '').replace('NVIDIA GeForce ', ''))} · {ram_gb(h.get('ram_gib'))} GB<br><span class='q'>{esc(rt.get('engine') or ((x.get('recipe') or {}).get('runtime') or {}).get('engine') or 'llama.cpp')}{' ' + esc(rt['llama_cpp_build']) if rt.get('llama_cpp_build') else ''}</span></td>"
+                    f"<td>{counted.get(x.get('created'), 0)}</td><td>{_pct(vs) if counted.get(x.get('created'), 0) >= FEW else '<span class=q title=\'too few answers for a score of this run alone\'>—</span>'}</td><td>{f'{t:.0f}' if (t := (s.get('speed') or {}).get('decode_tps')) else '—'}</td></tr>")
     return ('<section class="panel runs"><div class="lbl">Runs</div><div class="tw"><table><tr><th class="l">RUN</th><th class="l">SUITE</th><th class="l">BOX</th>'
             '<th>ANSWERS<br><span class="faint">counted</span></th><th>THIS RUN<br><span class="faint">% of Opus</span></th><th>TOK/S</th></tr>' + "".join(rows)
             + "".join(f"<tr class='nc'><td class='l'>{esc(_ago(x.get('created', '')))}</td><td class='l' colspan='5'>not counted, an unfinished test: "
@@ -346,8 +346,8 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
     pool, fl = ctx["pool_rows"], ctx["flags"]
     # reliability and lost tasks over the pooled answers, each with its own run's thinking flags
     fx = lambda x: (fl.get(x.get("_run")) or {}).get(x["id"], {})
-    n_cut = sum(1 for x in pool if fx(x).get("cut"))
-    n_loop = sum(1 for x in pool if fx(x).get("loop"))
+    st = stuck(pool, fx)
+    n_stuck = st["total"]
     lost = {}
     for x in sorted(pool, key=lambda x: x["score"]):
         if x["score"] < 0.99:
@@ -376,12 +376,12 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
     tiles = (f"<div><span class='sc'>Score</span><b>{_pct(vs)}</b><span>of Claude Opus 5.5 · range {rlo:.0f}–{rhi:.0f}</span>"
              f"<span>#{pl} of {len(rs)}{f' · statistically tied with #{lo}–#{hi}' if lo != hi else ''}</span></div>"
              f"<div id='vspd'><span class='sc'>Speed</span><b>{f'{tps:.0f}' if tps else '—'}<small> tok/s</small></b>"
-             f"<span class='sub'>short chat{f' · {float(deep):.0f} at 32k of context' if deep != '-' else ''}</span><span class='src'>{"measured on our test PC" if rec.get("speed_note") else "measured during its quality run on our test PC (no separate speed test)"}</span></div>"
+             f"<span class='sub'>short chat{f' · {float(deep):.0f} at 32k of context' if deep != '-' else ''}</span><span class='src'>{f"measured on our test PC as {esc(rec['speed_as'])}: the same file and settings" if rec.get("speed_as") else "measured on our test PC" if rec.get("speed_note") else "measured during its quality run on our test PC (no separate speed test)"}</span></div>"
              f"<div id='vfit'><span class='sc'>Fits</span><b>{'✓ ' + str(round(shp['ctx'] / 1024)) + 'k' if shp.get('ctx') else '—'}</b>"
              f"<span class='sub'>context on our test PC</span><span class='src'>{esc(ref_box)}</span></div>"
-             f"<div><span class='sc'>Finished</span><b>{(100 * (1 - (n_cut + n_loop) / len(pool)) if pool else 100):.0f}%</b>"
-             f"<span>{len(pool) - n_cut - n_loop} of {len(pool)} answers"
-             + (f"; {n_cut + n_loop} got stuck ({', '.join(x for x in (f'{n_cut} ran out of thinking room' if n_cut else '', f'{n_loop} looped' if n_loop else '') if x)})" if n_cut + n_loop else ", none got stuck")
+             f"<div><span class='sc'>Finished</span><b>{(100 * (1 - n_stuck / len(pool)) if pool else 100):.0f}%</b>"
+             f"<span>{len(pool) - n_stuck} of {len(pool)} answers"
+             + (f"; {n_stuck} got stuck ({st['words']})" if n_stuck else ", none got stuck")
              + "</span>"
              f"<span class='src'>{runs_n} run{'s' if runs_n != 1 else ''} · {ctx['solved_h']:.0f} tasks solved per hour</span></div>")
     body = f'''

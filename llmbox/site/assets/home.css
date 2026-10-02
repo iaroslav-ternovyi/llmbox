@@ -58,10 +58,10 @@
 @media (max-width:760px){
  .hero{padding:16px 10px 10px}.cmp{width:100%;justify-content:space-between}
  .rank thead{display:none}.rank,.rank tbody{display:block}
- .rank tr.mr{display:grid;grid-template-columns:24px max-content minmax(0,1fr) auto;grid-template-areas:"rk mod mod act" "rk sco sco sco" "rk spd fit so";column-gap:12px;border-bottom:1px solid var(--line2);padding:10px 0}
+ .rank tr.mr{display:grid;grid-template-columns:24px max-content minmax(0,1fr) auto;grid-template-areas:"rk mod mod act" "rk sco sco sco" "rk spd fit fit" "rk so so so";column-gap:12px;border-bottom:1px solid var(--line2);padding:10px 0}
  .rank tr.mr td{display:block;border:0;padding:2px 0;min-width:0;width:auto;background:none!important}
  .rank td.rk{grid-area:rk;padding-top:4px}.rank td.mod{grid-area:mod}.rank td.act{grid-area:act;text-align:right}.rank td.sco{grid-area:sco;padding:8px 0 6px}
- .rank td.spd{grid-area:spd;text-align:left}.rank td.fit{grid-area:fit;text-align:left;padding-top:4px}.rank td.so{grid-area:so;font-size:12px}
+ .rank td.spd{grid-area:spd;text-align:left}.rank td.fit{grid-area:fit;text-align:left;padding-top:4px}.rank td.so{grid-area:so;font-size:12px;padding-top:4px}
  .rank td.spd b{font-size:15px}.fp .num{font-size:15px}.fp .trk s{top:0;bottom:0}.rank td.spd b::after{content:" tok/s";font:400 11px var(--mono);color:var(--faint)}
  .rank tr.gs{border-top:1px dashed rgba(255,176,0,.6)}.rank tr.gs td{border-top:0}
  .rank tr.cloud{display:grid;grid-template-columns:24px minmax(0,1fr) minmax(0,1.3fr);grid-template-areas:"rk mod sco";column-gap:12px;align-items:center;border-bottom:1px solid var(--line2);padding:4px 0}

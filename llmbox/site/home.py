@@ -10,7 +10,7 @@ from .components import _marker, _pct, _profile, _spd, _stands_out
 from .data import optimize_records, queue_state, shape_data
 from .layout import _page
 from .stats import rank_ranges
-from .words import _ago, _kind, _size, BLOCKS, esc, FAMILIES, family, LABEL, model_name, plain_line, PRESETS, SHORT, variant, SITE_URL
+from .words import _ago, _kind, _size, BLOCKS, esc, FAMILIES, family, LABEL, model_name, plain_line, PRESETS, ram_gb, SHORT, variant, SITE_URL
 
 
 def _scatter(local: list[dict]) -> str:
@@ -158,7 +158,7 @@ def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier
     local = [r for r in rs if r["host"].get("id") != "cloud" and not r.get("partial")]
     clouds = [r for r in rs if r["host"].get("id") == "cloud" and not r.get("partial")]
     hw = next((r["host"] for r in local), {})
-    ref_box = f'{hw.get("gpu", "").replace("NVIDIA GeForce ", "")} + {hw.get("ram_gib", "?")} GB RAM'
+    ref_box = f'{hw.get("gpu", "").replace("NVIDIA GeForce ", "")} + {ram_gb(hw.get("ram_gib"))} GB RAM'
     ranks = rank_ranges(local)
     q = [j for j in queue_state() if j["model"] not in {r["id"] for r in local}]
     sd = sd or shape_data(local, host)
@@ -243,7 +243,7 @@ LM Studio or Ollama, on Linux, Windows or macOS.</li></ol>
 <dl class="gl">
 <dt>tok/s</dt><dd>Tokens per second, how fast the answer appears. A token is about &frac34; of a word. 20 reads comfortably; a coding agent feels quick from about 50.</dd>
 <dt>Context</dt><dd>How much text the model keeps in view at once: the chat, your files, a document. 256k tokens is roughly a 500-page book.
-A bigger context needs more memory, and answers get slower as it fills up (the answers get slower as it fills up (the &ldquo;long&rdquo; speed)ldquo;at 32kanswers get slower as it fills up (the &ldquo;long&rdquo; speed)rdquo; speed).</dd>
+A bigger context needs more memory, and answers get slower as it fills up: the small number under tok/s is the speed with 32k tokens already in.</dd>
 <dt>Quant (Q4_K_M, UD-Q4_K_XL, IQ3_XXS)</dt><dd>The model&rsquo;s numbers stored in fewer bits so it fits in memory. 4-bit (Q4) is the usual choice:
 about a quarter of the original size for a small loss. Q3 and Q2 fit smaller boxes and lose more; Q6 and Q8 lose almost nothing.</dd>
 <dt>MoE, &ldquo;35B-A3B&rdquo;</dt><dd>Mixture of experts: 35 billion parameters in total, but only 3 billion work on each token. It needs memory for all of them

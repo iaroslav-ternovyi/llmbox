@@ -57,6 +57,20 @@ def load(host: str, rid: str, _seen: tuple = ()) -> dict:
     return _merge(DEFAULTS, r)
 
 
+SPEED_KEYS = ("model", "runtime", "placement", "extra", "speculative")   # what a recipe's speed depends on
+
+
+def speed_parent(host: str, rid: str) -> str | None:
+    """The recipe this one extends when it changes nothing its speed depends on (k2-medium: k2-horizon's file, placement
+    and threads with a shorter thinking), so the parent's speed measurement is this one's too; else None."""
+    try:
+        with open(os.path.join(recipes_dir(host), f"{rid}.toml"), "rb") as f:
+            raw = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    return raw.get("extends") if raw.get("extends") and not any(k in raw for k in SPEED_KEYS) else None
+
+
 def load_set(host: str, rid: str, overrides: list[str] | None = None) -> dict:
     """The recipe with `--set key=value` overrides applied, values read as JSON when they are (a variant: llmbox test
     --set, llmbox bench --set)."""

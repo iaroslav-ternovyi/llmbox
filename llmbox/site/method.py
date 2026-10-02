@@ -4,7 +4,7 @@ from __future__ import annotations
 from .components import _fp_html, _marker
 from .layout import _page
 from .stats import _axis_of, _range_pct, surely_better
-from .words import _GRADING, _name_of, esc, GROUPS, INSTALL, model_name, NOT_MEASURED, share, TIPS
+from .words import _GRADING, _name_of, esc, GROUPS, INSTALL, model_name, NOT_MEASURED, share, TIPS, variant
 
 
 def _optimize_table(opts: dict, ranked: set | None = None) -> str:
@@ -14,7 +14,9 @@ def _optimize_table(opts: dict, ranked: set | None = None) -> str:
     import statistics as _st
     gains = [o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1 for _, o in rows]
     deep = [o["summary"]["llmbox"]["deep"] / o["summary"]["stock"]["deep"] - 1 for _, o in rows if o["summary"]["stock"].get("deep") and o["summary"]["llmbox"].get("deep")]
-    link = lambda rid: f'<a href="recipe-{esc(rid)}.html">{esc(_name_of(opts[rid]))}</a>' if ranked is None or rid in ranked else esc(_name_of(opts[rid]))
+    # the file too: two quants of one model are two rows (Tiel-Coder Q4 and Q6 read the same without it)
+    nm = lambda rid: f"{_name_of(opts[rid])} · {variant(rid, (opts[rid].get('model') or {}).get('file'))}"
+    link = lambda rid: f'<a href="recipe-{esc(rid)}.html">{esc(nm(rid))}</a>' if ranked is None or rid in ranked else esc(nm(rid))
     tr = "".join(f'<tr><td class="l">{link(rid)}</td><td>{o["summary"]["stock"]["decode"]:.0f}</td>'
                  f'<td>{o["summary"]["llmbox"]["decode"]:.0f}</td><td>{(o["summary"]["llmbox"]["decode"] / o["summary"]["stock"]["decode"] - 1) * 100:+.0f}%</td>'
                  f'<td>{o["summary"]["stock"].get("deep") or 0:.0f}</td><td>{o["summary"]["llmbox"].get("deep") or 0:.0f}</td>'
@@ -23,7 +25,8 @@ def _optimize_table(opts: dict, ranked: set | None = None) -> str:
             f"<code>llama-server -m model.gguf -c &lt;context&gt;</code> runs it with llama.cpp's own defaults, once with its llmbox recipe (placement of the "
             f"weights, KV cache type, speculative decoding with the model's MTP head where it has one, batch sizes, then <code>llmbox tune</code>). Same file, "
             f"same context. Median: <b>{_st.median(gains) * 100:+.0f}%</b> in a short chat"
-            + (f", <b>{_st.median(deep) * 100:+.0f}%</b> at 32k" if deep else "") + ".</p>"
+            + (f", <b>{_st.median(deep) * 100:+.0f}%</b> at 32k" if deep else "") + ". These pairs are shorter timings than the speed on "
+            "the model pages, taken minutes apart on the same box, so their figures can differ from it by a few tok/s; the gain is the point.</p>"
             f'<div class="tw"><table class="opt"><tr><th class="l">model</th><th>stock tok/s</th><th>llmbox tok/s</th><th>gain</th><th>stock at 32k</th>'
             f"<th>llmbox at 32k</th><th class='l'>tuned</th></tr>{tr}</table></div>")
 
@@ -126,8 +129,8 @@ and the page says <i>rough</i>.</p>
 
 <h2 id="people">Your computer</h2>
 <p>One line installs llmbox and asks the rest: it finds your card and memory, gets llama.cpp for it, picks the best model for
-your computer, installs it with the settings measured here fitted to your hardware, and starts it (Linux with an NVIDIA card;
-Macs get the pick, running on a Mac is coming). <code>llmbox test</code> then measures it and, on a yes, sends the result.</p>
+your computer, installs it with the settings measured here fitted to your hardware, and starts it (Linux with an NVIDIA card, or a Mac
+with Apple silicon; <a href="install.html">the other ways</a>). <code>llmbox test</code> then measures it and, on a yes, sends the result.</p>
 <pre class="cmd">{esc(INSTALL)}
 llmbox test &lt;model&gt;          # 3 min speed + 10 min quality, where you stand (--full: 40 min)</pre>
 <p>Speeds are grouped by kind of hardware: the same graphics card (chip and memory) and system RAM of about the same speed, since a

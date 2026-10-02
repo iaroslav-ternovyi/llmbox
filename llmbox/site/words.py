@@ -51,6 +51,12 @@ def esc(s) -> str:
     return html.escape(str(s))
 
 
+def ram_gb(gib) -> int | str:
+    """A machine's RAM as it is sold (64 GB), not as the system reports it (61.4 GiB after the firmware's share)."""
+    from ..db import _RAM_SIZES
+    return min(_RAM_SIZES, key=lambda s: abs(s - float(gib))) if gib else "?"
+
+
 def _ago(ts: str) -> str:
     try:
         dt = datetime.strptime(ts[:16], "%Y-%m-%dT%H:%M")

@@ -66,7 +66,13 @@ def new_page(rs: list[dict], data: dict, host: str, news: str = "") -> str | Non
         sp = m["speed"] or {}
         lo, hi = _range_pct(m) if m.get("vs_ref") is not None else (None, None)
         return {"rid": m["id"], "name": model_name(m), "vs": m.get("vs_ref"), "lo": lo, "hi": hi, "cap": m["capability"], "t2": sp.get("decode_tps"),
-                "td": float(report._deep(sp)) if report._deep(sp) != "-" else None}
+                "td": float(report._deep(sp)) if report._deep(sp) != "-" else None, "ctx": _ctx(m["id"])}
+
+    def _ctx(rid: str) -> int | None:   # the context it was measured with on our test PC (the model page's "Fits")
+        try:
+            return rc.load(host, rid)["placement"].get("ctx") or None
+        except (OSError, ValueError, KeyError):
+            return None
 
     rows, seen = [], set()
     for c in cs:

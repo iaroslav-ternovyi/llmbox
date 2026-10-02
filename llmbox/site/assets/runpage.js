@@ -1,5 +1,6 @@
 // a person's run page (r/<id>): copy buttons, and "Your machine?" - the best model for the machine picked (text only)
 const D = typeof document !== "undefined" ? document : null;
+const r0 = typeof rnd === "function" ? rnd : Math.round;   // box.js's rounding on the site; the tests load this file alone in Node
 for (const b of D ? D.querySelectorAll("[data-copy],[data-copy-from]") : []) {
   const label = b.textContent;
   b.onclick = () => {
@@ -14,7 +15,7 @@ function bestLine(m) {
   // m: [name, slug, kind, best model, number, measured, testable]
   if (!m) return null;
   const [name, slug, , model, n, measured, testable] = m;
-  const num = n == null ? "" : (measured ? `${Math.round(n)} tok/s` : `~${Math.round(n)} tok/s predicted`);
+  const num = n == null ? "" : (measured ? `${r0(n)} tok/s` : `~${r0(n)} tok/s predicted`);
   const line = model ? `best here: ${model}${num ? " · " + num : ""}` : "nothing fits at 64 GB of RAM";
   const after = testable ? "" : " · AMD timing comes after launch";
   return { line: line + after, page: `hw-${slug}.html`, feed: `feeds/${slug}.xml`, name };

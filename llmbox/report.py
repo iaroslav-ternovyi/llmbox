@@ -22,15 +22,30 @@ def latest_probe(recs: list[dict], rid: str, after: str = "") -> dict | None:
     return max(ps, key=lambda x: x["created"]) if ps else None
 
 
-def with_probe(rec: dict, recs: list[dict]) -> dict:
+def speed_probe(recs: list[dict], rid: str, host: str | None) -> dict | None:
+    """The probe that measures this recipe's speed: its own newest, else the one of the recipe it extends without
+    changing anything its speed depends on (recipe.speed_parent)."""
+    p = latest_probe(recs, rid)
+    if p or not host:
+        return p
+    from . import recipe
+    parent = recipe.speed_parent(host, rid)
+    return latest_probe(recs, parent) if parent else None
+
+
+def with_probe(rec: dict, recs: list[dict], host: str | None = None) -> dict:
     """The suite record with its speed replaced by the recipe's newest 1-stream probe (quality is the suite's; speed is
     the probe's), whenever one exists: a run's own figure is a token-weighted average over its whole run, a different
     method, so mixing the two made models of the same architecture look different (Qwen3.6 vs Tiel, 2026-10-02 audit)."""
-    p = latest_probe(recs, (rec.get("recipe") or {}).get("id"))
+    rid = (rec.get("recipe") or {}).get("id")
+    p = speed_probe(recs, rid, host)
     if not p:
         return rec
     out = dict(rec, summary=dict(rec["summary"], speed=p["summary"]["speed"]))
+    other = (p.get("recipe") or {}).get("id")
     out["speed_note"] = f"re-measured {p['created'][:10]}" + (" after tune" if p.get("tuned") else "")
+    if other != rid:
+        out["speed_as"] = other
     return out
 
 
@@ -93,7 +108,7 @@ def rows(host: str | None = None, suite_version: str | None = None, tier: str | 
     recs = [dict(x, _dir=host) for x in results.load_all(host)] + \
         ([dict(x, _dir="cloud") for x in results.load_all("cloud")] if host and host != "cloud" else [])
     from . import bench
-    recs = [bench.rescore(with_probe(x, recs)) if x.get("kind") == "suite" else x for x in recs]   # current weights
+    recs = [bench.rescore(with_probe(x, recs, x["_dir"])) if x.get("kind") == "suite" else x for x in recs]   # current weights
     # the current suite with a bank: a model is ranked on all its answers that still count (current_pool), whatever
     # version its runs were; one-block runs feed that pool and are not listed on their own
     cur = suite_version in (None, _suite.VERSION) and bool(current_pool())

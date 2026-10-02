@@ -7,7 +7,18 @@ from .words import CURL, esc, SITE_URL
 REPO = "https://github.com/iaroslav-ternovyi/llmbox"
 
 
-def install_page() -> str:
+def _session(ex: dict | None) -> str:
+    """What `llmbox` prints first on our test PC (wizard.main), from today's data."""
+    if not ex:
+        return ""
+    td = f", ~{ex['td']:.0f} with 32k of context" if ex.get("td") else ""
+    return (f"$ llmbox\nThis computer: {ex['machine']}\n\nBest for it: {ex['name']}\n"
+            f"  {ex['score']:.0f}% of Claude Opus on real work (95% range {ex['range'][0]:.0f}-{ex['range'][1]:.0f}) · ~{ex['t2']:.0f} tokens/s{td}"
+            + (f" · up to {ex['ctx'] // 1024}k context" if ex.get("ctx") else "") + f"\n  why: {ex['why']}\n"
+            + (f"  download: {ex['size']:.1f} GB into ~/models\n" if ex.get("size") else "") + "\nInstall and start it? [Y/n/l]")
+
+
+def install_page(example: dict | None = None) -> str:
     one = f"{CURL} {SITE_URL}/install.sh | sh"
     body = f'''
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / get llmbox</div><h1>Get llmbox</h1>
@@ -28,15 +39,7 @@ def install_page() -> str:
  gets llama.cpp built for your graphics card if it is missing, shows the best model for it with the numbers and why,
  and after one yes downloads it, fits the settings, times it (3 minutes, optional) and leaves it running with the address
  to put in your app. Every question has a default; nothing is sent without its own yes.</p>
-<pre class="cmd">$ llmbox
-This computer: RTX 5070 12 GB · RAM 45–65 GB/s · 61 GB RAM
-
-Best for it: Cyber-Tiel-Coder-35B-A3B UD-Q4_K_XL
-  88% of Claude Opus on real work (95% range 83-91) · ~55 tokens/s, ~52 with 32k of context · up to 256k context
-  why: the best score among the models that fit
-  download: 22.7 GB into ~/models
-
-Install and start it? [Y/n/l]</pre>
+{f'<pre class="cmd">{esc(_session(example))}</pre>' if example else ""}
 <p class="q">Afterwards:</p>
 <pre class="cmd">llmbox                 # the guided start
 llmbox doctor          # is this computer ready? each problem with its fix

@@ -1,3 +1,6 @@
+// numbers as the pages written in Python show them: an exact half to the even neighbour (84.5 -> 84), so a score or a
+// speed reads the same on the home page (drawn here) and on the model page (written by the build)
+function rnd(v) { const f = Math.floor(v), d = v - f; return d > 0.5 ? f + 1 : d < 0.5 ? f : f % 2 ? f + 1 : f; }
 window.llmboxCount = window.llmboxCount || function () {};   // stats.js counts events; without it (no counter set up) nothing
 (function () {   // an uncaught error in the site's scripts goes to the server: message, page, build - no address (privacy.html)
   const me = document.currentScript, api = me && me.dataset.err;

@@ -122,7 +122,7 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
  <p class="mlegend">Each cell: a graphics card or Mac, the best model for it, and how fast that model writes, in tokens per second (about ¾ of a
  word each; 20 reads comfortably, 50+ feels instant). <span class="fr m"></span> <b>measured</b>: someone ran it on that hardware (×3: on three machines) ·
  <span class="fr u"></span> <b>predicted</b> <span class="n pred">~</span>: worked out from the hardware until someone measures it ·
- <span class="fr x"></span> <b>AMD: later</b>: measuring on AMD opens after launch. Best = the highest score that fits with 64 GB of RAM (a Mac: its memory nearest 64).</p>
+ <span class="fr x"></span> <b>AMD: later</b>: measuring on AMD opens after launch. Best = what the Models page picks for that hardware with 64 GB of RAM (a Mac: its memory nearest 64): the top score among models that write 20+ tok/s, unless one tied with it is much faster or is the official release of a tied uncensored remix.</p>
  <p class="q mapwho" id="mapwho"></p>
  <div id="mapyou" class="mapyou" hidden></div>
  {"".join(tiers)}

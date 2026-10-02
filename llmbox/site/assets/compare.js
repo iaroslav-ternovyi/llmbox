@@ -21,30 +21,30 @@ function render(a, b) {
   const sA = speedOf(A), sB = speedOf(B), say = [];
   if (A.vs != null && B.vs != null) {
     const [hi, lo] = A.cap >= B.cap ? [A, B] : [B, A];
-    say.push(surely(hi, lo) ? `<b>${esc(hi.name)}</b> is measurably better: ${Math.round(hi.vs)}% against ${Math.round(lo.vs)}% of Claude Opus 5.5.`
-      : `Not measurably apart yet: ${Math.round(A.vs)}% and ${Math.round(B.vs)}% of Claude Opus 5.5, and their ranges overlap (${Math.round(A.lo)}–${Math.round(A.hi)} and ${Math.round(B.lo)}–${Math.round(B.hi)}).`);
+    say.push(surely(hi, lo) ? `<b>${esc(hi.name)}</b> is measurably better: ${rnd(hi.vs)}% against ${rnd(lo.vs)}% of Claude Opus 5.5.`
+      : `Not measurably apart yet: ${rnd(A.vs)}% and ${rnd(B.vs)}% of Claude Opus 5.5, and their ranges overlap (${rnd(A.lo)}–${rnd(A.hi)} and ${rnd(B.lo)}–${rnd(B.hi)}).`);
   }
   if (sA && sB && sA.t2 && sB.t2) { const [f, s] = sA.t2 >= sB.t2 ? [[A, sA], [B, sB]] : [[B, sB], [A, sA]], k = f[1].t2 / s[1].t2;
-    say.push(k < 1.1 ? `About as fast as each other${sA.pred ? " on your box" : ""} (${Math.round(sA.t2)} and ${Math.round(sB.t2)} tok/s).`
-      : `<b>${esc(f[0].name)}</b> writes ${k.toFixed(1)}× faster${f[1].pred ? " on your box" : ""}: ${sA.pred ? "~" : ""}${Math.round(f[1].t2)} against ${Math.round(s[1].t2)} tok/s.`); }
+    say.push(k < 1.1 ? `About as fast as each other${sA.pred ? " on your box" : ""} (${rnd(sA.t2)} and ${rnd(sB.t2)} tok/s).`
+      : `<b>${esc(f[0].name)}</b> writes ${k.toFixed(1)}× faster${f[1].pred ? " on your box" : ""}: ${sA.pred ? "~" : ""}${rnd(f[1].t2)} against ${rnd(s[1].t2)} tok/s.`); }
   for (const [m, s] of [[A, sA], [B, sB]]) if (s && !s.fits) say.push(`<b>${esc(m.name)}</b> does not fit on your box.`);
   if (A.cloud || B.cloud) say.push(`Claude runs in the cloud: it is here as a reference for quality, with no speed on your box.`);
   const gaps = DATA.groups.map(([g, bs]) => [g, wavg(A.blocks, bs) - wavg(B.blocks, bs)]).filter(x => Math.abs(x[1]) >= 6);
-  if (gaps.length) say.push("Clear gaps: " + gaps.map(([g, d]) => `${esc(g.toLowerCase())} favours <b>${esc((d > 0 ? A : B).name)}</b> (${d > 0 ? "+" : "−"}${Math.round(Math.abs(d))})`).join("; ") + ".");
+  if (gaps.length) say.push("Clear gaps: " + gaps.map(([g, d]) => `${esc(g.toLowerCase())} favours <b>${esc((d > 0 ? A : B).name)}</b> (${d > 0 ? "+" : "−"}${rnd(Math.abs(d))})`).join("; ") + ".");
   const tile = (m, s, cls) => `<div class="side ${cls}"><div class="who"><span class="dot ${cls}"></span>${m.cloud ? nm(m) : `<a href="recipe-${m.id}.html">${nm(m)}</a>`}</div>` +
-    `<div class="nums"><div><b>${m.vs != null ? Math.round(m.vs) + "%" : "—"}</b><span>${m.cloud ? "cloud reference" : `place ${m.place} · range ${Math.round(m.lo)}–${Math.round(m.hi)}`}</span></div>` +
-    `<div><b>${s && s.t2 ? (s.pred ? "~" : "") + Math.round(s.t2) : "—"}</b><span>${m.cloud ? "cloud" : s && !s.fits ? "does not fit" : `tok/s ${s.pred ? "on your box" : "measured"}`}</span></div>` +
-    `<div><b>${s && s.fits && s.ctx ? "✓ " + Math.round(s.ctx / 1024) + "k" : s && !s.fits ? "✗" : "—"}</b><span>${m.cloud ? "" : "context that fits"}</span></div>` +
-    `<div><b>${m.rel ? m.rel[0] : "—"}</b><span>${m.rel ? `of ${m.rel[1]} answers with thinking problems` : ""}</span></div></div></div>`;
+    `<div class="nums"><div><b>${m.vs != null ? rnd(m.vs) + "%" : "—"}</b><span>${m.cloud ? "cloud reference" : `place ${m.place} · range ${rnd(m.lo)}–${rnd(m.hi)}`}</span></div>` +
+    `<div><b>${s && s.t2 ? (s.pred ? "~" : "") + rnd(s.t2) : "—"}</b><span>${m.cloud ? "cloud" : s && !s.fits ? "does not fit" : `tok/s ${s.pred ? "on your box" : "measured"}`}</span></div>` +
+    `<div><b>${s && s.fits && s.ctx ? "✓ " + rnd(s.ctx / 1024) + "k" : s && !s.fits ? "✗" : "—"}</b><span>${m.cloud ? "" : "context that fits"}</span></div>` +
+    `<div><b>${m.rel ? m.rel[0] : "—"}</b><span>${m.rel ? `of ${m.rel[1]} answers got stuck (looped, or ran out of thinking room or time)` : ""}</span></div></div></div>`;
   $("#verdict").innerHTML = `<div class="sides">${tile(A, sA, "a")}${tile(B, sB, "b")}</div><p class="say">${say.join(" ")}</p>`;
   // side by side: the overall score, then each use with its blocks, on a scale from just under the lowest value to 100
   const vals = [A.vs, B.vs, ...Object.values(A.blocks), ...Object.values(B.blocks)].filter(v => v != null);
   const lo0 = Math.max(0, Math.floor((Math.min(...vals) - 5) / 10) * 10), X = v => (Math.max(v, lo0) - lo0) / (100 - lo0) * 100;
-  const row = (label, x, y, cls) => { const d = x != null && y != null ? x - y : null;
-    return `<div class="dr ${cls}"><span class="dl">${label}</span><span class="dv">${x != null ? Math.round(x) : "—"}</span><span class="dt">` +
+  const row = (label, x, y, cls) => { const d = x != null && y != null ? rnd(x) - rnd(y) : null;   // the gap of the numbers shown
+    return `<div class="dr ${cls}"><span class="dl">${label}</span><span class="dv">${x != null ? rnd(x) : "—"}</span><span class="dt">` +
       (x != null ? `<i class="a" style="left:${X(x)}%"></i>` : "") + (y != null ? `<i class="b" style="left:${X(y)}%"></i>` : "") +
-      (x != null && y != null ? `<em style="left:${X(Math.min(x, y))}%;width:${X(Math.max(x, y)) - X(Math.min(x, y))}%"></em>` : "") + `</span><span class="dv">${y != null ? Math.round(y) : "—"}</span>` +
-      `<span class="dd ${d == null || Math.abs(d) < 6 ? "" : d > 0 ? "wa" : "wb"}">${d == null ? "" : Math.abs(d) < 0.5 ? "=" : (d > 0 ? "+" : "−") + Math.round(Math.abs(d))}</span></div>`; };
+      (x != null && y != null ? `<em style="left:${X(Math.min(x, y))}%;width:${X(Math.max(x, y)) - X(Math.min(x, y))}%"></em>` : "") + `</span><span class="dv">${y != null ? rnd(y) : "—"}</span>` +
+      `<span class="dd ${d == null || Math.abs(d) < 6 ? "" : d > 0 ? "wa" : "wb"}">${d == null ? "" : Math.abs(d) < 0.5 ? "=" : (d > 0 ? "+" : "−") + Math.abs(d)}</span></div>`; };
   let ticks = ""; for (let v = lo0; v <= 100; v += 10) ticks += `<span style="left:${X(v)}%">${v}</span>`;
   let h = `<div class="dr hd"><span></span><span class="dv"><span class="dot a"></span></span><span class="dt axis">${ticks}</span><span class="dv"><span class="dot b"></span></span><span></span></div>`;
   h += row("% of Claude Opus 5.5", A.vs, B.vs, "top");
@@ -57,8 +57,8 @@ function render(a, b) {
   else { const top = Math.max(...A.depth.map(x => x[1]), ...B.depth.map(x => x[1])) * 1.1;
     const near = (m, k) => m.depth.reduce((p, x) => Math.abs(x[0] - k) < Math.abs(p[0] - k) ? x : p, m.depth[0]);
     $("#speed").innerHTML = deps.map(([k]) => { const x = near(A, k), y = near(B, k);
-      return `<div class="sd"><div class="k">${k <= 4 ? "Short chat" : k <= 40 ? "Long session" : "Big document"}<small>${Math.round(k)}k tokens in context</small></div><div>` +
-        [[A, x, "a"], [B, y, "b"]].map(([m, v, c]) => `<div class="sb ${c}"><i style="width:${100 * v[1] / top}%"></i><span>${Math.round(v[1])} tok/s${v[2] ? ` · first word ${v[2]} s` : ""}</span></div>`).join("") + `</div></div>`; }).join("") +
+      return `<div class="sd"><div class="k">${k <= 4 ? "Short chat" : k <= 40 ? "Long session" : "Big document"}<small>${rnd(k)}k tokens in context</small></div><div>` +
+        [[A, x, "a"], [B, y, "b"]].map(([m, v, c]) => `<div class="sb ${c}"><i style="width:${100 * v[1] / top}%"></i><span>${rnd(v[1])} tok/s${v[2] ? ` · first word ${v[2]} s` : ""}</span></div>`).join("") + `</div></div>`; }).join("") +
       `<p class="q" style="margin-top:12px">Measured on our test PC.${box && !sameClassAs(box, DATA.ref) ? " Your box: see the tiles above." : ""}</p>`; }
   // tasks one solved and the other did not (same task kind and level; runs pick different tasks, so only the shared ones count)
   const only = (x, y) => Object.keys(x.fam).filter(f => f in y.fam && x.fam[f] >= 0.99 && y.fam[f] < 0.5).sort();

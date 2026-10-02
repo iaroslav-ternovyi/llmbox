@@ -85,7 +85,7 @@ def calibration(r: dict, shape, at_k: int | None = None) -> F.Calibration:
     kd, t2 = F.solve(r, shape, hw, dv, int(dk * 1000), term=term or None, ctx=ctx, kv_type=kv) if dv else (k2, term)
     if t2 != term:   # one form for both figures: the deep one could not be solved on the same side
         kd = k2
-    return F.Calibration(k2, kd, int(dk), f"calibrated on the reference {ref.get('gpu') or 'box'} ({ref.get('measured', '')})",
+    return F.Calibration(k2, kd, int(at_k or dk), f"calibrated on the reference {ref.get('gpu') or 'box'} ({ref.get('measured', '')})",
                          {"decode_tps": ref["decode_tps"], "deep_tps": dv}, term)
 
 

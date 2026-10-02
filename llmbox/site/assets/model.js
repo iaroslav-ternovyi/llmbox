@@ -4,10 +4,10 @@
   if (!box || !DATA.sh || !DATA.sh.layers || sameClassAs(box, DATA.ref)) return;
   const f = forBox(DATA.sh, box), sp = document.querySelector("#vspd"), ft = document.querySelector("#vfit"), yb = document.querySelector("#yourbox");
   if (f.fits) {
-    sp.querySelector("b").innerHTML = `~${Math.round(f.t2)}<small> tok/s</small>`;
-    sp.querySelector(".sub").textContent = `short chat · ~${Math.round(f.td)} at 32k of context`;
-    ft.querySelector("b").textContent = `✓ ${Math.round(f.ctx / 1024)}k`;
-    yb.innerHTML = `On your box (${boxLabel(box)}): <b>~${Math.round(f.t2)} tok/s</b> in a short chat, <b>~${Math.round(f.td)}</b> at 32k of context, up to ${Math.round(f.ctx / 1024)}k context. Predicted; the bars below are measured on our test PC.`;
+    sp.querySelector("b").innerHTML = `~${rnd(f.t2)}<small> tok/s</small>`;
+    sp.querySelector(".sub").textContent = `short chat · ~${rnd(f.td)} at 32k of context`;
+    ft.querySelector("b").textContent = `✓ ${rnd(f.ctx / 1024)}k`;
+    yb.innerHTML = `On your box (${boxLabel(box)}): <b>~${rnd(f.t2)} tok/s</b> in a short chat, <b>~${rnd(f.td)}</b> at 32k of context, up to ${rnd(f.ctx / 1024)}k context. Predicted; the bars below are measured on our test PC.`;
   } else {
     sp.querySelector("b").textContent = "—"; sp.querySelector(".sub").textContent = "does not fit on your box";
     ft.querySelector("b").innerHTML = '<span class="red">✗ too big</span>';

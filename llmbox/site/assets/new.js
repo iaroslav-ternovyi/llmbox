@@ -2,11 +2,11 @@
 const $ = s => document.querySelector(s);
 const saved = savedBox(DATA);
 const box = saved || { name: "our test PC", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
-$("#boxname").textContent = saved ? `your box (${boxLabel(box)})` : `our test PC (${DATA.ref.gpu} · ${Math.round(DATA.ref.ram / 1024)} GB)`;
-const fmtDl = n => n == null ? "" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : n;
-const cap = v => v > 200 ? "200+" : "~" + Math.round(v);   // above ~200 the formula ignores per-token overheads
+$("#boxname").textContent = saved ? `your box (${boxLabel(box)})` : `our test PC (${DATA.ref.gpu} · ${ramSold(DATA.ref.ram / 1024)} GB)`;
+const fmtDl = n => n == null ? "" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? rnd(n / 1e3) + "k" : n;
+const cap = v => v > 200 ? "200+" : "~" + rnd(v);   // above ~200 the formula ignores per-token overheads
 const bits = q => { const m = q.replace("UD-", "").toUpperCase().match(/(?:I?Q|BF|F)(\d+)/); return m ? +m[1] : 16; };
-const ago = d => { const n = Math.round((Date.now() - new Date(d)) / 864e5); return n < 1 ? "today" : n < 45 ? `${n} d ago` : `${Math.round(n / 30)} mo ago`; };
+const ago = d => { const n = rnd((Date.now() - new Date(d)) / 864e5); return n < 1 ? "today" : n < 45 ? `${n} d ago` : `${rnd(n / 30)} mo ago`; };
 const [amin, astep] = DATA.ax, X = v => Math.max(0, Math.min(100, (v - amin) / (100 - amin) * 100));
 let axl = ""; for (let v = amin; v <= 100; v += astep) axl += `<span style="left:${X(v)}%">${v}</span>`;
 $("#nax").innerHTML = axl;
@@ -31,7 +31,7 @@ const nweek = rows.filter(r => (Date.now() - new Date(r.released)) / 864e5 <= 14
 $("#nsum").innerHTML = `In the last two weeks: <b>${nweek.length}</b> new model${nweek.length === 1 ? "" : "s"}, <b>${nweek.filter(r => r.fits).length}</b> fit ${saved ? "your box" : "our test PC"}, <b>${nweek.filter(r => r.m).length}</b> measured here.`;
 function scoreCell(r) {
   const g = () => { let t = ""; for (let v = amin; v <= 100; v += astep) t += `<s style="left:${X(v)}%"></s>`; return t; };
-  if (r.m && r.m.vs != null) return `<div class="fp" title="measured: 95% range ${Math.round(r.m.lo)}–${Math.round(r.m.hi)}%"><div class="trk">${g()}<i style="left:${X(r.m.lo)}%;width:${X(r.m.hi) - X(r.m.lo)}%;background:${r.col}"></i><b style="left:${X(r.m.vs)}%;background:${r.col}"></b></div><span class="num">${Math.round(r.m.vs)}%</span></div>`;
+  if (r.m && r.m.vs != null) return `<div class="fp" title="measured: 95% range ${rnd(r.m.lo)}–${rnd(r.m.hi)}%"><div class="trk">${g()}<i style="left:${X(r.m.lo)}%;width:${X(r.m.hi) - X(r.m.lo)}%;background:${r.col}"></i><b style="left:${X(r.m.vs)}%;background:${r.col}"></b></div><span class="num">${rnd(r.m.vs)}%</span></div>`;
   if (!r.guess) return `<div class="fp"><div class="trk">${g()}</div><span class="num e q" title="not in the public benchmark index">—</span></div>`;
   return `<div class="fp" title="expected from the Epoch Capabilities Index of ${r.guess.name} (${r.guess.eci.toFixed(1)})${r.guess.remix || r.kind !== "release" ? ", its base model" : ""}"><div class="trk">${g()}<i class="d" style="left:${X(r.guess.lo)}%;width:${X(r.guess.hi) - X(r.guess.lo)}%;border-color:${r.col}"></i><b class="h" style="left:${X(r.guess.mid)}%;border-color:${r.col}"></b></div><span class="num e">~${r.guess.mid}%</span></div>`;
 }
@@ -46,10 +46,10 @@ function render() {
   $("#rows").innerHTML = list.map((r, i) => { const name = r.repo.split("/")[1].replace(/-GGUF(-MTP)?$/i, "");
     const sub = [ago(r.released), `${r.total}B${r.active < 0.7 * r.total ? `, ${r.active}B active` : ""}`, r.of ? `${r.kind} of ${r.of.split("/").pop()}` : r.kind === "release" ? "" : r.kind, r.dl ? `${fmtDl(r.dl)} downloads` : ""].filter(Boolean).join(" · ");
     return `<div class="nr2${r.fits ? "" : " nofit"}"><div class="mw">${marker(r)}<span class="m">${r.m ? `<a href="recipe-${r.m.rid}.html" style="color:inherit">${name}</a>` : name}${r.fresh ? '<span class="tag" title="first listed here in the last 7 days">NEW THIS WEEK</span>' : ""}</span>` +
-      `<span class="qt">${sub} · <a href="https://huggingface.co/${r.repo}" rel="noopener">HF</a>${r.rel.length ? `<br>fine-tunes measured: ${r.rel.map(x => `<a href="recipe-${x[0]}.html">${x[0]}</a> ${Math.round(x[1])}%`).join(", ")}` : ""}</span></div>` +
+      `<span class="qt">${sub} · <a href="https://huggingface.co/${r.repo}" rel="noopener">HF</a>${r.rel.length ? `<br>fine-tunes measured: ${r.rel.map(x => `<a href="recipe-${x[0]}.html">${x[0]}</a> ${rnd(x[1])}%`).join(", ")}` : ""}</span></div>` +
       scoreCell(r) +
-      `<div class="sp r">${r.fits ? `<b>${r.onRef ? Math.round(r.t2) : cap(r.t2)}</b><small>${r.td ? (r.onRef ? Math.round(r.td) : cap(r.td)) + " at 32k" : ""}${r.onRef ? " · measured" : ""}</small>` : "—"}</div>` +
-      `<div class="fl">${r.fits ? `✓ ${r.c.f.quant} · ${(r.c.f.bytes / 1e9).toFixed(1)} GB<small>${Math.round(r.c.p.ctx / 1024)}k context${r.low ? ` · <span class="low">${bits(r.c.f.quant)}-bit: expect a lower score</span>` : ""}</small>` : `<span class="no">✗ too big</span><small>${r.c.f.quant} · ${(r.c.f.bytes / 1e9).toFixed(1)} GB</small>`}</div>` +
+      `<div class="sp r">${r.fits ? `<b>${r.onRef ? rnd(r.t2) : cap(r.t2)}</b><small>${r.td ? (r.onRef ? rnd(r.td) : cap(r.td)) + " at 32k" : ""}${r.onRef ? " · measured" : ""}</small>` : "—"}</div>` +
+      `<div class="fl">${r.fits ? `✓ ${r.c.f.quant} · ${(r.c.f.bytes / 1e9).toFixed(1)} GB<small>${rnd((r.onRef && r.m.ctx || r.c.p.ctx) / 1024)}k context${r.low ? ` · <span class="low">${bits(r.c.f.quant)}-bit: expect a lower score</span>` : ""}</small>` : `<span class="no">✗ too big</span><small>${r.c.f.quant} · ${(r.c.f.bytes / 1e9).toFixed(1)} GB</small>`}</div>` +
       (r.m ? `<a class="btn go" href="recipe-${r.m.rid}.html">RESULTS →</a>` : `<button class="btn go" data-i="${i}">HOW TO TEST ▾</button>`) +
       (r.m ? "" : `<div class="cmds" id="c${i}" hidden>Draft the recipe for this file, download it, tune the speed, run the 40-minute adaptive test:` +
       `<code>llmbox recipe new ${r.repo} --file ${r.c.f.file.split("/").pop()} --write</code><code>llmbox install ${r.rid} --apply</code><code>llmbox optimize ${r.rid}</code>` +

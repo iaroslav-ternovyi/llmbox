@@ -46,7 +46,9 @@ function boxFrom(g, ramGB, rambw) {   // a picker entry and the RAM fields -> wh
   return { name: g[0], gpu: g[0].replace(/ \d+ GB$/, ""), vram: g[1], vrambw: g[2], ram: ramGB * 1024, rambw,
            gen: typeof g[3] === "number" ? g[3] : 1, backend: g[4] === "vulkan" ? "vulkan" : "cuda", amd: g[4] === "vulkan" };
 }
-function boxLabel(b) { return b.uni ? `${b.name} · ${Math.round(b.mem / 1024)} GB unified · ${b.rambw} GB/s` : `${b.name} · ${Math.round(b.ram / 1024)} GB · ${b.rambw} GB/s`; }
+function boxLabel(b) { return b.uni ? `${b.name} · ${rnd(b.mem / 1024)} GB unified · ${b.rambw} GB/s` : `${b.name} · ${rnd(b.ram / 1024)} GB · ${b.rambw} GB/s`; }
+// a machine's RAM as it is sold (64 GB), not as the system reports it (61.4 GiB): words.ram_gb
+const ramSold = gib => [8, 16, 24, 32, 36, 48, 64, 96, 128, 192, 256, 512].reduce((a, s) => Math.abs(s - gib) < Math.abs(a - gib) ? s : a);
 function savedBox(DATA) {
   try { const s = JSON.parse(localStorage.getItem("llmbox-box") || "null"); if (!s || !s.gpu) return null;
     const g = DATA.gpus.find(x => x[0] === s.gpu); if (!g) return null;
