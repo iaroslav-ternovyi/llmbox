@@ -12,7 +12,10 @@ REPO="${1:?usage: vps-setup.sh <repo-url> [<ssh public key for the llmbox user>]
 PUBKEY="${2:-}"
 
 apt-get update -q
-apt-get install -y -q python3 python3-venv git rsync ufw bubblewrap apparmor debian-keyring debian-archive-keyring apt-transport-https curl gnupg restic
+apt-get install -y -q python3 python3-venv git rsync ufw bubblewrap apparmor debian-keyring debian-archive-keyring apt-transport-https curl gnupg restic librsvg2-bin
+# the result cards: rsvg-convert draws them in IBM Plex (Sans Condensed + Mono), which Ubuntu ships in multiverse
+apt-get install -y -q fonts-ibm-plex || { add-apt-repository -y multiverse && apt-get update -q && apt-get install -y -q fonts-ibm-plex; }
+fc-match "IBM Plex Sans Condensed" | grep -q "Plex" && fc-match "IBM Plex Mono" | grep -q "Plex" || { echo "IBM Plex is missing: the result cards cannot be drawn"; exit 1; }
 # Node 22+ for wrangler (the site upload); Ubuntu 24.04 ships 18
 if ! node -e 'process.exit(parseInt(process.versions.node) >= 22 ? 0 : 1)' 2>/dev/null; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null

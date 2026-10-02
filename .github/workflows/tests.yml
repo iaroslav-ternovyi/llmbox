@@ -18,6 +18,9 @@ jobs:
         run: |
           sudo apt-get install -y -q bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: rsvg-convert and IBM Plex (the result card is drawn and checked as a PNG)
+        run: |
+          sudo apt-get install -y -q librsvg2-bin fonts-ibm-plex || { sudo add-apt-repository -y multiverse && sudo apt-get update -q && sudo apt-get install -y -q librsvg2-bin fonts-ibm-plex; }
       - name: tests that need no saved results (python3 tests/run_all.py --portable)
         env:
           LLMBOX_HOME: ${{ runner.temp }}/llmbox
