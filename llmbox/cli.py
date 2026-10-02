@@ -359,6 +359,16 @@ def cmd_test(a: argparse.Namespace) -> None:
         rc.load(host, rid)
     except OSError:
         raise SystemExit(f"{rid} is not installed on {host}: llmbox install {rid} --from registry --host {host} --apply")
+    if a.set:
+        from . import social
+        if any("=" not in o for o in a.set):
+            raise SystemExit("--set takes key=value, e.g. --set placement.ubatch=1024")
+        ok, bad = social.parse(a.set)
+        if bad:
+            print(f"  not shareable: {', '.join(bad)} (paths, the engine and free server flags stay on this machine); "
+                  f"the run is sent, the model's page does not offer these settings to others")
+        if ok:
+            print(f"  your settings: {social.describe(ok)} - measured and, signed in, offered on the model's page with your numbers")
     ch = irt.canonical(suite.content_hash())
     if ch not in irt.RELEASES:
         raise SystemExit(f"this llmbox's tasks ({suite.VERSION}, {ch}) are not a released version: update llmbox")
@@ -393,16 +403,17 @@ def cmd_test(a: argparse.Namespace) -> None:
     # a Mac reads a prompt at a few hundred tokens a second: 80k alone took 8 of an M2 Max's 16 minutes (2026-10-02), so a
     # Mac is timed at 32k (what its card and page show) and leaves the 80k figure to the machines that read fast
     mac = (prof["hw"].get("gpus") or [{}])[0].get("vendor") == "apple"
-    main(["speed", rid, "--host", host, "--depth", "32000"] + ([] if mac else ["--depth", "80000"]) + ["--unload"])
+    sets = [x for o in a.set or [] for x in ("--set", o)]
+    main(["speed", rid, "--host", host, "--depth", "32000"] + ([] if mac else ["--depth", "80000"]) + ["--unload"] + sets)
     if quality:
         budget = a.budget or (40 if a.full else 10)
         print(f"\n2/{steps} quality: adaptive test, {budget:g} minutes" + ("" if a.full else " (--full: 40 minutes, a narrower range)"), flush=True)
         from . import serving
-        with serving.served(host, rid) as url:   # llmbox serves the recipe itself: no llama-swap needed
+        with serving.served(host, rid, a.set) as url:   # llmbox serves the recipe itself: no llama-swap needed
             print(f"  serving {rid} at {url}", flush=True)
             # no second speed probe: step 1 timed it at every depth (on a Mac the probe's 96k prompt alone took ~9 minutes)
             main(["bench", rid, "--host", host, "--recipe", rid, "--endpoint", url, "--adaptive", "--budget", str(budget),
-                  "--target", "2.5", "--seed", str(seed)])
+                  "--target", "2.5", "--seed", str(seed)] + sets)
     mine = [(p, r) for p, r in results.files(host) if os.path.getmtime(p) >= t0 and r.get("kind") in submit.KINDS
             and (r.get("recipe") or {}).get("id") == rid]   # this test's records only, not the machine's history
     print(f"\n{steps}/{steps} where this stands", flush=True)
@@ -608,6 +619,35 @@ def cmd_serve(a: argparse.Namespace) -> None:
     server.serve(a.data, port=a.port, bind=a.bind, on_accept=(lambda ids: _rebuild_site(a.rebuild, a.deploy)) if a.rebuild else None)
 
 
+def cmd_moderate(a: argparse.Namespace) -> None:
+    """The operator's side of comments: what readers reported, and hide / show / delete / ban."""
+    from . import server
+    it = server.Intake(a.data)
+    if a.action == "list":
+        rows = it.moderation()
+        if not rows:
+            print("nothing reported or hidden")
+        for r in rows:
+            state = {0: "visible", 1: "HIDDEN by reports", 2: f"hidden by you ({r['reason']})"}.get(r["hidden"], "?")
+            print(f"#{r['id']} on {r['rid']} by {r['login']} ({r['handle']}{', BANNED' if r['banned'] else ''}) {r['created']} · {r['n']} report(s) · {state}")
+            if r["why"]:
+                print(f"   reports: {r['why']}")
+            print("   " + r["body"].replace("\n", "\n   "))
+        return
+    if a.action in ("ban", "unban"):
+        if not a.target or not it.ban(a.target, a.action == "ban"):
+            raise SystemExit(f"no account {a.target!r} (a handle or GitHub name)")
+        print(f"{a.target}: {'may not' if a.action == 'ban' else 'may again'} comment or vote")
+        return
+    if not (a.target or "").isdigit():
+        raise SystemExit(f"llmbox moderate {a.action} <comment number>")
+    if a.action == "hide" and not a.reason:
+        raise SystemExit("hide needs --reason: the author is told why (EU Digital Services Act art. 17)")
+    if not it.moderate(int(a.target), a.action, a.reason or ""):
+        raise SystemExit(f"no comment #{a.target}")
+    print(f"#{a.target}: {a.action}")
+
+
 def _rebuild_site(out: str, deploy: str | None = None) -> bool:
     """Rebuild the site; then publish it with the deploy command ({site} = the folder), e.g. wrangler pages deploy.
     True when the site went out (or there is nothing to deploy with), False when the upload failed."""
@@ -680,7 +720,7 @@ def cmd_bench(a: argparse.Namespace) -> None:
     info = None
     if cap is not None:
         from . import recipe as rc
-        rr = rc.load(a.host, a.recipe or a.model) if (a.recipe or a.model) in rc.ids(a.host) else None
+        rr = rc.load_set(a.host, a.recipe or a.model, a.set) if (a.recipe or a.model) in rc.ids(a.host) else None
         info = runinfo.end(cap, rr)
         rt = info["runtime"] or {}
         print(f"  settings: {rt.get('variant', 'no recipe to compare')} · consistent {rt.get('settings_consistent')} · "
@@ -717,9 +757,11 @@ def cmd_bench(a: argparse.Namespace) -> None:
     elif a.host:
         prof = hosts.load(a.host)
         from . import recipe as rc
-        r = rc.load(a.host, a.recipe or a.model) if (a.recipe or a.model) in rc.ids(a.host) else {"id": a.recipe or a.model}
+        r = rc.load_set(a.host, a.recipe or a.model, a.set) if (a.recipe or a.model) in rc.ids(a.host) else {"id": a.recipe or a.model}
         rec = results.new("suite", prof, recipe=r, model={k: (r.get("model") or {}).get(k) for k in ("hf_repo", "file", "path", "sha256")})
         rec.update(res)
+        if a.set:   # served with these overrides (llmbox test --set): a variant of the recipe, not the recipe
+            rec["overrides"] = list(a.set)
         if info:
             rec["runtime"] = info["runtime"]
             rec["telemetry"] = info["telemetry"]
@@ -968,7 +1010,7 @@ def cmd_site(a) -> None:
 COMMAND_GROUPS = [
     ("Pick and run a model on your box", ["start", "doctor", "update", "bug", "host", "pick", "scout", "fit", "recipe", "install", "run", "stop", "tune", "optimize"]),
     ("Measure it", ["test", "bench", "queue", "speed", "probe", "loops", "traces"]),
-    ("Share and compare", ["login", "whoami", "profile", "submit", "logout", "forget", "serve"]),
+    ("Share and compare", ["login", "whoami", "profile", "submit", "logout", "forget", "serve", "moderate"]),
     ("Scores, results and the site", ["report", "site", "irt", "db", "verify", "regrade", "grade-pending", "watch"]),
     ("Develop the test", ["validate", "snapshot"]),
 ]
@@ -1111,6 +1153,7 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--explore", type=int, help="adaptive: new task families (no calibration yet) to try; default 6. A strong "
                    "cloud model calibrating new levels: 20+, every task goes to them once each block has its minimum")
     b.add_argument("--bank", help="adaptive: content hash of the calibrated bank to use (default: this suite's)")
+    b.add_argument("--set", action="append", help="the endpoint serves the recipe with this override (as llmbox speed --set): recorded with the run")
     b.set_defaults(fn=cmd_bench)
 
     qp = command("queue", "persistent benchmark job queue with GPU health gating and auto-resume")
@@ -1191,6 +1234,9 @@ def main(argv: list[str] | None = None) -> None:
     te.add_argument("--yes", "-y", action="store_true", help="no questions (it then sends nothing: sending needs its own yes)")
     te.add_argument("--server", help="intake address (default $LLMBOX_SERVER)")
     te.add_argument("--no-submit", action="store_true", help="measure only; `llmbox submit` sends it later")
+    te.add_argument("--set", action="append", metavar="KEY=VALUE",
+                    help="test your own settings, e.g. --set placement.ubatch=1024 (repeatable): sent signed in, the model's page "
+                         "offers them to others with your numbers, next to llmbox's")
     te.set_defaults(fn=cmd_test)
 
     for name, what in (("login", "sign in with GitHub (a code to enter at github.com): your results get an account and a profile page"),
@@ -1220,6 +1266,13 @@ def main(argv: list[str] | None = None) -> None:
     sv.add_argument("--deploy", help="after a rebuild, run this to publish the site ({site} = the folder), e.g. wrangler pages deploy")
     sv.add_argument("--force-rebuild", action="store_true", help="with --ingest-once: rebuild (and deploy) even when nothing new came in")
     sv.set_defaults(fn=cmd_serve)
+
+    mo = command("moderate", "the intake's comments: list what readers reported; hide (with a reason), show, delete; ban an account")
+    mo.add_argument("action", choices=["list", "hide", "show", "delete", "ban", "unban"])
+    mo.add_argument("target", nargs="?", help="a comment number, or for ban / unban a handle or GitHub name")
+    mo.add_argument("--reason", help="hide: why (the author sees it)")
+    mo.add_argument("--data", default=os.path.join(hosts.HOME, "intake"), help="the intake's data folder")
+    mo.set_defaults(fn=cmd_moderate)
 
     rc_ = command("recipe", "recipes: list / show / render a launcher / check the host runs what the recipe says / pull the site's")
     rc_.add_argument("action", choices=["list", "show", "render", "check", "new", "pull"])

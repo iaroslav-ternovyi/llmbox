@@ -29,13 +29,14 @@ function signedOut(msg) {
 function signedIn(me) {
   const name = me.public && me.login ? me.login : me.handle;
   $("#acct-h").textContent = name;
-  $("#acct-sub").innerHTML = `Signed in with GitHub as <b>${esc(me.login)}</b> · ${me.submissions} submission${me.submissions === 1 ? "" : "s"}, ${me.records} result${me.records === 1 ? "" : "s"}`;
+  $("#acct-sub").innerHTML = `Signed in with GitHub as <b>${esc(me.login)}</b> · ${me.submissions} submission${me.submissions === 1 ? "" : "s"}, ${me.records} result${me.records === 1 ? "" : "s"}` +
+    (me.comments ? `, ${me.comments} comment${me.comments === 1 ? "" : "s"}` : "");
   $("#acct").innerHTML =
     `<section class="panel pad"><div class="lbl">Profile</div><p><a href="${esc(me.handle)}.html">Your profile page →</a> <span class="q">(appears with your first result)</span></p>` +
     `<p>It shows <b>${me.public ? "your GitHub name, " + esc(me.login) : "the handle " + esc(me.handle) + ", not your GitHub name"}</b>.</p>` +
     `<p><button class="btn" id="vis" type="button">${me.public ? "SHOW ONLY THE HANDLE" : "SHOW MY GITHUB NAME"}</button></p></section>` +
     `<section class="panel pad"><div class="lbl">This browser</div><p><button class="btn" id="out" type="button">SIGN OUT</button></p></section>` +
-    `<section class="panel pad"><div class="lbl">Delete</div><p class="q">Deletes the account and every result you sent, here and on the site. It cannot be undone.</p>` +
+    `<section class="panel pad"><div class="lbl">Delete</div><p class="q">Deletes the account and every result, comment and vote you sent, here and on the site. It cannot be undone.</p>` +
     `<p><button class="btn" id="del" type="button">DELETE MY ACCOUNT AND DATA</button></p></section>`;
   header(me);
   $("#vis").onclick = async () => { try { signedIn(Object.assign(store.get(), await call("/api/v1/me", { public: !me.public }))); } catch (e) { alert(e.message); } };

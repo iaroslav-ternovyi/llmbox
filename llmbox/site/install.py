@@ -107,6 +107,10 @@ def privacy_page() -> str:
  account you asked for (GDPR art. 6.1.b).</li>
  <li>Your profile page shows a handle, not your GitHub name, unless you choose to show it. Results are published on this site
  and in its <a href="data/LICENSE.txt">data download</a> (CC BY 4.0) under that handle, or without any name when sent anonymously.</li>
+ <li>Comments you post and your votes on settings are kept with your account; a comment is shown with your handle (or your
+ GitHub name, if you made it public) and the machines you measured that model on. When you report a comment, the report
+ (its reason and your account) is kept for the operator to decide on it. Basis: providing the comments you asked for
+ (GDPR art. 6.1.b) and keeping them lawful (art. 6.1.c and f).</li>
  <li>For rate limits the server keeps a keyed hash of the address a request came from, changed daily and deleted after two days.</li>
  <li>Kept until you delete them.</li></ul></section>
 <section class="panel pad"><div class="lbl">Who else handles it</div><ul class="plain">
@@ -116,8 +120,8 @@ def privacy_page() -> str:
  <li>GitHub (USA) handles signing in, and anything you post in the repository's issues.</li>
  <li>Nothing is sold or used for advertising.</li></ul></section>
 <section class="panel pad"><div class="lbl">Your rights</div><ul class="plain">
- <li><code>llmbox forget</code>, or DELETE on the <a href="account.html">account page</a>, deletes the account and every result it
- sent, at once. Anonymous results are deleted on request with their submission id (<code>~/.llmbox/submitted.json</code>).</li>
+ <li><code>llmbox forget</code>, or DELETE on the <a href="account.html">account page</a>, deletes the account and every result,
+ comment, vote and report it sent, at once. Anonymous results are deleted on request with their submission id (<code>~/.llmbox/submitted.json</code>).</li>
  <li>You can also ask for a copy of your data, for a correction, to limit or object to its use, and take your results elsewhere
  (they are in the CC BY 4.0 download). And you can complain to the Spanish data protection authority,
  <a href="https://www.aepd.es">AEPD</a>.</li></ul></section>'''
@@ -141,7 +145,17 @@ def terms_page() -> str:
  under Creative Commons Attribution 4.0, under your handle or without a name. You can delete them at any time
  (<a href="privacy.html">how</a>); copies others already downloaded stay theirs under that licence.</li>
  <li>Send only results of runs you made. Results that look wrong are held back or marked, not deleted silently, and a
- machine or account that sends made-up results can be blocked.</li></ul></section>'''
+ machine or account that sends made-up results can be blocked.</li>
+ <li>Settings you share (<code>llmbox test --set</code>) are published with the run that measured them, the same way.</li></ul></section>
+<section class="panel pad" id="comments"><div class="lbl">Comments and votes</div><ul class="plain">
+ <li>Anyone signed in with GitHub can comment on a model and vote on settings. A comment shows your handle (or your GitHub
+ name, if you made it public) and the machines you measured that model on.</li>
+ <li>Keep to the model: what you ran, on what, what happened. No advertising, no abuse, nothing illegal, nobody's personal data.
+ You stay responsible for what you write and allow llmbox to show it on this site; it is not part of the data download.</li>
+ <li>Anyone signed in can report a comment, with the reason. Three reports hide it until the operator looks; the operator may
+ then remove it, and tells its author why on the comment itself. An account that keeps breaking these rules loses the right
+ to comment and vote. If you think a decision was wrong, write to the operator (<a href="privacy.html">contact</a>).</li>
+ <li>You can delete your own comments at any time; deleting your account deletes all of them, and your votes.</li></ul></section>'''
     return _page("llmbox · terms", "", body, ("pages.css", "method.css"),
-                 about="llmbox's terms: open source without warranty, models under their own licences, results published under CC BY 4.0 and deletable.")
+                 about="llmbox's terms: open source without warranty, models under their own licences, results published under CC BY 4.0 and deletable, rules for comments.")
 

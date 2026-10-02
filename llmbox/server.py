@@ -17,6 +17,14 @@
                            site page with a one-time ticket in the #fragment (no cookie: the site and the API are two
                            origins); POST /api/v1/login/web/redeem {ticket} -> {key, handle}
   GET  /api/v1/health      ok; 503 while a result card could not be drawn in the last day (the uptime monitor alerts)
+  GET  /api/v1/models/<id>/social   a model page's comments (each with who wrote it and the machines they measured
+                           that model on), the votes on llmbox's settings and on the settings people measured, and -
+                           with a key - this account's own votes
+  POST /api/v1/comments    {rid, body} (signed in): plain text, 1-2000 characters; 10 an hour, 30 a day
+  POST /api/v1/comments/<n>/delete   the author's own comment
+  POST /api/v1/comments/<n>/report   {reason: spam|abuse|illegal|other, detail}: three readers hide it until the
+                           operator looks (`llmbox moderate`)
+  POST /api/v1/votes       {target: "rid:<id>" (llmbox's settings) or a variant id, value: 1, -1 or 0}
 
 Bundles are stored as sent (<data>/inbox/<id>.json.gz) and listed in <data>/intake.db. `ingest()` (a thread of the
 server, or `llmbox serve --ingest-once`) checks each record and files the accepted ones as results of the pseudo
@@ -65,7 +73,14 @@ CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, github_id INTEGER UNIQ
   public INTEGER DEFAULT 0, created TEXT);
 CREATE TABLE IF NOT EXISTS keys (hash TEXT PRIMARY KEY, user_id INTEGER, created TEXT, last_used TEXT);
 CREATE TABLE IF NOT EXISTS web (token TEXT PRIMARY KEY, kind TEXT, value TEXT, expires REAL);
-CREATE TABLE IF NOT EXISTS publishes (at REAL, ok INTEGER, n INTEGER)"""
+CREATE TABLE IF NOT EXISTS publishes (at REAL, ok INTEGER, n INTEGER);
+CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY, rid TEXT, user_id INTEGER, body TEXT, created TEXT,
+  hidden INTEGER DEFAULT 0, reason TEXT DEFAULT '');
+CREATE INDEX IF NOT EXISTS comments_rid ON comments (rid);
+CREATE TABLE IF NOT EXISTS votes (user_id INTEGER, target TEXT, value INTEGER, created TEXT, PRIMARY KEY (user_id, target));
+CREATE TABLE IF NOT EXISTS reports (user_id INTEGER, comment_id INTEGER, reason TEXT, detail TEXT, created TEXT,
+  PRIMARY KEY (user_id, comment_id))"""
+HIDDEN_BY_REPORTS, HIDDEN_BY_OPERATOR = 1, 2   # comments.hidden
 GH_AUTHORIZE = "https://github.com/login/oauth/authorize"
 GH_TOKEN = "https://github.com/login/oauth/access_token"
 # site pages a web sign-in may return to (the public site; the local one for development); $LLMBOX_SITE_ORIGINS adds more
@@ -87,6 +102,8 @@ class Intake:
                 c.execute("ALTER TABLE submissions ADD COLUMN user_id INTEGER")
             if "published" not in cols:   # when the site that shows this submission went out
                 c.execute("ALTER TABLE submissions ADD COLUMN published TEXT")
+            if "banned" not in {r[1] for r in c.execute("PRAGMA table_info(users)")}:   # may not comment or vote (llmbox moderate)
+                c.execute("ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0")
         sp = os.path.join(self.data, "salt")   # handles are hashes of the GitHub id with this server's own salt
         if not os.path.exists(sp):
             import secrets
@@ -265,10 +282,12 @@ class Intake:
             self.export_users()
         with self._db() as c:
             n = c.execute("SELECT count(*), coalesce(sum(records), 0) FROM submissions WHERE user_id = ?", (user["id"],)).fetchone()
-        return 200, {"handle": user["handle"], "login": user["login"], "public": bool(user["public"]), "submissions": n[0], "records": n[1]}
+            nc = c.execute("SELECT count(*) FROM comments WHERE user_id = ?", (user["id"],)).fetchone()[0]
+        return 200, {"handle": user["handle"], "login": user["login"], "public": bool(user["public"]), "submissions": n[0], "records": n[1],
+                     "comments": nc}
 
     def forget(self, user: dict, save_host: str = COMMUNITY) -> tuple[int, dict]:
-        """Every result the account sent, its submissions, keys and the account itself: gone."""
+        """Every result the account sent, its submissions, comments, votes and reports, keys and the account itself: gone."""
         gone = 0
         for p, r in results.files(save_host):
             if (r.get("submission") or {}).get("user") == user["handle"]:
@@ -282,6 +301,9 @@ class Intake:
                 if st == "accepted":   # it had a page: the page says it was removed, its card goes
                     removed.append(sid)
             c.execute("DELETE FROM submissions WHERE user_id = ?", (user["id"],))
+            c.execute("DELETE FROM reports WHERE user_id = ? OR comment_id IN (SELECT id FROM comments WHERE user_id = ?)", (user["id"], user["id"]))
+            c.execute("DELETE FROM comments WHERE user_id = ?", (user["id"],))
+            c.execute("DELETE FROM votes WHERE user_id = ?", (user["id"],))
             c.execute("DELETE FROM keys WHERE user_id = ?", (user["id"],))
             c.execute("DELETE FROM users WHERE id = ?", (user["id"],))
         withdraw(removed, "owner")
@@ -308,6 +330,161 @@ class Intake:
         with os.fdopen(fd, "w") as f:
             json.dump(us, f)
         os.replace(tmp, os.path.join(self.data, "users.json"))
+
+    # ---- a model page's comments, votes and reports (llmbox/social.py) --------------------------------------------------
+
+    COMMENTS_PER_HOUR, COMMENTS_PER_DAY = 10, 30
+    VOTES_PER_DAY = 300
+    REPORTS_TO_HIDE = 3      # distinct readers' reports that hide a comment until the operator looks at it
+    REPORT_REASONS = ("spam", "abuse", "illegal", "other")
+
+    def _index(self) -> tuple[dict, dict]:
+        """(variants by recipe id, machines by (handle, recipe id)) from the filed runs: read again when the folder changed."""
+        from . import social
+        d = os.path.join(results.HOME, "results", COMMUNITY)
+        sig = os.stat(d).st_mtime_ns if os.path.isdir(d) else 0
+        idx = getattr(self, "_idx", None)
+        if not idx or idx[0] != sig:
+            idx = self._idx = (sig, social.variants(COMMUNITY), social.testers(COMMUNITY))
+        return idx[1], idx[2]
+
+    @staticmethod
+    def _since(seconds: float) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - seconds))
+
+    def social(self, rid: str, user: dict | None) -> tuple[int, dict]:
+        from . import social
+        if not social.rid_known(rid):
+            return 404, {"error": "no such model"}
+        variants, testers = self._index()
+        uid = (user or {}).get("id") or -1
+        targets = [f"rid:{rid}"] + [v["key"] for v in variants.get(rid, [])]
+        q = ",".join("?" * len(targets))
+        with self._db() as c:
+            rows = c.execute("SELECT c.id, c.body, c.created, c.hidden, c.reason, c.user_id, u.handle, u.login, u.public FROM comments c "
+                             "JOIN users u ON u.id = c.user_id WHERE c.rid = ? AND (c.hidden = 0 OR c.user_id = ?) ORDER BY c.id", (rid, uid)).fetchall()
+            tally = {t: {"up": 0, "down": 0} for t in targets}
+            for t, val, n in c.execute(f"SELECT target, value, count(*) FROM votes WHERE target IN ({q}) AND value != 0 GROUP BY target, value", targets):
+                tally[t]["up" if val > 0 else "down"] = n
+            mine = dict(c.execute(f"SELECT target, value FROM votes WHERE user_id = ? AND target IN ({q})", [uid, *targets]).fetchall())
+            reported = {r[0] for r in c.execute("SELECT comment_id FROM reports WHERE user_id = ?", (uid,))}
+        comments = [{"id": r["id"], "body": r["body"], "when": r["created"], "by": r["handle"], "name": r["login"] if r["public"] else None,
+                     "tested": testers.get((r["handle"], rid), []), "mine": r["user_id"] == uid,
+                     "held": ("removed by the operator" + (f": {r['reason']}" if r["reason"] else "")) if r["hidden"] == HIDDEN_BY_OPERATOR
+                     else "hidden after reports, until the operator looks" if r["hidden"] else None,
+                     "reported": r["id"] in reported} for r in rows]
+        return 200, {"rid": rid, "comments": comments, "votes": tally, "mine": mine,
+                     "me": {"handle": user["handle"], "can_post": not user.get("banned")} if user else None}
+
+    def comment(self, user: dict, raw: bytes) -> tuple[int, dict]:
+        from . import social
+        if user.get("banned"):
+            return 403, {"error": "this account cannot post comments"}
+        try:
+            d = json.loads(raw or b"{}")
+        except ValueError:
+            return 400, {"error": "not JSON"}
+        if not isinstance(d, dict) or not social.rid_known(d.get("rid")):
+            return 404, {"error": "no such model"}
+        body = social.clean(d.get("body"))
+        if body is None:
+            return 400, {"error": f"a comment is 1 to {social.MAX_COMMENT} characters of text, under {social.MAX_LINES} lines"}
+        with self.lock, self._db() as c:
+            hour = c.execute("SELECT count(*) FROM comments WHERE user_id = ? AND created > ?", (user["id"], self._since(3600))).fetchone()[0]
+            day = c.execute("SELECT count(*) FROM comments WHERE user_id = ? AND created > ?", (user["id"], self._since(86400))).fetchone()[0]
+            if hour >= self.COMMENTS_PER_HOUR or day >= self.COMMENTS_PER_DAY:
+                return 429, {"error": f"at most {self.COMMENTS_PER_HOUR} comments an hour and {self.COMMENTS_PER_DAY} a day"}
+            if c.execute("SELECT 1 FROM comments WHERE user_id = ? AND rid = ? AND body = ?", (user["id"], d["rid"], body)).fetchone():
+                return 409, {"error": "you already posted that"}
+            now = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+            cid = c.execute("INSERT INTO comments (rid, user_id, body, created) VALUES (?,?,?,?)", (d["rid"], user["id"], body, now)).lastrowid
+        return 201, {"id": cid, "body": body, "when": now}
+
+    def uncomment(self, user: dict, cid: int) -> tuple[int, dict]:
+        with self.lock, self._db() as c:
+            if not c.execute("DELETE FROM comments WHERE id = ? AND user_id = ?", (cid, user["id"])).rowcount:
+                return 404, {"error": "no comment of yours with that number"}
+            c.execute("DELETE FROM reports WHERE comment_id = ?", (cid,))
+        return 200, {"deleted": cid}
+
+    def report(self, user: dict, cid: int, raw: bytes) -> tuple[int, dict]:
+        """A reader's notice about a comment (EU Digital Services Act art. 16: why, and who sends it - the GitHub account).
+        The third reader's notice hides it until the operator decides (llmbox moderate); the author sees why."""
+        try:
+            d = json.loads(raw or b"{}")
+        except ValueError:
+            return 400, {"error": "not JSON"}
+        why = d.get("reason") if isinstance(d, dict) else None
+        if why not in self.REPORT_REASONS:
+            return 400, {"error": f"reason: one of {', '.join(self.REPORT_REASONS)}"}
+        detail = str(d.get("detail") or "")[:500]
+        with self.lock, self._db() as c:
+            row = c.execute("SELECT user_id, hidden FROM comments WHERE id = ?", (cid,)).fetchone()
+            if not row:
+                return 404, {"error": "no such comment"}
+            if row["user_id"] == user["id"]:
+                return 400, {"error": "that is your own comment: delete it instead"}
+            c.execute("INSERT OR IGNORE INTO reports (user_id, comment_id, reason, detail, created) VALUES (?,?,?,?,?)",
+                      (user["id"], cid, why, detail, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())))
+            n = c.execute("SELECT count(*) FROM reports WHERE comment_id = ?", (cid,)).fetchone()[0]
+            if n >= self.REPORTS_TO_HIDE and row["hidden"] == 0:
+                c.execute("UPDATE comments SET hidden = ? WHERE id = ?", (HIDDEN_BY_REPORTS, cid))
+        return 202, {"reported": cid, "hidden": n >= self.REPORTS_TO_HIDE}
+
+    def vote(self, user: dict, raw: bytes) -> tuple[int, dict]:
+        """+1, -1 or 0 (taken back) on llmbox's settings for a model ("rid:<id>") or on a variant people measured."""
+        from . import social
+        if user.get("banned"):
+            return 403, {"error": "this account cannot vote"}
+        try:
+            d = json.loads(raw or b"{}")
+        except ValueError:
+            return 400, {"error": "not JSON"}
+        t, val = (d.get("target"), d.get("value")) if isinstance(d, dict) else (None, None)
+        if val not in (1, -1, 0) or isinstance(val, bool) or not isinstance(t, str):
+            return 400, {"error": "value: 1, -1 or 0"}
+        variants, _ = self._index()
+        own = next((v for vs in variants.values() for v in vs if v["key"] == t), None)
+        if not ((t.startswith("rid:") and social.rid_known(t[4:])) or own):
+            return 404, {"error": "nothing to vote on with that id"}
+        if own and user["handle"] in {r["by"] for r in own["runs"]}:
+            return 400, {"error": "you measured these settings yourself"}
+        with self.lock, self._db() as c:
+            if c.execute("SELECT count(*) FROM votes WHERE user_id = ? AND created > ?", (user["id"], self._since(86400))).fetchone()[0] >= self.VOTES_PER_DAY:
+                return 429, {"error": f"at most {self.VOTES_PER_DAY} votes a day"}
+            c.execute("INSERT INTO votes (user_id, target, value, created) VALUES (?,?,?,?) ON CONFLICT (user_id, target) "
+                      "DO UPDATE SET value = excluded.value, created = excluded.created",
+                      (user["id"], t, val, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())))
+            up, down = (c.execute("SELECT count(*) FROM votes WHERE target = ? AND value = ?", (t, x)).fetchone()[0] for x in (1, -1))
+        return 200, {"target": t, "value": val, "up": up, "down": down}
+
+    def moderation(self) -> list[dict]:
+        """The comments readers reported or the operator hid, most reported first (llmbox moderate)."""
+        with self._db() as c:
+            rows = c.execute("SELECT c.id, c.rid, c.body, c.created, c.hidden, c.reason, u.handle, u.login, u.banned, count(r.user_id) AS n, "
+                             "group_concat(r.reason || coalesce(': ' || nullif(r.detail, ''), ''), ' | ') AS why FROM comments c "
+                             "JOIN users u ON u.id = c.user_id LEFT JOIN reports r ON r.comment_id = c.id "
+                             "GROUP BY c.id HAVING n > 0 OR c.hidden > 0 ORDER BY c.hidden = 1 DESC, n DESC, c.id DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def moderate(self, cid: int, action: str, reason: str = "") -> bool:
+        """hide (the author sees the reason), show (and the reports on it are cleared), or delete a comment."""
+        with self.lock, self._db() as c:
+            if action == "hide":
+                n = c.execute("UPDATE comments SET hidden = ?, reason = ? WHERE id = ?", (HIDDEN_BY_OPERATOR, reason[:300], cid)).rowcount
+            elif action == "show":
+                n = c.execute("UPDATE comments SET hidden = 0, reason = '' WHERE id = ?", (cid,)).rowcount
+                c.execute("DELETE FROM reports WHERE comment_id = ?", (cid,))
+            elif action == "delete":
+                n = c.execute("DELETE FROM comments WHERE id = ?", (cid,)).rowcount
+                c.execute("DELETE FROM reports WHERE comment_id = ?", (cid,))
+            else:
+                raise ValueError(action)
+        return bool(n)
+
+    def ban(self, handle: str, on: bool = True) -> bool:
+        with self.lock, self._db() as c:
+            return bool(c.execute("UPDATE users SET banned = ? WHERE handle = ? OR login = ?", (int(on), handle, handle)).rowcount)
 
     def receive(self, raw: bytes, addr: str, user: dict | None = None) -> tuple[int, dict]:
         try:
@@ -637,6 +814,9 @@ def check(rec: dict) -> str | None:
     args = (rc_.get("extra") or {}).get("args", [])
     if not isinstance(args, list) or len(args) > 64 or not all(isinstance(x, (str, int, float)) and len(str(x)) <= 200 for x in args):
         return "the recipe's extra arguments are malformed"
+    ov = rec.get("overrides", [])   # `--set key=value`: the settings a person changed (llmbox/social.py shares some of them)
+    if not isinstance(ov, list) or len(ov) > 32 or not all(isinstance(x, str) and "=" in x and len(x) <= 200 for x in ov):
+        return "the overrides are malformed"
     rt = rec.get("runtime", {})
     if not isinstance(rt, dict) or not _text(rt.get("llama_cpp_build"), 40, need=False):
         return "the runtime description is malformed"
@@ -757,6 +937,9 @@ def handler(intake: Intake):
             if self.path.startswith("/api/v1/runs/"):
                 st = intake.status(self.path.rsplit("/", 1)[-1][:32])
                 return self._json(200, st) if st else self._json(404, {"error": "no such submission"})
+            m = re.fullmatch(r"/api/v1/models/([a-z0-9][a-z0-9.-]{0,79})/social", u.path)
+            if m:   # anyone may read; a key only adds this account's own votes and held comments
+                return self._json(*intake.social(m.group(1), intake.user_of(self.headers.get("Authorization"))))
             self._json(404, {"error": "not found"})
 
         def do_POST(self):
@@ -777,6 +960,17 @@ def handler(intake: Intake):
                 if self.path.endswith("logout"):
                     return self._json(*intake.revoke(self.headers["Authorization"]))
                 return self._json(*(intake.forget(u) if self.path.endswith("forget") else intake.me(u, body or None)))
+            m = re.fullmatch(r"/api/v1/comments(?:/(\d{1,12})/(delete|report))?|/api/v1/votes", self.path)
+            if m and n <= 8192:
+                u = intake.user_of(self.headers.get("Authorization"))
+                if not u:
+                    return self._json(401, {"error": "sign in with GitHub first"})
+                body = self.rfile.read(n)
+                if self.path == "/api/v1/votes":
+                    return self._json(*intake.vote(u, body))
+                if not m.group(1):
+                    return self._json(*intake.comment(u, body))
+                return self._json(*(intake.uncomment(u, int(m.group(1))) if m.group(2) == "delete" else intake.report(u, int(m.group(1)), body)))
             if self.path != "/api/v1/runs":
                 return self._json(404, {"error": "not found"})
             if not 0 < n <= MAX_BODY:

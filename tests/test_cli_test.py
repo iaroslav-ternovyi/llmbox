@@ -53,7 +53,8 @@ cli._standing = lambda host, rid, recs, entry=None, predicted=None: calls.append
 
 
 @contextlib.contextmanager
-def served(host, rid):
+def served(host, rid, overrides=None):
+    state["served_with"] = overrides
     yield "http://127.0.0.1:9"
 
 
@@ -62,6 +63,7 @@ serving.served = served
 
 def fake_main(argv):   # the speed and bench steps write their records, as the real ones do
     calls.append(argv[0])
+    state.setdefault("sets", {})[argv[0]] = [argv[i + 1] for i, x in enumerate(argv) if x == "--set"]
     if argv[0] == "speed":
         state["depths"] = [argv[i + 1] for i, x in enumerate(argv) if x == "--depth"]
     assert "--speed-probe" not in argv, argv   # step 1 timed every depth; a second probe cost a Mac ~15 minutes
@@ -82,7 +84,7 @@ builtins.input = lambda prompt="": (calls.append(("asked", prompt)), state["answ
 
 def test(recipe="qwen-x", **kw):
     calls.clear()
-    a = types.SimpleNamespace(recipe=recipe, host="me", full=False, budget=None, yes=False, server="http://127.0.0.1:9", no_submit=False)
+    a = types.SimpleNamespace(recipe=recipe, host="me", full=False, budget=None, yes=False, server="http://127.0.0.1:9", no_submit=False, set=None)
     for k, v in kw.items():
         setattr(a, k, v)
     out = io.StringIO()
@@ -111,6 +113,13 @@ state.update(prof=profile(MAC))
 out, code = test()
 assert code == 0 and state["depths"] == ["32000"], (code, state["depths"], out[-500:])
 state.update(prof=profile(NV))
+# --set: the speed step, the served model and the quality run all get the settings (a variant people can try and vote on)
+out, code = test(set=["placement.ubatch=1024", "model.path=/x"])
+assert code == 0 and state["sets"] == {"speed": ["placement.ubatch=1024", "model.path=/x"], "bench": ["placement.ubatch=1024", "model.path=/x"]}, state["sets"]
+assert state["served_with"] == ["placement.ubatch=1024", "model.path=/x"], state["served_with"]
+assert "not shareable: model.path" in out and "your settings: ubatch 1024" in out, out
+out, code = test(set=["nonsense"])
+assert code and "key=value" in str(code), code
 
 # 2 anonymous on a terminal, no: speed only, then the send; the offer names the badge (nobody measured an RTX 3080 10 GB)
 state.update(key=None, answers=["n", "y"])

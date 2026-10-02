@@ -21,11 +21,12 @@ def address(name: str) -> str:
     return ep.split("://", 1)[-1].rsplit(":", 1)[0]
 
 
-def start(host_name: str, rid: str, port: int | None = None) -> dict:
-    """{url, port, pid, log, cmd} of a llama-server running the recipe; raises RuntimeError when it does not come up."""
+def start(host_name: str, rid: str, port: int | None = None, overrides: list[str] | None = None) -> dict:
+    """{url, port, pid, log, cmd} of a llama-server running the recipe (with `--set` overrides: a variant); raises
+    RuntimeError when it does not come up."""
     prof = hosts.load(host_name)
     h = hosts.host_of(prof)
-    r = rc.load(host_name, rid)
+    r = rc.load_set(host_name, rid, overrides)
     hosts.free_up(h)
     args = rc.server_args(r)
     i = args.index("--port")
@@ -86,9 +87,9 @@ def stop_background(host_name: str, rid: str) -> bool:
 
 
 @contextlib.contextmanager
-def served(host_name: str, rid: str):
+def served(host_name: str, rid: str, overrides: list[str] | None = None):
     """The recipe served for the length of the block: yields its OpenAI-compatible base URL."""
-    s = start(host_name, rid)
+    s = start(host_name, rid, overrides=overrides)
     try:
         yield s["url"]
     finally:

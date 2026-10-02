@@ -57,6 +57,23 @@ def load(host: str, rid: str, _seen: tuple = ()) -> dict:
     return _merge(DEFAULTS, r)
 
 
+def load_set(host: str, rid: str, overrides: list[str] | None = None) -> dict:
+    """The recipe with `--set key=value` overrides applied, values read as JSON when they are (a variant: llmbox test
+    --set, llmbox bench --set)."""
+    r = load(host, rid)
+    for o in overrides or []:
+        k, v = o.split("=", 1)
+        d = r
+        for p in k.split(".")[:-1]:
+            d = d.setdefault(p, {})
+        try:
+            v = json.loads(v)
+        except ValueError:
+            pass
+        d[k.split(".")[-1]] = v
+    return r
+
+
 def ids(host: str) -> list[str]:
     d = recipes_dir(host)
     return sorted(f[:-5] for f in os.listdir(d) if f.endswith(".toml")) if os.path.isdir(d) else []

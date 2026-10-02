@@ -230,6 +230,65 @@ def _settings_panel(rcp: dict, opt: dict | None) -> str:
             + worth + "</section>")
 
 
+def _shared_panel(rid: str, vs: list[dict], community: list | None, users: dict, ours: dict, k: float | None) -> str:
+    """llmbox's settings and the settings people measured instead (llmbox test --set, llmbox/social.py), each with its
+    numbers per machine and the votes (filled in by social.js from the API). ours: {t2, t32, score, machines} of the
+    recipe; k turns a raw capability into % of Opus."""
+    from .. import social
+    by_cls = {c["class"]: c for c in community or []}
+    pct = lambda cap: f"{cap * k:.0f}%" if cap is not None and k else "—"
+
+    def who(h: str) -> str:
+        u = users.get(h) or {}
+        return f"<a href='{esc(h)}.html'>{esc(u.get('login') if u.get('public') and u.get('login') else h)}</a>"
+
+    def run_row(r: dict, answers: bool) -> str:
+        base, t2, t32 = (by_cls.get(r["cls"]) or {}).get("t2"), r.get("t2"), r.get("t32")
+        d = f" <span class='{'up' if t2 >= base else 'dn'}'>{(t2 / base - 1) * 100:+.0f}%</span>" if t2 and base else ""
+        score = (f"{pct(r['score'])}<span class='q'> · 10-min test</span>" if r.get("score") is not None
+                 else "<span class='q'>not tested</span>" if answers and r["kind"] == "speed" else "")
+        flag = " <span class='q'>unconfirmed</span>" if r.get("outlier") else ""
+        return (f"<tr><td class='l'>{who(r['by'])}</td><td class='l'>{esc(r['machine'])}</td>"
+                f"<td>{f'{t2:.0f}' if t2 else ''}{d}{flag}</td><td>{f'{t32:.0f}' if t32 else ''}</td><td>{score}</td>"
+                f"<td class='q'>{esc(r['when'][:10])}</td></tr>")
+
+    t2, t32, n = ours.get("t2"), ours.get("t32"), ours.get("machines")
+    summary = " · ".join(x for x in (f"{t2:.0f} tok/s" if t2 else "", f"{t32:.0f} at 32k" if t32 else "") if x)
+    blocks = [f"<div class='var ours' data-key='rid:{esc(rid)}'><div class='vhead'><div><b>llmbox's settings</b>"
+              f"<span class='q'> · optimized on the reference PC, fitted to each box by <code>--fit</code> (<a href='#run'>run it</a>)</span></div>"
+              f"<span class='vote' data-target='rid:{esc(rid)}'></span></div>"
+              f"<p class='vsum'>{summary + ' on the reference PC · ' if summary else ''}score {pct(ours.get('score'))}"
+              f"{f' · measured on {n} more machine' + ('s' if n != 1 else '') if n else ''}</p></div>"]
+    for v in vs:
+        cmd = f"llmbox test {rid} " + " ".join(f"--set {f}" for f in social.flags(v["settings"]))
+        blocks.append(f"<div class='var' data-key='{esc(v['key'])}'><div class='vhead'><div><span class='set'>{esc(social.describe(v['settings']))}</span>"
+                      + ("<span class='q'> · changes the answers</span>" if v["answers"] else "<span class='q'> · speed only</span>")
+                      + f"</div><span class='vote' data-target='{esc(v['key'])}'></span>"
+                      f"<button class='btn vcopy' type='button' data-copy='{esc(cmd)}' title='{esc(cmd)}'>COPY</button></div>"
+                      "<div class='tw'><table class='vruns'><tr><th class='l'>BY</th><th class='l'>MEASURED ON</th><th>TOK/S<br><span class='faint'>vs llmbox's</span></th>"
+                      "<th>AT 32K</th><th>SCORE</th><th></th></tr>" + "".join(run_row(r, v["answers"]) for r in v["runs"]) + "</table></div></div>")
+    keys = ", ".join(f"<code>{esc(x)}</code>" for x in social.SHAREABLE)
+    empty = ("<p class='vnone'>Nobody has shared other settings for this model yet. If you think llmbox's can be beaten on your machine, "
+             "measure yours and they appear here, with your numbers, for others to try and vote on.</p>") if not vs else ""
+    return (f'<section class="panel pad shared" id="shared"><div class="lbl">Settings people measured</div>'
+            f'<p class="q vtop">Other settings people ran this model with, each with the run behind it: a setting is only offered with its measurement. '
+            f'The % is against llmbox\'s settings on the same card or Mac. Vote for the ones that work for you.</p>'
+            + "".join(blocks) + empty +
+            f"<details class='vhow'><summary>Share your settings</summary><p>Signed in (<code>llmbox login</code>): "
+            f"<code>llmbox test {esc(rid)} --set placement.ubatch=1024</code>, one <code>--set</code> per setting. "
+            f"The run is checked like any other; settings that change the answers get a score from the 10-minute quality test that runs with them. "
+            f"Settings that can be shared: {keys}. Paths, the engine and free server flags stay on your machine.</p></details></section>")
+
+
+def _talk_panel(rid: str) -> str:
+    """Comments: rendered by social.js from the API (people's text never goes into the page's HTML)."""
+    return (f'<section class="panel pad talk" id="talk"><div class="lbl">Comments</div>'
+            f'<div id="comments" data-rid="{esc(rid)}" aria-live="polite"><p class="q">Loading comments…</p></div>'
+            '<noscript><p class="q">Comments need JavaScript.</p></noscript>'
+            '<p class="q crules">Plain text, signed in with GitHub. Someone who measured this model is marked with the machines they ran it on. '
+            'Readers can report a comment: three reports hide it until the operator looks (<a href="terms.html#comments">rules</a>).</p></section>')
+
+
 def _runs_panel(runs: list[dict], ref: dict | None, counted: dict) -> str:
     rows = []
     for x in sorted(runs, key=lambda r: r.get("created", ""), reverse=True):
@@ -301,6 +360,10 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
     hf = f"https://huggingface.co/{m['hf_repo']}" if m.get("hf_repo") else ""
     meta = " · ".join(x for x in (origin, size, f"{m['bytes'] / 1e9:.1f} GB file" if m.get("bytes") else "", f"<a href='{esc(hf)}' rel='noopener'>Hugging Face</a>" if hf else "") if x)
     runs_n = len(ctx["runs"])
+    k = vs / row["capability"] if vs is not None and row.get("capability") else None   # raw capability -> % of Opus
+    cl = ctx.get("community") or []
+    ours = {"t2": tps, "t32": float(deep) if deep != "-" else None, "score": row.get("capability"),
+            "machines": sum(c["machines"] for c in cl if not c.get("ref")) + sum(c["machines"] - 1 for c in cl if c.get("ref"))}
     tiles = (f"<div><span class='sc'>Score</span><b>{_pct(vs)}</b><span>of Claude Opus 5.5 · range {rlo:.0f}–{rhi:.0f}</span>"
              f"<span>place {pl} of {len(rs)}{f' · tied with {lo}–{hi}' if lo != hi else ''}</span></div>"
              f"<div id='vspd'><span class='sc'>Speed</span><b>{f'{tps:.0f}' if tps else '—'}<small> tok/s</small></b>"
@@ -327,10 +390,13 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
  <p class="q" style="margin-top:16px">Measured on the reference PC ({esc(ref_box)}).{_people_line(ctx.get("community"))} <a href="hardware-{esc(rid)}.html">Speed on {len(GPUS)} other graphics cards and Macs →</a></p></section>
 <div id="run"></div>{_run_panel(rid, rec, ctx["model_now"], ctx["on_hf"])}
 {_settings_panel(rcp, ctx["opt"])}
-{_runs_panel(ctx["runs"], ref, ctx["counted"])}'''
+{_shared_panel(rid, ctx.get("variants") or [], ctx.get("community"), ctx.get("users") or {}, ours, k)}
+{_runs_panel(ctx["runs"], ref, ctx["counted"])}
+{_talk_panel(rid)}'''
     about = (f"{nm} {variant(rid, m.get('file'), full=True)}: {_pct(vs)} of Claude Opus 5.5 on real work (coding, tools, documents, writing)"
              + (f", {tps:.0f} tok/s on {ref_box}" if tps else "") + ". The file, and the settings to run it in llama.cpp, LM Studio or Ollama.")
-    return _page(f"llmbox · {nm} · {variant(rid, m.get('file'), full=True)}", "MODELS", body, ("pages.css", "model.css"), ("plan.js", "model.js", "runcmd.js"),
-                 {"sh": shp, "gpus": GPUS, "ref": ctx["ref_hw"]}, about=about)
+    return _page(f"llmbox · {nm} · {variant(rid, m.get('file'), full=True)}", "MODELS", body, ("pages.css", "model.css"),
+                 ("plan.js", "model.js", "runcmd.js", "social.js"), {"sh": shp, "gpus": GPUS, "ref": ctx["ref_hw"], "api": ctx.get("api") or "", "rid": rid},
+                 about=about)
 
 

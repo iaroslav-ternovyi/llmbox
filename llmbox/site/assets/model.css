@@ -31,3 +31,35 @@
 .run .more{background:none;border:0;color:var(--amber);font:12px var(--mono);padding:6px 0;cursor:pointer}
 /* a result that is not directly comparable: shown with why (a recipe's caveat) */
 .panel.cavp{padding:14px 18px;font-size:14.5px;color:var(--soft);border-color:var(--amber-dim)}.panel.cavp b{color:var(--t-mid);font-weight:600;margin-right:6px}
+/* settings people measured (llmbox test --set) with votes, and comments (social.js) */
+.shared .vtop{margin:0 0 14px;max-width:900px}
+.var{border:1px solid var(--line2);margin-top:12px;background:rgba(14,15,12,.6)}.var.ours{border-color:var(--amber-dim)}
+.var .vhead{display:flex;align-items:center;gap:12px;padding:10px 14px;flex-wrap:wrap}.var .vhead>div{flex:1 1 320px;min-width:0}
+.var .vhead b{font:600 15px var(--cond);color:var(--amber)}.var .set{font:13px var(--mono);color:var(--ink)}
+.var .vsum{padding:0 14px 12px;margin:0;font-size:13px;color:var(--soft)}
+.var .vruns{width:100%;font-size:12.5px;border-top:1px solid var(--line2)}.var .vruns th,.var .vruns td{padding:6px 14px}
+.var .vruns .up{color:var(--amber)}.var .vruns .dn{color:#e0826a}
+.vote{display:inline-flex;gap:6px}
+.vb{background:none;border:1px solid var(--line);color:var(--soft);font:12px var(--mono);padding:5px 10px;cursor:pointer;min-height:32px}
+.vb:hover:not([disabled]){border-color:var(--amber);color:var(--amber)}.vb.on{border-color:var(--amber);color:var(--amber);background:var(--amber-faint)}
+.vb[disabled]{opacity:.5;cursor:default}
+.vcopy{padding:5px 12px}
+.vnone{font-size:13.5px;color:var(--soft);margin:12px 0 0;max-width:820px}
+.vhow{margin-top:14px;font-size:13px;color:var(--soft)}.vhow summary{cursor:pointer;color:var(--amber);font:12px var(--mono);letter-spacing:.08em}
+.vhow p{margin-top:8px;max-width:900px;line-height:1.7}
+.talk .ccount{margin:0 0 6px}
+.cm{border-top:1px solid var(--line2);padding:12px 0}.cm .cmh{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.cm .who{font:600 14.5px var(--cond)}
+.cm .tested{font:11px var(--mono);letter-spacing:.08em;color:var(--bg);background:var(--t-mid);padding:1px 7px}
+.cm .cmb{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14.5px;color:var(--ink);margin:6px 0 0;max-width:860px}
+.cm.held{opacity:.75}.cm .heldnote{font-size:12.5px;color:var(--t-mid);margin:6px 0 0}
+.cm .cmf{display:flex;gap:14px;align-items:center;margin-top:6px;flex-wrap:wrap}
+.lnk{background:none;border:0;color:var(--muted);font:12px var(--mono);cursor:pointer;padding:4px 0}.lnk:hover{color:var(--amber)}
+.rep{display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:1 1 100%;max-width:860px}.rep select,.rep input{background:var(--bg);border:1px solid var(--edge);padding:6px 8px;font-size:13px}
+.rep input{flex:1 1 260px;min-width:0}
+.cform{border-top:1px solid var(--line2);padding-top:14px;margin-top:4px}
+.cform textarea{width:100%;max-width:860px;display:block;background:var(--bg);border:1px solid var(--edge);padding:10px 12px;font:14.5px/1.5 var(--sans);resize:vertical}
+.cform .crow{display:flex;justify-content:space-between;align-items:center;gap:12px;max-width:860px;margin-top:8px}
+.talk .crules{margin-top:14px;max-width:900px}
+@media (max-width:760px){.var .vruns th:nth-child(4),.var .vruns td:nth-child(4),.var .vruns th:nth-child(6),.var .vruns td:nth-child(6){display:none}
+ .vb{min-height:44px;min-width:56px}.vcopy{min-height:44px}.lnk{min-height:44px;padding:0 4px}}
