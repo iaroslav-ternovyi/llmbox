@@ -138,7 +138,7 @@ def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool |
         return (f'<div class="rp{" on" if on else ""}" data-t="{key}"><p class="q rpn">{esc(note)}</p>'
                 f'<pre class="cp{" clip" if more else ""}">{esc(body)}</pre>{more}<button class="btn cpy" type="button">COPY</button></div>')
     made = ("" if on_hf is not False else
-            f" This file was made on the reference box - the <a href=\"https://huggingface.co/{esc(repo)}\" rel=\"noopener\">{esc(repo)}</a> "
+            f" This file was made on our test PC - the <a href=\"https://huggingface.co/{esc(repo)}\" rel=\"noopener\">{esc(repo)}</a> "
             "GGUF with Qwen3.6's MTP layer grafted in for speculative decoding. With the plain file from that repo, leave out the "
             "two --spec lines: same answers, a little slower" if "graft" in fname else
             " This exact file is not on Hugging Face under this name")
@@ -148,7 +148,7 @@ def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool |
     return ('<section class="panel pad run"><div class="lbl">Run it yourself</div>' + head
             + '<div class="rtabs" role="group" aria-label="how to run it">'
             + "".join(f'<button type="button" class="{"on" if i == 0 else ""}" data-t="{k}">{t}</button>' for i, (k, t) in
-                      enumerate([("one", "One line"), ("srv", "llama-server"), ("win", "Windows"), ("swap", "llama-swap"), ("lms", "LM Studio"), ("oll", "Ollama")]))
+                      enumerate([("one", "One line · Linux, Mac"), ("lms", "LM Studio"), ("oll", "Ollama"), ("srv", "llama-server"), ("win", "llama.cpp on Windows"), ("swap", "llama-swap")]))
             + "</div>"
             + tab("one", f"{CURL} {SITE_URL}/install.sh | sh -s -- {rid}",
                   ("The shortest way (Linux or a Mac): installs llmbox and llama.cpp, fits these settings to your computer, downloads the model, "

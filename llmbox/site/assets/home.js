@@ -130,6 +130,7 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
     (best.td ? `, ${Math.round(best.td)} with a long document` : "") +
     ` · ${why}</p></div>` +
     `<div class="pkc"><pre class="cmd" id="pickcmd">${esc(cmd)}</pre><button class="btn cpy" type="button" id="pickcpy">COPY</button>` +
+    (/Windows/.test(navigator.userAgent) ? `<p class="win">On Windows the easiest way is <a href="recipe-${best.id}.html#run">LM Studio or Ollama with these settings</a>; the line above needs WSL2.</p>` : "") +
     `<p class="q">installs llmbox and this model, with the settings measured here fitted to your computer, then starts it (Linux or a Mac` +
     (hwNow && (hwNow.amd || hwNow.apu) ? "; on AMD it installs the Vulkan build of llama.cpp, and timing there comes after launch" : "") + `; <a href="install.html">more</a>)</p></div></div>`;
   if ($("#pickcpy")) $("#pickcpy").onclick = () => (llmboxCount("copy-install/home"), navigator.clipboard) && navigator.clipboard.writeText(cmd).then(() => { $("#pickcpy").textContent = "COPIED"; setTimeout(() => $("#pickcpy").textContent = "COPY", 1500); });

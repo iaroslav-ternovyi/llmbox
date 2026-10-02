@@ -13,6 +13,12 @@ def install_page() -> str:
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / get llmbox</div><h1>Get llmbox</h1>
  <p class="q" style="margin-top:6px">One program: it picks the model that fits your computer, installs it with the settings measured here,
  tunes it for your hardware, and measures it. Free and open source (Apache-2.0).</p></div></section>
+<section class="panel pad"><div class="lbl">Your system</div><ul class="plain sys3">
+ <li><b>Linux with an NVIDIA card</b>, or <b>a Mac with Apple silicon</b> (M1 or newer): the line below does everything, measuring included.
+ AMD cards on Linux: models install and run; measuring them comes after launch.</li>
+ <li><b>Windows:</b> the easiest way needs no llmbox at all: <a href="https://lmstudio.ai">LM Studio</a> or <a href="https://ollama.com">Ollama</a>
+ with the file and settings shown on each model page (its <i>Run it yourself</i> panel has a tab for each). For all of llmbox, run the line below
+ in WSL2 (details under <a href="#needs">What it needs</a>).</li></ul></section>
 <section class="panel pad"><div class="lbl">Install</div>
  <div class="copy"><pre class="cmd" id="one">{esc(one)}</pre><button class="btn cpy" type="button" data-copy="one">COPY</button></div>
  <p class="q">It makes a private Python environment in <code>~/.llmbox/venv</code> and puts the <code>llmbox</code> command in
@@ -37,13 +43,14 @@ llmbox doctor          # is this computer ready? each problem with its fix
 llmbox test &lt;model&gt;    # 3 min speed + 10 min quality, where you stand against machines like yours (--full: 40 min)
 llmbox stop            # stop what llmbox started
 llmbox login           # optional: GitHub, for your profile page and for your quality runs to count</pre></section>
-<section class="panel pad"><div class="lbl">What it needs</div><ul class="plain">
+<section class="panel pad" id="needs"><div class="lbl">What it needs</div><ul class="plain">
  <li><b>Linux with an NVIDIA card</b> and its driver. llama.cpp comes with it: the official build for
  your card and driver, checked against its published sha256 (your own build is used if you have one).</li>
  <li><b>Windows:</b> in WSL2 with Ubuntu 24.04 (<code>wsl --install -d Ubuntu-24.04</code> in PowerShell), run the line above in its
  terminal. It uses your Windows NVIDIA driver; <code>llmbox doctor</code> says when WSL gives Linux too little of your memory
  (half of it unless told otherwise).</li>
- <li><b>Mac:</b> <code>llmbox pick</code> tells what fits and roughly how fast; running and measuring models on a Mac is coming.</li>
+ <li><b>Mac</b> with Apple silicon: llama.cpp's official Metal build, checked the same way. Speeds are measured at 32k of
+ context (a Mac reads long prompts slowly, so the 80k figure is left to machines that read fast).</li>
  <li>Python 3.12 or newer and git.</li></ul></section>
 <section class="panel pad"><div class="lbl">Your data</div><ul class="plain">
  <li>Everything llmbox keeps is in <code>~/.llmbox</code> on your computer.</li>

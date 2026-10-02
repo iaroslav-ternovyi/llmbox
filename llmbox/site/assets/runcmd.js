@@ -4,7 +4,10 @@ document.querySelectorAll(".run").forEach(sec => {
     sec.querySelectorAll(".rp").forEach(x => x.classList.toggle("on", x.dataset.t === t)); };
   sec.querySelectorAll(".rtabs button").forEach(b => b.addEventListener("click", () => {
     pick(b.dataset.t); try { localStorage.setItem("llmbox-runtab", b.dataset.t); } catch (e) {} }));
-  try { const t = localStorage.getItem("llmbox-runtab"); if (t && sec.querySelector(`.rtabs button[data-t="${t}"]`)) pick(t); } catch (e) {}   // the app the visitor uses
+  let t = null;
+  try { t = localStorage.getItem("llmbox-runtab"); } catch (e) {}   // the app the visitor uses
+  if (!t && /Windows/.test(navigator.userAgent)) t = "lms";          // Windows: an app, not the one line (that needs WSL2)
+  if (t && sec.querySelector(`.rtabs button[data-t="${t}"]`)) pick(t);
   sec.querySelectorAll(".more").forEach(b => { const all = b.textContent; b.addEventListener("click", () => { const pre = b.parentElement.querySelector("pre");
     pre.classList.toggle("clip"); b.textContent = pre.classList.contains("clip") ? all : "show fewer lines ▴"; }); });
   sec.querySelectorAll(".cpy").forEach(b => b.addEventListener("click", async () => {
