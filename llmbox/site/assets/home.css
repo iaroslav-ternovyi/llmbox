@@ -87,7 +87,7 @@
  .q1{font-size:26px}.boxbar #boxnote{margin-left:0;width:100%}.boxbar select{max-width:100%;min-width:0}.boxbar #gpu{width:100%}
 }
 .pickp{padding:16px 18px}.pk{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:18px;align-items:center}
-.pk h2{margin:4px 0 6px;font-size:22px}.pk h2 small{color:var(--muted);font-size:13px;font-weight:400}.pk p{margin:0}
+.pk h2{margin:4px 0 6px;font-size:22px}.pk h2 small{color:var(--muted);font-size:13px;font-weight:400;white-space:nowrap}.pk p{margin:0}
 .pkc{position:relative}.pkc pre.cmd{margin:0;background:#0b0c09;border:1px solid var(--line);padding:12px 88px 12px 14px;font-size:12.5px;white-space:pre-wrap;overflow-wrap:anywhere}
 .pkc .cpy{position:absolute;top:7px;right:8px}.pkc .q{margin-top:6px;font-size:12px}
 @media (max-width:760px){.pk{grid-template-columns:minmax(0,1fr)}.pkc pre.cmd{padding-right:14px}.pkc .cpy{position:static;margin-top:8px}}
