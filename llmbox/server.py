@@ -628,6 +628,21 @@ def check(rec: dict) -> str | None:
         return "the recipe id is missing or malformed"
     if len(json.dumps(rec)) > (15 if rec.get("kind") == "suite" else 5) * 2**20:
         return "record too large"
+    # what the site's pages and result cards read besides the machine: the recipe's tables and the server line built
+    # from them, the llama.cpp build, the client's own prediction, a quality run's summary
+    if not all(isinstance(rc_.get(k, {}), dict) for k in ("runtime", "placement", "speculative", "sampling", "chat", "antiloop", "serve", "extra", "model")):
+        return "the recipe has a malformed table"
+    if not _text((rc_.get("model") or {}).get("path"), 400, need=False) or not _text((rc_.get("runtime") or {}).get("engine"), 40, need=False):
+        return "the recipe has a malformed field"
+    args = (rc_.get("extra") or {}).get("args", [])
+    if not isinstance(args, list) or len(args) > 64 or not all(isinstance(x, (str, int, float)) and len(str(x)) <= 200 for x in args):
+        return "the recipe's extra arguments are malformed"
+    rt = rec.get("runtime", {})
+    if not isinstance(rt, dict) or not _text(rt.get("llama_cpp_build"), 40, need=False):
+        return "the runtime description is malformed"
+    pr = rec.get("prediction", {})
+    if not isinstance(pr, dict) or not all(v is None or _num(v, 0, 10**6) for k, v in pr.items() if k.endswith("_tps") or "tps_" in k):
+        return "the prediction is malformed"
     if rec.get("kind") == "suite":
         from . import irt
         su = rec.get("suite")
@@ -639,6 +654,11 @@ def check(rec: dict) -> str | None:
         if not isinstance(rows, list) or not 0 < len(rows) <= 400 or not all(isinstance(r, dict) and isinstance(r.get("id"), str)
                                                                             and ROW_ID.match(r["id"]) for r in rows):
             return "a quality run must carry its answers, each with a task id"
+        sm = rec.get("summary", {})
+        ci = sm.get("capability_ci95") if isinstance(sm, dict) else None
+        if not isinstance(sm, dict) or (sm.get("capability") is not None and not _num(sm.get("capability"), 0, 100)) or \
+                (ci is not None and not (isinstance(ci, list) and len(ci) == 2 and all(_num(x, 0, 100) for x in ci))):
+            return "the quality run's summary is malformed"
         return None
     sp = (rec.get("speed") if rec.get("kind") == "speed" else ((rec.get("runs") or {}).get("llmbox") or {})) or {}
     if not isinstance(sp, dict):
@@ -653,11 +673,37 @@ def check(rec: dict) -> str | None:
     return None
 
 
+def predicted(rec: dict) -> float | None:
+    """What the speed formula predicts for a submitted speed record, worked out here from the published recipe and the
+    picker entry the machine belongs to (never the client's own figure, which the sender could set). None when the
+    machine is outside the picker or the recipe is not published: then the client's figure stands (no credit, no map
+    cell depends on those)."""
+    try:
+        from . import fit as F, pick, registry
+        from .hosts import HOME as _H   # noqa: F401  (the box's recipes and shapes are synced here)
+        host = rec.get("host") or {}
+        cls = host.get("class") or hwclass.of_host(host)
+        name = hwclass.display_class(cls)
+        if not name:
+            return None
+        r = registry.published("box", (rec.get("recipe") or {})["id"])
+        shape = F.shape_for(r)
+        ram_bw = min(float(host.get("ram_read_gbs") or 60.0), 130.0)
+        hw = pick.entry_spec(name, int(host.get("ram_gib") or 64), ram_bw)
+        cal = registry.calibration(r, shape)
+        if hwclass.entry_kind(name) in ("mac", "chip"):
+            cal = F.Calibration(deep_k=cal.deep_k)
+        f = F.fit(r, shape, hw, cal=cal)
+        return f.tps if f.fits else None
+    except (OSError, ValueError, KeyError, TypeError, SystemExit):
+        return None
+
+
 def outlier_flags(rec: dict, predict=None) -> list[str]:
     """'outlier' when the decode figure is over twice what the formula predicts for that machine (predict(rec) -> tok/s)."""
     if rec.get("kind") != "speed":
         return []
-    pred = predict(rec) if predict else ((rec.get("prediction") or {}).get("decode_tps_no_spec"))
+    pred = (predict(rec) if predict else None) or ((rec.get("prediction") or {}).get("decode_tps_no_spec"))
     dec = (rec.get("speed") or {}).get("decode_tps")
     return ["outlier"] if pred and dec and dec > 2 * pred else []
 
@@ -789,7 +835,7 @@ def serve(data: str, port: int = 8767, bind: str = "127.0.0.1", every_s: int = 3
         waiting, last = [], 0.0
         while True:
             try:
-                ids = intake.ingest()
+                ids = intake.ingest(predict=predicted)
                 req = os.path.join(intake.data, "rebuild")
                 if ids or os.path.exists(req):
                     waiting.append(ids or [])

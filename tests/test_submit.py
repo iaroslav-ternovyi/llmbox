@@ -83,7 +83,11 @@ bomb = gzip.compress(b"[" + b"0," * (110 * 2**20) + b"0]")   # ~0.3 MB that unpa
 assert intake.receive(bomb, "9.9.9.9")[0] == 413, "a gzip bomb was unpacked"
 # hostile or broken records: rejected one by one, none blocks the submissions behind it, none reaches a path or a page
 evil = [1, dict(rec, id="abs-path", created="/private/tmp/x"), dict(rec, id="xss-ram", host=dict(rec["host"], ram_gib="<img src=x onerror=alert(1)>")),
-        dict(rec, id="bad-speed", speed=dict(rec["speed"], decode_tps="fast")), dict(rec, id="bad-recipe", recipe=dict(rec["recipe"], id="../../etc"))]
+        dict(rec, id="bad-speed", speed=dict(rec["speed"], decode_tps="fast")), dict(rec, id="bad-recipe", recipe=dict(rec["recipe"], id="../../etc")),
+        # what the site's pages and cards read: each of these used to stop every site build
+        dict(rec, id="bad-runtime", runtime="x"), dict(rec, id="bad-path", recipe=dict(rec["recipe"], model={"path": 7})),
+        dict(rec, id="bad-args", recipe=dict(rec["recipe"], extra={"args": "--fit-target"})),
+        dict(rec, id="bad-table", recipe=dict(rec["recipe"], runtime=["x"])), dict(rec, id="bad-pred", prediction={"decode_tps_no_spec": "lots"})]
 r_bad = submit.send(submit.bundle([x for x in evil if x != 1]), url)
 raw_bad = intake.receive(gzip.compress(json.dumps({"schema": "llmbox.submission/1", "client": "x" * 32, "records": [1]}).encode()), "8.8.8.8")
 r_ok = submit.send(submit.bundle([dict(rec, id="after-the-bad-ones")]), url)
@@ -93,6 +97,17 @@ assert intake.status(raw_bad[1]["id"])["status"] == "rejected" and intake.status
 assert "page" not in intake.status(raw_bad[1]["id"]) and "live_at" not in intake.status(raw_bad[1]["id"])   # no page to wait for
 assert all(d["status"] == "rejected" for d in intake.status(r_bad["id"])["detail"]), intake.status(r_bad["id"])
 assert not os.path.exists("/private/tmp/x-speed-" + str(rec["recipe"]["id"]) + ".json")
+# a quality run's summary is read by the cards: malformed ones are refused
+from llmbox import irt  # noqa: E402
+q0 = {"schema": results.SCHEMA, "kind": "suite", "id": "q-1", "created": rec["created"], "host": rec["host"], "model": rec["model"], "recipe": rec["recipe"],
+      "suite": {"content_hash": next(iter(irt.RELEASES)), "tier": "adaptive", "seed0": 7000}, "rows": [{"id": "tools.dedupe.L8.7000"}]}
+for bad in ([1, 2, 3], "x", {"capability": 64.0, "capability_ci95": [40, "x"]}, {"capability": 640.0}):
+    assert "summary is malformed" in (server.check(dict(q0, summary=bad)) or ""), bad
+assert server.check(dict(q0, summary={"capability": 64.8, "capability_ci95": [39.6, 80.1]})) is None
+# the outlier check uses the server's own prediction when it has one, not the figure the sender wrote
+fast = dict(rec, speed=dict(rec["speed"], decode_tps=900.0), prediction={"decode_tps_no_spec": 10000.0})
+assert server.outlier_flags(fast) == [] and server.outlier_flags(fast, predict=lambda r: 60.0) == ["outlier"]
+assert server.outlier_flags(fast, predict=lambda r: None) == []   # outside the picker: the sender's figure stands
 # a result card the site build gave up on: health is 503 for a day, so the uptime monitor alerts
 import urllib.error  # noqa: E402
 os.makedirs(os.path.join(home, "cards"))

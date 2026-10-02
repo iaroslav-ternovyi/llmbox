@@ -600,7 +600,7 @@ def cmd_submit(a: argparse.Namespace) -> None:
 def cmd_serve(a: argparse.Namespace) -> None:
     from . import server
     if a.ingest_once:
-        ids = server.Intake(a.data).ingest()
+        ids = server.Intake(a.data).ingest(predict=server.predicted)
         print(f"{len(ids)} submission(s) checked")
         if (ids or a.force_rebuild) and a.rebuild:
             _rebuild_site(a.rebuild, a.deploy)
