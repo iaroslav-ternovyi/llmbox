@@ -195,7 +195,7 @@ def _recipe_ids(host: str) -> dict:
 
 def _portable(F, r: dict) -> str:
     """The settings the score belongs to (fit.PORTABLE without the texts and the file's hash), as one comparable string."""
-    lay = F.layer(r, tuple(p for p in F.PORTABLE if p not in ("description", "notes", "model.sha256", "model.hf_repo")))
+    lay = F.layer(r, tuple(p for p in F.PORTABLE if p not in ("description", "notes", "caveat", "model.sha256", "model.hf_repo")))
     return json.dumps(lay, sort_keys=True)
 
 

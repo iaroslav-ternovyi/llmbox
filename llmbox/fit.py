@@ -24,8 +24,8 @@ from . import estimate as E
 from .hosts import HOME
 
 # dotted paths; a table name covers everything under it
-PORTABLE = ("description", "notes", "model.hf_repo", "model.file", "model.sha256", "chat", "sampling", "antiloop",
-            "placement.kv_type")
+PORTABLE = ("description", "notes", "caveat", "model.hf_repo", "model.file", "model.sha256", "chat", "sampling", "antiloop",
+            "placement.kv_type")   # caveat: why a result of this recipe is not directly comparable (it travels with it)
 HARDWARE = ("model.path", "runtime", "placement.ctx", "placement.fit", "placement.fit_target_mib", "placement.n_cpu_moe", "placement.flash_attn",
             "placement.load_mode", "placement.batch", "placement.ubatch", "placement.slots", "placement.kv_unified",
             "placement.cache_ram", "placement.cache_ram_headroom_mib", "placement.cache_reuse", "placement.kv_offload",
