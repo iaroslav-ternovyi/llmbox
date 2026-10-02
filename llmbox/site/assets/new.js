@@ -1,8 +1,8 @@
 // new models for the visitor's box: the file that fits, speed, filters, sort
 const $ = s => document.querySelector(s);
 const saved = savedBox(DATA);
-const box = saved || { name: "the reference PC", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
-$("#boxname").textContent = saved ? `your box (${boxLabel(box)})` : `the reference PC (${DATA.ref.gpu} · ${Math.round(DATA.ref.ram / 1024)} GB)`;
+const box = saved || { name: "our test PC", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
+$("#boxname").textContent = saved ? `your box (${boxLabel(box)})` : `our test PC (${DATA.ref.gpu} · ${Math.round(DATA.ref.ram / 1024)} GB)`;
 const fmtDl = n => n == null ? "" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : n;
 const cap = v => v > 200 ? "200+" : "~" + Math.round(v);   // above ~200 the formula ignores per-token overheads
 const bits = q => { const m = q.replace("UD-", "").toUpperCase().match(/(?:I?Q|BF|F)(\d+)/); return m ? +m[1] : 16; };
@@ -21,12 +21,12 @@ function pick(r) {   // the file this box runs well: 4-bit first, then the large
   return first || { f: r.ladder[0], p: null };
 }
 const rows = DATA.rows.map(r => { const c = pick(r), m = r.measured[0];
-  const onRef = !saved && m && m.t2;   // on the reference PC a measured model shows what was measured
+  const onRef = !saved && m && m.t2;   // on our test PC a measured model shows what was measured
   const t2 = onRef ? m.t2 : c.p ? c.p.t2 : 0, td = onRef ? m.td : c.p ? c.p.td : 0;
   const score = m ? m.vs : r.guess ? r.guess.mid : null;
   return Object.assign({}, r, { c, m, fits: !!c.p, t2, td, onRef, score, low: c.p && bits(c.f.quant) < 4 }); });
 const nweek = rows.filter(r => (Date.now() - new Date(r.released)) / 864e5 <= 14);
-$("#nsum").innerHTML = `In the last two weeks: <b>${nweek.length}</b> new model${nweek.length === 1 ? "" : "s"}, <b>${nweek.filter(r => r.fits).length}</b> fit ${saved ? "your box" : "the reference PC"}, <b>${nweek.filter(r => r.m).length}</b> measured here.`;
+$("#nsum").innerHTML = `In the last two weeks: <b>${nweek.length}</b> new model${nweek.length === 1 ? "" : "s"}, <b>${nweek.filter(r => r.fits).length}</b> fit ${saved ? "your box" : "our test PC"}, <b>${nweek.filter(r => r.m).length}</b> measured here.`;
 function scoreCell(r) {
   const g = () => { let t = ""; for (let v = amin; v <= 100; v += astep) t += `<s style="left:${X(v)}%"></s>`; return t; };
   if (r.m && r.m.vs != null) return `<div class="fp" title="measured: 95% range ${Math.round(r.m.lo)}–${Math.round(r.m.hi)}%"><div class="trk">${g()}<i style="left:${X(r.m.lo)}%;width:${X(r.m.hi) - X(r.m.lo)}%;background:${r.col}"></i><b style="left:${X(r.m.vs)}%;background:${r.col}"></b></div><span class="num">${Math.round(r.m.vs)}%</span></div>`;

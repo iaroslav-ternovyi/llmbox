@@ -31,7 +31,7 @@ def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dic
             + _pop("SCORE ↕", "Score · % of Claude Opus 5.5", "How close the model gets to Claude Opus 5.5 on the same tasks (Opus = 100%). "
                    "The dot is the score, the line its 95% range: models whose lines overlap are not measurably apart yet. Click to sort.")
             + "</span></div></th><th class='r' data-sort='speed'>" + _pop("TOK/S ↕", "Speed on your box", "Tokens per second while writing the answer, "
-            "in a short chat (big number) and with a long document in context (small). Measured on the reference PC, predicted for the box you pick. Click to sort.")
+            "in a short chat (big number) and with a long document in context (small). Measured on our test PC, predicted for the box you pick. Click to sort.")
             + "</th><th class='r'>" + _pop("FITS", "Does it fit?", "Whether the model and its context fit in the graphics card plus RAM of the box you pick, "
             "and the largest context that does.") + "</th><th class='l'>" + _pop("STANDS OUT", "Stands out", "Blocks where the model scores at least "
             "6 points above (▲) or below (▼) the typical (median) local model here. Click a row for all nine.") + "</th><th><span class='sr'>compare</span></th></tr>")
@@ -169,10 +169,10 @@ it gets to Claude, and one line that installs it. Every model is graded on real 
 <p class="trust">{_trust(local)}</p>
 {NEWBIE}
 <section class="boxbar" id="box"><span class="sc">Your box</span>
- <select id="gpu" aria-label="GPU or Mac"><option value="">the reference PC ({esc(ref_box)})</option></select>
- <span class="bl">RAM</span><select id="ram" aria-label="System RAM or a Mac's unified memory"><option value="8">8 GB</option><option value="16">16 GB</option><option value="24">24 GB</option><option value="32">32 GB</option><option value="36">36 GB</option><option value="48">48 GB</option><option value="64" selected>64 GB</option><option value="96">96 GB</option><option value="128">128 GB</option><option value="192">192 GB</option><option value="256">256 GB</option><option value="512">512 GB</option></select>
- <span class="bl" id="bwl">speed</span><select id="bw" aria-label="RAM speed"></select>
- <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
+ <select id="gpu" aria-label="GPU or Mac"><option value="">not set: our test PC ({esc(ref_box)})</option></select>
+ <span class="fld"><span class="bl">RAM</span><select id="ram" aria-label="System RAM or a Mac's unified memory"><option value="8">8 GB</option><option value="16">16 GB</option><option value="24">24 GB</option><option value="32">32 GB</option><option value="36">36 GB</option><option value="48">48 GB</option><option value="64" selected>64 GB</option><option value="96">96 GB</option><option value="128">128 GB</option><option value="192">192 GB</option><option value="256">256 GB</option><option value="512">512 GB</option></select></span>
+ <span class="fld"><span class="bl" id="bwl">RAM speed</span><select id="bw" aria-label="RAM speed"></select>
+ <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)"></span>
  <span id="boxnote" class="q">speeds measured on this box</span><span id="fitsum" class="q"></span></section>
 <section class="panel pickp" id="pick" aria-live="polite"></section>
 {f'<p class="tomap"><a href="hardware.html">Every graphics card and Mac: {measured[0]} of {measured[1]} measured so far, the rest predicted →</a></p>' if measured else ""}

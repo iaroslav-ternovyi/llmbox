@@ -107,7 +107,7 @@ def new_page(rs: list[dict], data: dict, host: str, news: str = "") -> str | Non
                      "ladder": [{"file": rec["model"].get("file") or "", "quant": _quant(rec["model"].get("file") or ""), "bytes": sh.total_bytes or 1}]})
     body = f"""
 <section class="panel hd"><div><div class="crumb"><a href="index.html">Models</a> / new</div><h1>New models for your box</h1>
- <p class="lede">Local models from the last six months that people actually download: which file fits <b id="boxname">the reference PC</b>
+ <p class="lede">Local models from the last six months that people actually download: which file fits <b id="boxname">our test PC</b>
  (<a href="index.html#box">pick your box</a>), how fast it runs there, and how good it is: measured here, or the range public benchmarks suggest.</p></div></section>
 <p class="nsum" id="nsum"></p>
 <section class="panel"><div class="lbl"><span id="count">{len(rows)}</span> models</div>

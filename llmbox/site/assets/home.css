@@ -8,7 +8,7 @@
 .newbie .gl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:7px 14px;line-height:1.55;margin:0}
 .newbie dt{color:var(--amber);font-size:12px;padding-top:1px;max-width:150px}.newbie dd{margin:0;color:var(--soft)}
 @media (max-width:760px){.newbie .nb{grid-template-columns:1fr}.newbie .gl{grid-template-columns:1fr}.newbie dd{margin-bottom:6px}}
-.boxbar .bl{font-size:12px;color:var(--muted);margin-left:6px}
+.boxbar .bl{font-size:12px;color:var(--muted);margin-left:6px}.boxbar .fld{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
 .side{display:flex;flex-direction:column;gap:22px;min-width:0}
 .hero{padding:22px 22px 14px;margin:0 0 22px}.hero .ch2{font:600 22px var(--cond);margin:0 0 12px;color:var(--ink)}
 .hero .cap{font-size:12.5px;line-height:1.6;color:var(--muted);max-width:110ch;margin:8px 4px 2px}
@@ -84,7 +84,8 @@
 @media (max-width:900px){.lgd2{grid-template-columns:1fr}}
 .legend{display:flex;gap:10px;align-items:flex-start;font-size:12px;color:var(--muted);margin:6px 8px 4px;line-height:1.5}.legend svg{flex:none;margin-top:2px}
 @media (max-width:900px){
- .q1{font-size:26px}.boxbar #boxnote{margin-left:0;width:100%}.boxbar select{max-width:100%;min-width:0}.boxbar #gpu{width:100%}
+ .q1{font-size:26px}.boxbar #boxnote{margin-left:0;width:100%}.boxbar #fitsum{width:100%}.boxbar #fitsum:before{content:none}
+ .boxbar .fld .bl{margin-left:0;min-width:74px}.boxbar select{max-width:100%;min-width:0}.boxbar #gpu{width:100%}
 }
 .pickp{padding:16px 18px}.pk{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:18px;align-items:center}
 .pk h2{margin:4px 0 6px;font:600 24px/1.2 var(--cond)}.pk h2 small{color:var(--muted);font-size:13px;font-weight:400;white-space:nowrap}.pk p{margin:0}

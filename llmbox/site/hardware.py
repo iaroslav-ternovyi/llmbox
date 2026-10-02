@@ -15,7 +15,7 @@ def hardware_page(rid: str, rec: dict, shape: dict, data: dict, community: list 
  <h1>How fast is <a href="recipe-{esc(rid)}.html">{esc(nm)}</a> on other computers?</h1>
  <p class="q" style="margin-top:6px">The score is the same on every computer; only the speed changes. Computers people measured come first; the others are predicted from the model file and each box's memory speed.</p></div></section>
 <p class="yb" id="yourbox"></p>
-<section class="panel"><div class="lbl" id="advbox">What would make the reference PC faster</div><div class="adv" id="adv"></div>
+<section class="panel"><div class="lbl" id="advbox">What would make our test PC faster</div><div class="adv" id="adv"></div>
  <div class="why" id="why"></div></section>
 <section class="panel"><div class="lbl" id="boxlbl">Computers</div>
  <div class="hwf"><div class="seg" role="group" aria-label="show"><button class="on" data-k="all">All</button><button data-k="nv">NVIDIA</button><button data-k="amd">AMD</button><button data-k="mac">Mac</button></div>

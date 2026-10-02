@@ -166,7 +166,8 @@ def _run_panel(rid: str, rec: dict, model_now: dict | None = None, on_hf: bool |
 
 def _near_html(rid: str, rs: list[dict], clouds: list[dict], ranks: dict, look: dict) -> str:
     """Where the model sits: the two models above and below it, and the Claude models in that span, on the ranking's scale."""
-    order = sorted([r for r in rs if r.get("vs_ref") is not None], key=lambda r: (-r["vs_ref"], r["id"]))
+    # by place, as the home ranking lists them (two models a rounding apart keep the home page's order)
+    order = sorted([r for r in rs if r.get("vs_ref") is not None], key=lambda r: (ranks[r["id"]][0], -r["vs_ref"], r["id"]))
     i = next((n for n, r in enumerate(order) if r["id"] == rid), None)
     if i is None:
         return ""
@@ -176,7 +177,10 @@ def _near_html(rid: str, rs: list[dict], clouds: list[dict], ranks: dict, look: 
     cl = [c for c in clouds if c.get("vs_ref") is not None and bot - 0.5 <= c["vs_ref"] <= top + 0.5]
     ax = _axis_of([r.get("vs_ref") for r in rs])
     rows = []
-    for r in sorted(pick + cl, key=lambda r: -(r["vs_ref"])):
+    seq = list(pick)
+    for c in sorted(cl, key=lambda c: -c["vs_ref"]):   # each Claude model above the first model it beats
+        seq.insert(next((n for n, r in enumerate(seq) if r not in cl and r["vs_ref"] < c["vs_ref"]), len(seq)), c)
+    for r in seq:
         cloud = r in cl
         nm = model_name(r)
         if cloud:
@@ -217,7 +221,7 @@ def _settings_panel(rcp: dict, opt: dict | None) -> str:
         s = opt["summary"]
         st, lb = s["stock"], s["llmbox"]
         pct = lambda a, b: f" <em>{(b / a - 1) * 100:+.0f}%</em>" if a and b else ""
-        worth = (f"<div class='worth'><div class='sc'>What they are worth on the reference PC</div><dl>"
+        worth = (f"<div class='worth'><div class='sc'>What they are worth on our test PC</div><dl>"
                  f"<dt>Short chat</dt><dd>{st['decode']:.0f} → <b>{lb['decode']:.0f}</b> tok/s{pct(st['decode'], lb['decode'])}</dd>"
                  + (f"<dt>At 32k</dt><dd>{st['deep']:.0f} → <b>{lb['deep']:.0f}</b> tok/s{pct(st['deep'], lb['deep'])}</dd>" if st.get("deep") and lb.get("deep") else "")
                  + (f"<dt>First word, 12k prompt</dt><dd>{12000 / st['prefill']:.1f} → <b>{12000 / lb['prefill']:.1f}</b> s</dd>" if st.get("prefill") and lb.get("prefill") else "")
@@ -225,7 +229,7 @@ def _settings_panel(rcp: dict, opt: dict | None) -> str:
     return ('<section class="panel recipe"><div class="lbl">Settings and why</div><div class="rgrid">'
             '<div><div class="sc">Same on every box · these set the score</div><dl>' + "".join(f"<dt>{k}</dt><dd class='val'>{esc(v)}</dd>" for k, v in portable) + "</dl></div>"
             '<div><div class="sc">Fitted to each box · speed only</div><dl>' + "".join(f"<dt>{k}</dt><dd>{esc(v)}</dd>" for k, v in hw) + "</dl>"
-            '<p class="q" style="margin-top:10px">values of the reference PC; <code>--fit</code> finds them on yours</p></div></div>'
+            '<p class="q" style="margin-top:10px">values of our test PC; <code>--fit</code> finds them on yours</p></div></div>'
             + (f'<div class="notes"><div class="sc">Why these settings</div><ul>{"".join(f"<li>{esc(n)}</li>" for n in notes)}</ul></div>' if notes else "")
             + worth + "</section>")
 
@@ -255,9 +259,9 @@ def _shared_panel(rid: str, vs: list[dict], community: list | None, users: dict,
     t2, t32, n = ours.get("t2"), ours.get("t32"), ours.get("machines")
     summary = " · ".join(x for x in (f"{t2:.0f} tok/s" if t2 else "", f"{t32:.0f} at 32k" if t32 else "") if x)
     blocks = [f"<div class='var ours' data-key='rid:{esc(rid)}'><div class='vhead'><div><b>llmbox's settings</b>"
-              f"<span class='q'> · optimized on the reference PC, fitted to each box by <code>--fit</code> (<a href='#run'>run it</a>)</span></div>"
+              f"<span class='q'> · optimized on our test PC, fitted to each box by <code>--fit</code> (<a href='#run'>run it</a>)</span></div>"
               f"<span class='vote' data-target='rid:{esc(rid)}'></span></div>"
-              f"<p class='vsum'>{summary + ' on the reference PC · ' if summary else ''}score {pct(ours.get('score'))}"
+              f"<p class='vsum'>{summary + ' on our test PC · ' if summary else ''}score {pct(ours.get('score'))}"
               f"{f' · measured on {n} more machine' + ('s' if n != 1 else '') if n else ''}</p></div>"]
     for v in vs:
         cmd = f"llmbox test {rid} " + " ".join(f"--set {f}" for f in social.flags(v["settings"]))
@@ -318,7 +322,7 @@ def _range_note(pool: list, runs: list) -> str:
 
 
 def _people_line(cls: list | None) -> str:
-    """How many people's machines measured the model (llmbox submit), besides the reference PC."""
+    """How many people's machines measured the model (llmbox submit), besides our test PC."""
     others = [c for c in cls or [] if not c.get("ref")] + [dict(c, machines=c["machines"] - 1) for c in cls or [] if c.get("ref") and c["machines"] > 1]
     n = sum(c["machines"] for c in others)
     if not n:
@@ -369,9 +373,9 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
     tiles = (f"<div><span class='sc'>Score</span><b>{_pct(vs)}</b><span>of Claude Opus 5.5 · range {rlo:.0f}–{rhi:.0f}</span>"
              f"<span>place {pl} of {len(rs)}{f' · tied with {lo}–{hi}' if lo != hi else ''}</span></div>"
              f"<div id='vspd'><span class='sc'>Speed</span><b>{f'{tps:.0f}' if tps else '—'}<small> tok/s</small></b>"
-             f"<span class='sub'>short chat{f' · {float(deep):.0f} with a long document' if deep != '-' else ''}</span><span class='src'>measured on the reference PC</span></div>"
+             f"<span class='sub'>short chat{f' · {float(deep):.0f} with a long document' if deep != '-' else ''}</span><span class='src'>measured on our test PC</span></div>"
              f"<div id='vfit'><span class='sc'>Fits</span><b>{'✓ ' + str(round(shp['ctx'] / 1024)) + 'k' if shp.get('ctx') else '—'}</b>"
-             f"<span class='sub'>context on the reference PC</span><span class='src'>{esc(ref_box)}</span></div>"
+             f"<span class='sub'>context on our test PC</span><span class='src'>{esc(ref_box)}</span></div>"
              f"<div><span class='sc'>Reliability</span><b>{n_cut + n_loop}<small> of {len(pool)}</small></b>"
              f"<span>answers {'where the thinking ran out of room (' + str(n_cut) + ') or looped (' + str(n_loop) + ')' if n_cut + n_loop else 'with a thinking problem: none'}</span>"
              f"<span class='src'>{runs_n} run{'s' if runs_n != 1 else ''} · {ctx['solved_h']:.0f} tasks solved per hour</span></div>")
@@ -389,7 +393,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
  {_groups_legend(ref=bool(ref))}<p class="q">Click a line to see the tasks it lost and why.</p></section>
 <section class="panel pad"><div class="lbl">Speed as the context grows</div>
  <p class="yb" id="yourbox" hidden></p>{_depth_bars([(rid, sp.get("by_depth") or {})])}
- <p class="q" style="margin-top:16px">Measured on the reference PC ({esc(ref_box)}).{_people_line(ctx.get("community"))} <a href="hardware-{esc(rid)}.html">Speed on {len(GPUS)} other graphics cards and Macs →</a></p></section>
+ <p class="q" style="margin-top:16px">Measured on our test PC ({esc(ref_box)}).{_people_line(ctx.get("community"))} <a href="hardware-{esc(rid)}.html">Speed on {len(GPUS)} other graphics cards and Macs →</a></p></section>
 <div id="run"></div>{_run_panel(rid, rec, ctx["model_now"], ctx["on_hf"])}
 {_settings_panel(rcp, ctx["opt"])}
 {_shared_panel(rid, ctx.get("variants") or [], ctx.get("community"), ctx.get("users") or {}, ours, k)}

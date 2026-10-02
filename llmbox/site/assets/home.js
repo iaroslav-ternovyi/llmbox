@@ -152,13 +152,13 @@ function render() {
       const f = forBox(sh, hwNow); p.t2 = f.t2; p.td = f.td; p.pred = true;
       row.querySelector(".spd").innerHTML = f.fits ? `<b class="pred">~${fmt(f.t2)}</b><small>~${fmt(f.td)} long</small>` : "—";
       row.querySelector(".fit").innerHTML = f.fits ? `✓ ${kfmt(f.ctx)}` : `<span class="no">✗ too big</span>`;
-      if (!f.fits) { row.classList.add("nofit"); p.t2 = null; }
+      if (!f.fits) { row.classList.add("nofit"); p.t2 = null; p.nofit = true; }
     } else {
       row.querySelector(".spd").innerHTML = measured[p.id];
       row.querySelector(".fit").innerHTML = sh ? `✓ ${kfmt(sh.ctx)}` : "—";
     }
   }
-  const loc = pts.filter(p => !p.cloud), nfit = loc.filter(p => p.t2).length;
+  const loc = pts.filter(p => !p.cloud), nfit = loc.filter(p => !p.nofit).length;   // a model without a speed figure still fits
   $("#fitsum").textContent = nfit === loc.length ? `all ${loc.length} models fit` : `${nfit} of ${loc.length} models fit`;
   const tb = $(".rank tbody");
   const key = sortBy === "speed" ? p => p.t2 || 0 : p => p.vs ?? -1;

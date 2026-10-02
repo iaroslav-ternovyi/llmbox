@@ -67,7 +67,7 @@ def method_page(ref: dict | None, opts: dict | None = None, ranked: set | None =
 <li><b>Real work, graded by programs.</b> {n} tasks from coding, tool use, questions about your own machine, documents and writing; hidden tests and checkers grade them, no model grades another.</li>
 <li><b>Fresh tasks every run.</b> Tasks are generated from a seed, so a model cannot have seen the answers.</li>
 <li><b>% of Claude Opus 5.5.</b> The score is the share of what a frontier model gets on the same tasks, with a 95% range; overlapping ranges mean "not measurably apart yet".</li>
-<li><b>Speed on a real PC.</b> Timed on the reference PC with the settings shown on each model page, and predicted for yours from the model file and your memory speeds.</li>
+<li><b>Speed on a real PC.</b> Timed on our test PC with the settings shown on each model page, and predicted for yours from the model file and your memory speeds.</li>
 <li><b>Measured by people too.</b> Anyone can run the same test on their own computer; the server grades every answer again, and the site shows the speeds by kind of hardware.</li></ul></section>
 
 <h2 id="score">The score</h2>

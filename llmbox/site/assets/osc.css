@@ -148,3 +148,8 @@ footer{margin-top:28px;color:var(--faint);font-size:12px;display:flex;justify-co
 }
 /* form controls: a border you can see (WCAG 3:1 for control edges) */
 select,input[type=search],input[type=text],input:not([type]){border-color:var(--edge)!important}
+/* phone: a command wraps instead of hiding its end, its COPY goes under it, a panel's label stays on one line */
+@media (max-width:760px){
+ pre.cmd,pre.cp{white-space:pre-wrap;overflow-wrap:anywhere}
+ div.copy pre.cmd{padding-right:14px}.copy>.btn.cpy,.run .rp .btn.cpy{position:static;margin-top:8px}   /* over pages.css / model.css */
+ .panel>.lbl{max-width:calc(100% - 28px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}

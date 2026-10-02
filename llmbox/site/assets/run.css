@@ -28,3 +28,4 @@
 .mbest p{margin:4px 0}.cmd{display:flex;gap:10px;align-items:flex-start;margin:14px 0 8px}.cmd code{flex:1;font-size:12px;color:var(--soft);word-break:break-all}
 @media (max-width:760px){.share{grid-template-columns:1fr}.shot .acts{flex-direction:column}.btn.wide{display:block;width:100%;min-height:44px;text-align:center}
  .rp h1{font-size:23px}.badge{display:table;margin:10px 0 0}.yours select{min-height:44px}}
+@media (max-width:760px){.tasks th:nth-child(4),.tasks td:nth-child(4),.tasks th:nth-child(5),.tasks td:nth-child(5){display:none}.tasks td:nth-child(3){white-space:nowrap}}   /* task, score, time, flags fit a phone */

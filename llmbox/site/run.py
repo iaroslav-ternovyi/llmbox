@@ -10,6 +10,11 @@ from .layout import _page
 from .words import _name_of, BLOCKS, esc, task_name, TIPS
 
 
+def _tilde(x) -> str:
+    """A path as it is published: the home folder (and its user name) becomes ~."""
+    return re.sub(r"(?:/home|/Users)/[^/\s]+(?=/)", "~", str(x))
+
+
 def _argv_lines(argv: list[str]) -> list[str]:
     """The command line as one flag per line: '-c 262144', '--temp 0.6' ... (the binary and model path first)."""
     out, cur = [], []
@@ -37,8 +42,9 @@ def run_page(rid: str, rec: dict, ref: dict | None, flags: dict) -> str:
             body_rows.append(f'<tr><td class="l"><span class="m2">{esc(task_name(r["id"]))}</span></td>'
                              f'<td class="l"><span class="mb {"ok" if v >= 99 else "no" if v < 1 else ""}"><i style="width:{v:.0f}%"></i></span><b class="mv">{v:.0f}</b></td>'
                              f'<td>{r["seconds"]:.0f} s</td><td>{r.get("steps") or 1}</td><td>{f.get("max_reply", 0):,}</td><td class="l">{fl or "<span class=q>—</span>"}</td></tr>')
-    argv = rt.get("argv") or []
-    diff = rt.get("diff_vs_recipe")
+    argv = [_tilde(x) for x in rt.get("argv") or []]   # the box's home folder is nobody's business
+    diff = [dict(d, recipe=[_tilde(x) for x in d.get("recipe") or []], run=[_tilde(x) for x in d.get("run") or []]) for d in rt.get("diff_vs_recipe")] \
+        if isinstance(rt.get("diff_vs_recipe"), list) else rt.get("diff_vs_recipe")
     diff_html = ("<span class='v ok'>identical to the recipe</span>" if diff == [] else
                  "".join(f"<div><span class='flag {'lo' if d['class'] == 'quality' else ''}'>{d['class'].upper()}</span> {esc(d['flag'])}: recipe {esc(' '.join(d['recipe']) or '—')} → run {esc(' '.join(d['run']) or '—')}</div>" for d in diff) if diff
                  else "<span class='q'>not recorded for this run</span>")
@@ -58,12 +64,12 @@ def run_page(rid: str, rec: dict, ref: dict | None, flags: dict) -> str:
  <dt>CPU</dt><dd>{esc(h.get("cpu"))}</dd><dt>RAM</dt><dd>{h.get("ram_gib")} GiB · measured {h.get("ram_read_gbs")} GB/s read</dd><dt>OS</dt><dd>{esc(h.get("os"))}</dd>
  <dt>RUNTIME</dt><dd>llama.cpp {esc(rt.get("llama_cpp_build") or "not recorded")}</dd><dt>MODEL</dt><dd>{esc(m.get("hf_repo") or "")}<br><span class="q">{esc(m.get("file") or "")}</span></dd>
  <dt>SHA256</dt><dd class="{"" if m.get("sha256") else "todo"}">{esc(m.get("sha256") or "not recorded")}</dd></dl></section>
- <section class="panel"><div class="lbl">Settings used · the server's command line</div>
+ <section class="panel"><div class="lbl">Server command</div>
   <div class="argv" id="argv">{"".join(f"<span>{esc(x)}</span> " for x in _argv_lines(argv)) if argv else "<span class=q>not recorded for this run</span>"}</div>
   <div class="diff">{diff_html}{" <span class='q'>· consistent start to end</span>" if rt.get("settings_consistent") else ""}</div></section></div>
 {_telemetry_panel(rec.get("telemetry"))}
 <section class="panel tasks"><div class="lbl">Every task</div>
- <div class="tw"><table><tr><th class="l">TASK</th><th>SCORE</th><th>TIME</th><th>STEPS</th><th>LONGEST REPLY<br><span class="faint">tokens</span></th><th class="l">FLAGS</th></tr>{"".join(body_rows)}</table></div></section>'''
+ <div class="tw"><table class="tasks"><tr><th class="l">TASK</th><th>SCORE</th><th>TIME</th><th>STEPS</th><th>LONGEST REPLY<br><span class="faint">tokens</span></th><th class="l">FLAGS</th></tr>{"".join(body_rows)}</table></div></section>'''
     return _page(f"llmbox · run {rec['id'][:8]} · {rid}", "MODELS", body, ("pages.css", "run.css"), ("run.js",))
 
 

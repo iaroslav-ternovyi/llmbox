@@ -1,7 +1,7 @@
 // how fast a model is on other computers: the visitor's box first, filters
 const $ = s => document.querySelector(s);
 const saved = savedBox(DATA);
-const refBox = { name: "the reference PC", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
+const refBox = { name: "our test PC", gpu: DATA.ref.gpu, vram: DATA.ref.vram, vrambw: DATA.ref.vrambw, ram: DATA.ref.ram, rambw: DATA.ref.rambw };
 const box = saved || refBox;
 const cur = forBox(DATA.sh, box);
 // the formula is checked against public runs for NVIDIA (dense and MoE), Macs and AMD (dense); mixture-of-experts models
@@ -25,7 +25,7 @@ else $("#adv").innerHTML = (faster ? card(`Faster RAM (${faster} GB/s)`, Object.
   + card("A 24 GB card (RTX 4090)", gp("RTX 4090"), "Most of the model on the graphics card.");
 $("#why").textContent = DATA.sh.moe ? `A mixture-of-experts model: what does not fit on the graphics card runs from system RAM, so on small cards the RAM speed, not the GPU, sets the pace. At ${Math.round(cur.gf * 100)}% of the experts on the card now.`
   : "A dense model: every weight is read for every token, so it has to fit on the graphics card; the card's memory speed sets the pace.";
-// every box: NVIDIA cards with the visitor's RAM (or 64 GB at the reference PC's RAM speed), then Macs
+// every box: NVIDIA cards with the visitor's RAM (or 64 GB at our test PC's RAM speed), then Macs
 const ram = saved && !saved.uni ? saved.ram : 65536, rambw = saved && !saved.uni ? saved.rambw : DATA.ref.rambw;
 const m = DATA.measured, rows = [];
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -33,7 +33,7 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 for (const c of DATA.community) {
   const [card, ...rest] = c.label.split(" · ");
   rows.push({ k: c.class.endsWith("|metal") ? "mac" : c.class.endsWith("|vulkan") ? "amd" : "nv", name: card, measured: true, t2: c.t2, td: c.t80 || c.t32,
-              sub: [rest.join(" · "), `${plural(c.machines, "machine")}${c.people > 1 ? ` of ${c.people} people` : ""}${c.ref ? (c.machines > 1 ? ", the reference PC among them" : " (the reference PC)") : ""}`,
+              sub: [rest.join(" · "), `${plural(c.machines, "machine")}${c.people > 1 ? ` of ${c.people} people` : ""}${c.ref ? (c.machines > 1 ? ", our test PC among them" : " (our test PC)") : ""}`,
                     c.p5 ? `90% between ${Math.round(c.p5)} and ${Math.round(c.p95)} tok/s` : ""].filter(Boolean).join(" · "),
               f: c.ref ? forBox(DATA.sh, refBox) : { fits: true, gf: 0, ctx: c.ctx || DATA.sh.ctx } });
 }

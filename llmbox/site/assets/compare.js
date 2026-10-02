@@ -5,7 +5,7 @@ const wavg = (b, bs) => { let s = 0, n = 0; for (const k of bs) if (b[k] != null
 const se = (m, up) => Math.max(0.3, (up ? m.ci[1] - m.cap : m.cap - m.ci[0]) / 1.96);
 const surely = (a, b) => a.cap - b.cap > 1.96 * Math.hypot(se(a, false), se(b, true));   // as the ranking: outside the difference's own 95% margin
 const box = savedBox(DATA);
-function speedOf(m) {   // measured on the reference PC, or predicted for the visitor's box
+function speedOf(m) {   // measured on our test PC, or predicted for the visitor's box
   if (m.cloud) return null;
   const sh = DATA.recipes[m.id];
   if (box && sh && !sameClassAs(box, DATA.ref)) { const f = forBox(sh, box); return { t2: f.fits ? f.t2 : null, td: f.fits ? f.td : null, fits: f.fits, ctx: f.ctx, pred: true }; }
@@ -51,7 +51,7 @@ function render(a, b) {
   for (const [g, bs] of DATA.groups) { h += row(esc(g), wavg(A.blocks, bs), wavg(B.blocks, bs), "g");
     if (bs.length > 1) for (const k of bs) h += row(esc(DATA.short[k]), A.blocks[k], B.blocks[k], "k"); }
   $("#dumb").innerHTML = h;
-  // speed as the context grows: both on the reference PC (what was measured)
+  // speed as the context grows: both on our test PC (what was measured)
   const deps = A.depth.length ? A.depth : B.depth;
   if (A.cloud || B.cloud || !deps.length) $("#speed").innerHTML = `<p class="q">${A.cloud || B.cloud ? "A cloud model has no speed on a box." : "No speed probe recorded."}</p>`;
   else { const top = Math.max(...A.depth.map(x => x[1]), ...B.depth.map(x => x[1])) * 1.1;
@@ -59,7 +59,7 @@ function render(a, b) {
     $("#speed").innerHTML = deps.map(([k]) => { const x = near(A, k), y = near(B, k);
       return `<div class="sd"><div class="k">${k <= 4 ? "Short chat" : k <= 40 ? "Long session" : "Big document"}<small>${Math.round(k)}k tokens in context</small></div><div>` +
         [[A, x, "a"], [B, y, "b"]].map(([m, v, c]) => `<div class="sb ${c}"><i style="width:${100 * v[1] / top}%"></i><span>${Math.round(v[1])} tok/s${v[2] ? ` · first word ${v[2]} s` : ""}</span></div>`).join("") + `</div></div>`; }).join("") +
-      `<p class="q" style="margin-top:12px">Measured on the reference PC.${box && !sameClassAs(box, DATA.ref) ? " Your box: see the tiles above." : ""}</p>`; }
+      `<p class="q" style="margin-top:12px">Measured on our test PC.${box && !sameClassAs(box, DATA.ref) ? " Your box: see the tiles above." : ""}</p>`; }
   // tasks one solved and the other did not (same task kind and level; runs pick different tasks, so only the shared ones count)
   const only = (x, y) => Object.keys(x.fam).filter(f => f in y.fam && x.fam[f] >= 0.99 && y.fam[f] < 0.5).sort();
   const tname = f => { const p = f.split("."); return `${esc(DATA.tasks[p[0] + "." + p[1]] || p[1])} <span class="faint">· level ${p[2].slice(1)}</span>`; };

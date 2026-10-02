@@ -91,8 +91,8 @@ License: Creative Commons Attribution 4.0 International (CC BY 4.0), https://cre
 Credit: "llmbox ({site})". Built {built}; how the numbers are made: {site}/method
 
 models.csv   a row per model and settings (recipe): its score as % of Claude Opus 5.5 with the 95% range, the score per
-             use, the model file (Hugging Face repo, sha256), and its speed on the reference PC
-speeds.csv   measurements per model and hardware class (the reference PC is one machine among them): median tokens/s in a
+             use, the model file (Hugging Face repo, sha256), and its speed on our test PC
+speeds.csv   measurements per model and hardware class (our test PC is one machine among them): median tokens/s in a
              short chat, 32k and 80k tokens into a session, and how many machines
 models.json  the same as models.csv, as the site's model list carries it (recipes/index.json has the settings too)
 """

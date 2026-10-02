@@ -2,7 +2,7 @@
 12, 17 and 18). Both read the board (board.py), so the map's cell, the page and the feed say the same thing.
 
 The page: the best model there at the picker's start values and its number, measured (the comparison group behind
-it named) or predicted; the measurements per model and comparison group (RAM speed), the reference PC's labelled;
+it named) or predicted; the measurements per model and comparison group (RAM speed), our test PC's labelled;
 the recent runs, each linking to its page; who was first; the feed; "be the first" with the commands when nobody has
 measured it; AMD's "after launch" state. The feed: its first item, written once when the feed starts, then a model
 measured there for the first time and every new best, from the append-only event log (board.events)."""
