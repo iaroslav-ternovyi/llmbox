@@ -29,3 +29,4 @@
  .mapyou:not([hidden]){display:block;margin-top:10px}.mapyou .cell{width:auto;height:auto;min-height:44px;display:flex;align-items:center;gap:10px;padding:8px 10px}
  .mapyou .cell .tk{display:none}.cell .yt{position:static;flex:0 0 auto}}
 .hd .lede .n{font:500 14px "IBM Plex Mono";color:var(--muted)}
+a.cell:focus-visible{outline:2px solid var(--amber);outline-offset:2px}   /* over the cells' own frames */
