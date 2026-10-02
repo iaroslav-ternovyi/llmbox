@@ -4,7 +4,7 @@
 :root{
   --bg:#0E0F0C; --panel:#121310; --ink:#E8E4D8; --soft:#cfcabb; --muted:#9a9689; --faint:#85817a;   /* muted 6.1:1, faint 4.8:1 on the panels (WCAG AA for small text) */
   --amber:#FFB000; --amber-dim:#7a5a14; --amber-faint:#3a2d0c; --red:#ff5a36; --red-dim:#6b2a1a;
-  --line:#2a2b24; --line2:#1f201b; --grid:#15160f;
+  --line:#2a2b24; --line2:#1f201b; --grid:#15160f; --edge:#6b685f;   /* edge: a form control's border, 3.5:1 */
   --t-hi:#FFB000; --t-mid:#c9a255; --t-lo:#ff5a36;
   --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace; --cond:"IBM Plex Sans Condensed","Arial Narrow",sans-serif;
   color-scheme:dark;
@@ -143,3 +143,5 @@ footer{margin-top:28px;color:var(--faint);font-size:12px;display:flex;justify-co
   .exp{min-width:44px;min-height:44px}
   .rank .pick2 input{width:22px;height:22px}
 }
+/* form controls: a border you can see (WCAG 3:1 for control edges) */
+select,input[type=search],input[type=text],input:not([type]){border-color:var(--edge)!important}
