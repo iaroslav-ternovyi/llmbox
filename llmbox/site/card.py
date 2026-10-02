@@ -58,9 +58,9 @@ def build_tag(b) -> str | None:
     return b if re.fullmatch(r"b\d{1,6}", b) else None
 
 
-def spec(board: dict, sid: str, records: list[dict], models: dict, site: str, now: str | None = None) -> dict | None:
+def spec(board: dict, sid: str, records: list[dict], models: dict, site: str, now: str | None = None, wait: bool = True) -> dict | None:
     """The values a run's card shows, at this moment. None while it is not ready: a run with a quality test waits for
-    its explanations to be graded, up to a day after it was received."""
+    its explanations to be graded, up to a day after it was received (wait=False: the values now, for its page)."""
     run = board["runs"].get(sid)
     sp = next((r for r in records if r.get("kind") == "speed"), None)
     if not run or not sp:
@@ -68,7 +68,7 @@ def spec(board: dict, sid: str, records: list[dict], models: dict, site: str, no
     q = next((r for r in records if r.get("kind") == "suite"), None)
     sub = sp.get("submission") or {}
     received = sub.get("received") or ""
-    if q and any(x.get("pending") for x in q.get("rows") or []):
+    if wait and q and any(x.get("pending") for x in q.get("rows") or []):
         try:
             waited = time.time() - time.mktime(time.strptime(received[:19], "%Y-%m-%dT%H:%M:%S"))
         except ValueError:
@@ -209,6 +209,10 @@ def fonts_ok() -> bool:
     return all("Plex" in subprocess.run(["fc-match", f], capture_output=True, text=True).stdout for f in (COND, MONO))
 
 
+def available() -> bool:
+    return bool(shutil.which("rsvg-convert")) and fonts_ok()
+
+
 def render(text: str) -> bytes:
     """The PNG of an SVG card: rsvg-convert reads it on stdin, so there is no folder to resolve anything against."""
     if not shutil.which("rsvg-convert"):
@@ -236,6 +240,9 @@ def draw(board: dict, records: dict, models: dict, site: str, out_dir: str, now:
     d = os.path.join(out_dir, "r")
     os.makedirs(d, exist_ok=True)
     stats = {"drawn": 0, "failed": 0, "waiting": 0, "skipped": 0}
+    if render is _render and not available():   # this machine cannot draw at all (a laptop build): no card is counted
+        stats["unavailable"] = True              # as failed, so none is given up on; the server checks Plex at setup
+        return stats
     gone = removed()
     for sid in gone:
         with __import__("contextlib").suppress(OSError):
@@ -269,3 +276,6 @@ def draw(board: dict, records: dict, models: dict, site: str, out_dir: str, now:
             if n >= TRIES:   # given up: the health check reports it for a day
                 open(os.path.join(CARDS, f"{sid}.failed"), "w").write(str(e))
     return stats
+
+
+_render = render   # draw() tells the real renderer from one a test put in its place

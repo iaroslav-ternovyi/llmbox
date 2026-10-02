@@ -87,7 +87,10 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
                 "measured": {c["class"]: [c["t2"], c["t32"], c["t80"], c["machines"]] for c in cs.get(r["id"], [])},
                 "range": [round(r["ci"][0] * k, 1), round(r["ci"][1] * k, 1)] if r.get("ci") and k else None,
                 "uses": {n: round(v, 1) for n, bs in GROUPS if (v := _wavg(r.get("blocks_vs_ref"), bs)) is not None}}
-    written += registry.export(host, order, out_dir, {r["id"]: _meta(r) for r in rs})   # recipes/: what `llmbox recipe pull` installs
+    meta = {r["id"]: _meta(r) for r in rs}
+    written += registry.export(host, order, out_dir, meta)   # recipes/: what `llmbox recipe pull` installs
+    run_pages, images, noindex = _people_runs(out_dir, host, order, meta, {rid: os.path.basename((local[rid].get("model") or {}).get("file") or "") for rid in order})
+    written += run_pages
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
     w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
     from .install import account_page, install_page, privacy_page, terms_page
@@ -115,11 +118,77 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
                         f'<section class="panel hd" id="queue" hidden data-api="{esc(_api.rstrip("/"))}"><div><h1>Your result is on its way</h1>'
                         '<p class="q" id="qline" aria-live="polite" style="margin-top:8px"></p></div></section>', ("pages.css",), ("queue.js",), base=True))
     from .publish import finish
-    written += finish(out_dir, written)   # canonical, social preview, CSP per page; sitemap.xml, robots.txt, _headers
+    written += finish(out_dir, written, images, noindex)   # canonical, social preview, CSP per page; sitemap.xml, robots.txt, _headers
     # pages of earlier builds this one did not write (a run that no longer counts, a renamed recipe): only the site's own
     # kinds of file, so a folder with other things in it keeps them
-    keep = {os.path.basename(p) for p in written}
+    keep = {os.path.relpath(p, out_dir) for p in written}
     for f in os.listdir(out_dir):
-        if f not in keep and re.fullmatch(r"(index|new|method|compare|people|install|account|privacy|terms|404|(recipe|run|hardware|compare)-.+|u-[0-9a-f]{8})\.html|[a-z0-9]+\.(css|js)", f):
+        if f not in keep and re.fullmatch(r"(index|new|method|compare|people|install|account|privacy|terms|404|(recipe|run|hardware|compare|hw)-.+|u-[0-9a-f]{8})\.html|[a-z0-9]+\.(css|js)", f):
             os.remove(os.path.join(out_dir, f))
+    rdir = os.path.join(out_dir, "r")
+    for f in os.listdir(rdir) if os.path.isdir(rdir) else []:   # a run page whose records are gone (card.draw keeps the images)
+        if f"r/{f}" not in keep and re.fullmatch(r"[0-9a-f]{12}\.html", f):
+            os.remove(os.path.join(rdir, f))
     return written
+
+
+def _people_runs(out_dir: str, host: str, order: list[str], meta: dict, files: dict) -> tuple[list[str], dict, set]:
+    """People's runs: the board (llmbox/site/board.py), each run's card (card.py) and page r/<id>.html, and the
+    "removed" page of each run taken off. Returns (files written, {page: its card as social preview}, noindex pages)."""
+    import json
+    from .. import fit as F, registry
+    from ..public import site as _site
+    from . import board as B, card as C
+    from .run import removed_page, user_run_page
+    gone = C.removed()
+
+    def ours(rec):   # a speed or quality record of a listed model, with the file the model list names
+        rid = (rec.get("recipe") or {}).get("id")
+        f = os.path.basename((rec.get("model") or {}).get("file") or (rec.get("model") or {}).get("path") or "")
+        return rid in files and (not f or not files[rid] or f == files[rid])
+    box = [r for _p, r in report.results.files(host) if r.get("kind") == "speed" and ours(r)]
+    people = [r for _p, r in report.results.files("community") if ours(r) and (r.get("submission") or {}).get("id") not in gone]
+    models = []
+    for rid in order:
+        try:
+            p = registry.published(host, rid)
+            models.append((dict(meta.get(rid) or {}, id=rid), p, F.shape_for(p)))
+        except (OSError, ValueError, SystemExit) as e:
+            print(f"board: {rid} left out: {e}")
+    b = B.build(box, [r for r in people if r.get("kind") == "speed"], models)
+    recs: dict = {}
+    for r in people:
+        recs.setdefault(r["submission"]["id"], []).append(r)
+    site = _site()
+    st = C.draw(b, recs, meta, site, out_dir)
+    print("cards: not drawn here (no rsvg-convert or IBM Plex)" if st.get("unavailable")
+          else f"cards: {st['drawn']} drawn, {st['failed']} failed, {st['waiting']} waiting for grades")
+    machines = [[n, e["slug"], e["kind"], (e.get("best") or {}).get("name"),
+                 (e.get("best") or {}).get("measured") or (e.get("best") or {}).get("predicted"), bool((e.get("best") or {}).get("measured")), e["testable"]]
+                for n, e in b["entries"].items()]
+    rdir = os.path.join(out_dir, "r")
+    os.makedirs(rdir, exist_ok=True)
+    written, images, noindex = [], {}, set()
+    for sid in sorted(b["runs"]):
+        if not re.fullmatch(r"[0-9a-f]{12}", sid or "") or sid in gone:
+            continue
+        live = C.spec(b, sid, recs.get(sid) or [], meta, site, wait=False)
+        if not live:
+            continue
+        fp = os.path.join(C.CARDS, f"{sid}.json")
+        frozen = json.load(open(fp)) if os.path.exists(fp) else None
+        state = ("drawn" if os.path.exists(os.path.join(rdir, f"{sid}.png")) else "failed" if os.path.exists(os.path.join(C.CARDS, f"{sid}.failed"))
+                 else "retrying" if os.path.exists(os.path.join(C.CARDS, f"{sid}.tries")) or st.get("unavailable") else "waiting")
+        p = os.path.join(rdir, f"{sid}.html")
+        open(p, "w", encoding="utf-8").write(user_run_page(sid, b, recs[sid], live, frozen, state, machines, site))
+        written.append(p)
+        if state == "drawn":
+            from .run import _alt
+            images[f"r/{sid}.html"] = (f"r/{sid}.png", _alt(frozen or live))
+    for sid, reason in sorted(gone.items()):
+        if re.fullmatch(r"[0-9a-f]{12}", sid):
+            p = os.path.join(rdir, f"{sid}.html")
+            open(p, "w", encoding="utf-8").write(removed_page(sid, reason))
+            written.append(p)
+            noindex.add(f"r/{sid}.html")
+    return written, images, noindex

@@ -151,6 +151,9 @@ assert card.removed() == {"bbbbbbbbbbbb": "owner"}
 
 # a real PNG where rsvg-convert and IBM Plex are installed (CI, the server)
 card.render = real_render
+if not plex:   # a machine that cannot draw at all (a laptop build) gives up on no card
+    st = card.draw(dict(b, runs={"dddddddddddd": b["runs"]["dddddddddddd"]}), recs, META, SITE, out)
+    assert st.get("unavailable") and not os.path.exists(os.path.join(card.CARDS, "dddddddddddd.tries")), st
 if plex:
     png = card.render(card.svg(spec("aaaaaaaaaaaa")))
     w, h = struct.unpack(">II", png[16:24])

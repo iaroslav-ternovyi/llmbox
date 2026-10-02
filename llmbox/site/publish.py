@@ -23,6 +23,11 @@ OG_IMAGE = "og.png"   # 1200x630, in assets/
 NOINDEX = re.compile(r"^(u-[0-9a-f]{8}|account|404)\.html$")
 
 
+def _attr(s: str) -> str:
+    import html as _h
+    return _h.escape(s, quote=True)
+
+
 def _url(site: str, name: str) -> str:
     return site + "/" if name == "index.html" else f"{site}/{name[:-5]}"
 
@@ -59,8 +64,9 @@ def _csp(html: str, api: str) -> str:
             "base-uri 'self'; form-action 'self'; object-src 'none'").replace("  ", " ")
 
 
-def head(html: str, name: str, site: str, api: str) -> str:
-    """The page with its head completed (idempotent: a page that already has a canonical link is returned as it is)."""
+def head(html: str, name: str, site: str, api: str, image: tuple | None = None, noindex: bool = False) -> str:
+    """The page with its head completed (idempotent: a page that already has a canonical link is returned as it is).
+    image: (its own social preview, relative to the site; its alt text) - a run's result card - else the site's."""
     if 'rel="canonical"' in html:
         return html
     title = re.search(r"<title>(.*?)</title>", html, re.S)
@@ -70,10 +76,11 @@ def head(html: str, name: str, site: str, api: str) -> str:
     tags = (f'<link rel="canonical" href="{url}">'
             f'<meta property="og:type" content="website"><meta property="og:site_name" content="llmbox">'
             f'<meta property="og:title" content="{title}"><meta property="og:description" content="{about}">'
-            f'<meta property="og:url" content="{url}"><meta property="og:image" content="{site}/{OG_IMAGE}">'
+            f'<meta property="og:url" content="{url}"><meta property="og:image" content="{site}/{image[0] if image else OG_IMAGE}">'
             f'<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">'
-            f'<meta name="twitter:card" content="summary_large_image"><meta name="theme-color" content="#0E0F0C">'
-            + ('<meta name="robots" content="noindex">' if NOINDEX.match(name) else ""))
+            + (f'<meta property="og:image:alt" content="{_attr(image[1])}"><meta name="twitter:image:alt" content="{_attr(image[1])}">' if image and image[1] else "")
+            + f'<meta name="twitter:card" content="summary_large_image"><meta name="theme-color" content="#0E0F0C">'
+            + ('<meta name="robots" content="noindex">' if noindex or NOINDEX.match(name) else ""))
     html = html.replace("</head>", tags + _ld(name, site, title, about) + "</head>", 1)
     # the CSP last: it hashes the inline scripts, the structured data among them
     return html.replace("<head>", f'<head><meta http-equiv="Content-Security-Policy" content="{_csp(html, api)}">', 1)
@@ -129,18 +136,21 @@ def data_export(out_dir: str, site: str) -> list[str]:
     return out
 
 
-def finish(out_dir: str, written: list[str]) -> list[str]:
-    """Complete every written page's head; write sitemap.xml, robots.txt and _headers. Returns the files it wrote."""
+def finish(out_dir: str, written: list[str], images: dict | None = None, noindex: set | None = None) -> list[str]:
+    """Complete every written page's head; write sitemap.xml, robots.txt and _headers. Returns the files it wrote.
+    Pages may sit in a folder (r/<id>.html); images: {page: (its own social preview, alt text)}; noindex: pages kept
+    out of search and the sitemap (a removed run's)."""
     site, api = _site(), _server()
-    pages = sorted(os.path.basename(p) for p in written if p.endswith(".html"))
+    images, noindex = images or {}, noindex or set()
+    pages = sorted(os.path.relpath(p, out_dir) for p in written if p.endswith(".html"))
     for name in pages:
         p = os.path.join(out_dir, name)
         html = open(p, encoding="utf-8").read()
-        new = head(html, name, site, api)
+        new = head(html, name, site, api, images.get(name), name in noindex)
         if new != html:
             open(p, "w", encoding="utf-8").write(new)
     day = time.strftime("%Y-%m-%d")
-    listed = [n for n in pages if not NOINDEX.match(n)]
+    listed = [n for n in pages if not NOINDEX.match(n) and n not in noindex]
     sitemap = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
                + "".join(f"<url><loc>{_url(site, n)}</loc><lastmod>{day}</lastmod></url>\n" for n in listed) + "</urlset>\n")
     files = {"sitemap.xml": sitemap,
