@@ -135,3 +135,11 @@ footer{margin-top:28px;color:var(--faint);font-size:12px;display:flex;justify-co
 .signin{font-size:11.5px;letter-spacing:.12em;color:var(--muted);padding:5px 4px;white-space:nowrap}.signin:hover{color:var(--ink);text-decoration:none}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (max-width:480px){.brand small{display:none}}
+/* a phone: every control a finger can hit (44 px), the look otherwise unchanged */
+@media (max-width:900px){
+  .plate .tabs a{padding:13px 4px}
+  .plate .getbtn,.plate .signin,.plate .boxchip{min-height:44px;display:inline-flex;align-items:center;column-gap:.45em}
+  .seg button,.chips button,.run .rtabs button{min-height:44px}
+  .exp{min-width:44px;min-height:44px}
+  .rank .pick2 input{width:22px;height:22px}
+}
