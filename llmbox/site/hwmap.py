@@ -43,13 +43,13 @@ def cell(name: str, ent: dict, users: dict, now: float) -> str:
     kind = "m" if n else "u" if testable else "x"
     model = best["name"] if best else "nothing fits at 64 GB"
     if not testable:
-        ticks = '<span class="tk" title="a rough prediction: AMD timing comes after launch">after launch</span>'
+        ticks = '<span class="tk"></span>'   # AMD: the faint name and the legend say it; no word repeated 18 times
         said = f"AMD timing comes after launch; best model {model}, predicted roughly {num.lstrip('~')} tokens per second" if best else "AMD timing comes after launch"
     elif n:
         ticks = '<span class="tk" aria-hidden="true">' + "<i></i>" * min(n, 10) + (f"<em>+{n - 10}</em>" if n > 10 else "") + "</span>"
         said = (f"measured on {n} machine{'s' if n > 1 else ''}, best model {model} at {num.lstrip('~')} tokens per second" + (" (predicted)" if not measured else "")) if best else f"measured on {n} machines"
     else:
-        ticks = '<span class="tk">be the first</span>'
+        ticks = '<span class="tk"></span>'   # nobody yet: the dashed frame and the legend say it
         said = f"best model {model} predicted about {num.lstrip('~')} tokens per second, nobody has measured this {'Mac' if ent['kind'] == 'mac' else 'card'} yet" if best else "nobody has measured it yet"
     new = ""
     try:
@@ -109,10 +109,10 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
  <div class="mhead"><span><b>{measured}</b> of {len(ents)} measured · each new machine fills a cell: <code id="mapcmd">$ llmbox test</code>
   <button class="btn" data-copy-from="mapcmd">COPY</button></span>
   <span class="q">{later} AMD entries open after launch</span><a id="maprss" href="#box">RSS for your card</a></div>
+ <p class="mlegend"><span class="fr m"></span> measured: <span class="n">63</span> tok/s · <span class="fr u"></span> nobody yet: <span class="n pred">~52</span> predicted ·
+ <span class="fr x"></span> <span class="faint">AMD: timing after launch</span> · each cell's model is the best that fits with 64 GB of RAM (a Mac: its memory nearest 64)</p>
  <div id="mapyou" class="mapyou" hidden></div>
  {"".join(tiers)}
- <p class="mlegend"><span class="n">63</span> measured · <span class="n pred">~52</span> predicted · <span class="fr m"></span> solid frame: measured on this card ·
- <span class="fr u"></span> dashed: nobody yet · the best model at 64 GB of RAM (a Mac: the memory it is sold with nearest 64)</p>
  {other}</section>'''
 
 

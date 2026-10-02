@@ -30,7 +30,7 @@ assert "nobody has measured this card yet" in by["RTX 3080 10 GB"][3] and "nobod
 assert by["RX 7900 XTX 24 GB"][3].startswith("RX 7900 XTX 24 GB: AMD timing comes after launch")
 one = lambda name: re.search(rf'data-e="{re.escape(name)}".*?</a>', h).group(0)
 assert one("RTX 3060 12 GB").count("<i></i>") == 6 and '<span class="n">44</span>' in one("RTX 3060 12 GB") and 'title="first: @octo"' in one("RTX 3060 12 GB")
-assert '<span class="n pred">~' in one("RTX 3080 10 GB") and "be the first" in one("RTX 3080 10 GB")
+assert '<span class="n pred">~' in one("RTX 3080 10 GB") and "nobody has measured this card yet" in one("RTX 3080 10 GB")
 assert 'class="new"' in one("RTX 3060 12 GB") and 'class="new"' not in one("RTX 5070 12 GB")   # first measured 10 h ago vs weeks ago
 assert 'title="first: u-0000000b"' in one("RTX 4060 8 GB")   # not public: the handle
 assert re.search(r"<b>\d+</b> of 65 measured", h) and "16 AMD entries open after launch" in h
