@@ -81,26 +81,34 @@ def install(h, prof: dict, out=print, stream: bool = False) -> str:
 
 
 def ensure_server(host_name: str, r: dict, out=print) -> str:
-    """The recipe's llama-server, found again when it is gone (its folder deleted, a build removed): another build the
-    host has, else - when the missing one was llmbox's own download - the official build installed again. The recipe file
-    is pointed at it, so the next run does not look again. Raises SystemExit when there is none."""
-    from . import hosts, install as inst, recipe as rc
+    """The recipe's llama-server, found again when llmbox's own download of it is gone (~/.llmbox/engines cleared): another
+    build llmbox downloaded, else the official build installed again; the recipe file is pointed at it. Anything else is
+    left as it is: a bare name (found on PATH), a binary the host could not be asked about (ssh down: the agent reports
+    it), someone's own build or fork (a missing one is a plain stop - another fork would measure something else)."""
+    from . import hosts, recipe as rc
     path = r["runtime"]["server"]
+    if "/" not in path:
+        return path
     prof = hosts.load(host_name)
     h = hosts.host_of(prof)
-    if h.run(f"test -x {shlex.quote(path)}", timeout=30).returncode == 0:
+    q = shlex.quote(path)
+    said = h.run(f"if [ -x {q} ]; then echo ok; elif [ -e {q} ]; then echo noexec; else echo missing; fi", timeout=30).stdout.strip()
+    if said != "missing":
         return path
+    if "/.llmbox/engines/" not in path:
+        raise SystemExit(f"llama-server is no longer at {path}: build it again there, or `llmbox install {r.get('id')} --from registry "
+                         f"--host {host_name} --apply` to fit the model to a build this computer has")
     out(f"llama.cpp is no longer at {path}: looking for it again")
-    engine = r["runtime"].get("engine") or "llama.cpp"
+    own = lambda p_: [x["path"] for x in p_["hw"].get("runtimes") or [] if "/.llmbox/engines/" in (x.get("path") or "")]
     prof = hosts.detect(host_name, prof.get("ssh"), measure=False)
-    new = inst.server_for(prof, engine)
-    if not new and "/.llmbox/engines/" in path and engine == "llama.cpp":
+    found = own(prof)
+    if not found:
         install(h, prof, out=out)
         prof = hosts.detect(host_name, prof.get("ssh"), measure=False)
-        new = inst.server_for(prof, engine)
-    if not new:
-        raise SystemExit(f"llama-server is no longer at {path} and this computer has no other {engine} build: "
-                         "`llmbox` installs the official one")
+        found = own(prof)
+    if not found:
+        raise SystemExit(f"llama.cpp could not be installed again under ~/.llmbox/engines: `llmbox` sets it up")
+    new = max(found, key=lambda p_: int((re.search(r"/b(\d+)/", p_) or [0, 0])[1]))   # the newest build llmbox downloaded
     p = os.path.join(rc.recipes_dir(host_name), f"{r.get('id')}.toml")
     if os.path.exists(p):   # the server line as written (an extended recipe's base keeps its own)
         text = open(p).read()
