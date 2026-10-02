@@ -116,10 +116,9 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
         other = (f'<div class="other"><span class="sc">Other machines</span> {links}{f" · +{len(o) - 12} more" if len(o) > 12 else ""}'
                  f'<p class="q">Not in the picker yet, so not counted in the {len(ents)}.</p></div>')
     return f'''<section class="panel mapp" id="map" aria-labelledby="maph"><div class="lbl" id="maph">Hardware map</div>
- <div class="mhead"><span><b>{measured}</b> of {len(ents)} measured · each new machine fills a cell: <code id="mapcmd">$ llmbox test</code>
-  <button class="btn" data-copy-from="mapcmd">COPY</button></span>
-  <span class="q">{later} AMD entries open after launch</span><a id="maprss" href="#box">RSS for your card</a></div>
  {lead}
+ <div class="mhead"><span class="q"><b>{measured}</b> of {len(ents)} measured so far, the rest predicted · AMD: predicted only for now</span>
+  <a id="maprss" href="#box">Get told when your card is measured (RSS)</a></div>
  <p class="mlegend">Each cell: a graphics card or Mac, the best model for it, and how fast that model writes, in tokens per second (about ¾ of a
  word each; 20 reads comfortably, 50+ feels instant). <span class="fr m"></span> <b>measured</b>: someone ran it on that hardware (×3: on three machines) ·
  <span class="fr u"></span> <b>predicted</b> <span class="n pred">~</span>: worked out from the hardware until someone measures it ·
@@ -127,7 +126,9 @@ def map_panel(board: dict, users: dict, now: float | None = None) -> str:
  <p class="q mapwho" id="mapwho"></p>
  <div id="mapyou" class="mapyou" hidden></div>
  {"".join(tiers)}
- {other}</section>'''
+ {other}
+ <div class="mown"><b>Own one of these?</b> Measure it in about 20 minutes; it fills its cell for everyone:
+  <code id="mapcmd">$ llmbox test</code> <button class="btn" data-copy-from="mapcmd">COPY</button> <a href="install.html">install first</a></div></section>'''
 
 
 def hardware_page(board: dict, users: dict, now: float | None = None, latest: str = "") -> str:

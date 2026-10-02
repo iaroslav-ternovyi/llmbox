@@ -122,6 +122,7 @@ footer{margin-top:28px;color:var(--faint);font-size:12px;display:flex;justify-co
   .plate{flex-wrap:wrap;gap:10px 16px}.plate .brand{order:10}.plate .tabs{order:20;margin-left:auto}.plate .getbtn{order:30}
   .plate::after{content:"";order:35;flex-basis:100%;height:0}   /* the line break before the box chip */
   .plate .boxchip{order:40;margin-left:auto}.plate .signin{order:50;margin-left:0}
+  .brand small{display:none}   /* the tagline makes way for the tabs (the home page says it in its heading) */
 }
 @media (max-width:900px){
   .wrap{padding:16px 16px 40px}
@@ -153,3 +154,4 @@ select,input[type=search],input[type=text],input:not([type]){border-color:var(--
  pre.cmd,pre.cp{white-space:pre-wrap;overflow-wrap:anywhere}
  div.copy pre.cmd{padding-right:14px}.copy>.btn.cpy,.run .rp .btn.cpy{position:static;margin-top:8px}   /* over pages.css / model.css */
  .panel>.lbl{max-width:calc(100% - 28px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.tabs .ts{display:none}@media (max-width:600px){.tabs .tl{display:none}.tabs .ts{display:inline}}

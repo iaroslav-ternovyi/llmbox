@@ -32,3 +32,4 @@
 .hd .lede .n{font:500 14px var(--mono);color:var(--muted)}
 a.cell:focus-visible{outline:2px solid var(--amber);outline-offset:2px}   /* over the cells' own frames */
 .mlead{font-size:14.5px;color:var(--ink);margin:10px 0 2px}.mlead a{font-weight:500}
+.mown{margin-top:18px;padding:12px 14px;border:1px dashed var(--line);font-size:13.5px;color:var(--soft)}.mown code{color:var(--soft)}.mown .btn{padding:3px 10px;margin:0 6px}

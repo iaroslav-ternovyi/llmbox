@@ -36,7 +36,7 @@ assert '<span class="n pred">~' in one("RTX 3080 10 GB") and ">predicted<" in on
     and "nobody has measured this card yet" in one("RTX 3080 10 GB")
 assert 'class="new"' in one("RTX 3060 12 GB") and 'class="new"' not in one("RTX 5070 12 GB")   # first measured 10 h ago vs weeks ago
 assert 'title="first: u-0000000b"' in one("RTX 4060 8 GB")   # not public: the handle
-assert re.search(rf"<b>\d+</b> of {N} measured", h) and "16 AMD entries open after launch" in h
+assert re.search(rf"<b>\d+</b> of {N} measured so far", h) and "AMD: predicted only for now" in h and "Own one of these?" in h
 tiers = re.findall(r'<h3 class="sc">([^<]+)</h3><ul class="cells[^"]*">(.*?)</ul>', h, re.S)
 names = {t: re.findall(r'data-e="([^"]+)"', u) for t, u in tiers}
 assert list(names) == ["8 GB", "10–12 GB", "16 GB", "20–24 GB", "32 GB and more", "Mac", "Ryzen AI Max"], list(names)

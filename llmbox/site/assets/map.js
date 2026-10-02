@@ -12,7 +12,7 @@
     let name = sel && sel.value;
     if (!sel) try { name = (JSON.parse(localStorage.getItem("llmbox-box") || "null") || {}).gpu; } catch (e) {}
     const c = name && [...map.querySelectorAll(".cells .cell")].find(x => x.dataset.e === name);
-    if (!c) { rss.href = sel ? "#box" : "index.html#box"; rss.textContent = "RSS for your card: pick it first";
+    if (!c) { rss.href = sel ? "#box" : "index.html#box"; rss.textContent = "Get told when your card is measured (RSS): pick it first";
       if (who) { who.textContent = "Your own card or Mac is marked YOU once you pick it on the "; const a = document.createElement("a"); a.href = "index.html#box"; a.textContent = "Models page"; who.append(a, "."); }
       return; }
     if (who) { who.textContent = `YOU marks the box you picked: ${name}. Not yours? `; const a = document.createElement("a"); a.href = "index.html#box"; a.textContent = "Pick yours"; who.append(a, "."); }
@@ -20,7 +20,7 @@
     const y = document.createElement("span"); y.className = "yt"; y.textContent = "YOU";
     const n = c.querySelector(".new"); if (n) n.remove();
     c.append(y);
-    rss.href = `feeds/${c.dataset.slug}.xml`; rss.textContent = `RSS for ${name}`;
+    rss.href = `feeds/${c.dataset.slug}.xml`; rss.textContent = `Get told when ${name} is measured (RSS)`;
     pin.append(c.cloneNode(true)); pin.hidden = false;
   }
   if (sel) sel.addEventListener("change", () => setTimeout(mark));

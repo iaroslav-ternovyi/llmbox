@@ -15,6 +15,8 @@ ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 
 
 TAB_LINKS = {"MODELS": "index.html", "HARDWARE": "hardware.html", "NEW": "new.html", "COMPARE": "compare.html", "METHOD": "method.html"}
+# what a tab says, long and on a phone (the keys stay: pages name their tab by them)
+TAB_NAMES = {"NEW": ("NEW MODELS", "NEW"), "METHOD": ("HOW WE TEST", "METHOD")}
 
 
 def asset_url(name: str) -> str:
@@ -48,6 +50,13 @@ def _err_attrs() -> str:
     return f' data-err="{esc(api)}/api/v1/err" data-build="{time.strftime("%Y-%m-%dT%H:%M")}"' if api.startswith("https://") else ""
 
 
+def _tab_label(t: str) -> str:
+    if t not in TAB_NAMES:
+        return t
+    long, short = TAB_NAMES[t]
+    return f'<span class="tl">{long}</span><span class="ts">{short}</span>'
+
+
 def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data=None, links: dict | None = None,
           about: str | None = None, base: bool = False, head: str = "") -> str:
     """A page: the header (tabs, the visitor's box), the body, the footer. Stylesheets and scripts are shared files
@@ -55,7 +64,7 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
     page in a folder, r/<id>, and 404.html, which Pages serves at any missing address); such a page has no #anchors.
     head: more of the head (a page's feed link)."""
     links = dict(TAB_LINKS, **(links or {}))
-    nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in TAB_LINKS)
+    nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{_tab_label(t)}</a>' for t in TAB_LINKS)
     styles = "".join(f'<link rel="stylesheet" href="{asset_url(c)}">' for c in ("fonts.css", "osc.css") + tuple(css))
     from ..public import stats
     counter = f'<script src="{asset_url("stats.js")}" data-stats="{esc(stats())}"></script>' if stats() else ""   # before the page's scripts: they count events
@@ -69,7 +78,7 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
             f'<link rel="preload" href="plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>'
             f'<link rel="preload" href="plex-mono-400-latin.woff2" as="font" type="font/woff2" crossorigin>{styles}{head}</head><body>'
             '<svg width="0" height="0" style="position:absolute"><defs><filter id="g"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs></svg>'
-            '<div class="wrap"><header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>LOCAL LLM BENCHMARK</small></a>'
+            '<div class="wrap"><header class="plate"><a class="brand glow" href="index.html">LLMBOX<small>WHICH AI RUNS ON YOUR PC</small></a>'
             f'<nav class="tabs" aria-label="sections">{nav}</nav><a class="boxchip" id="boxchip" href="index.html#box" title="the box speeds and fit are shown for; change it on the home page">'
             f'Your box <b>not set</b></a><a class="getbtn" href="install.html">GET LLMBOX</a>'
             f'<a class="signin" id="signin" href="account.html">SIGN IN</a></header><main id="main">{body}</main>'

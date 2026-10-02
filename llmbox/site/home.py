@@ -75,22 +75,28 @@ def _queue_line(q: list[dict]) -> str:
 
 def _feed(host: str, q: list[dict], local: list[dict], clouds: list[dict], suite_version: str, tier: str) -> list[str]:
     """The latest results comparable with the ranking, newest first (the model being measured on top)."""
+    from .. import irt
     feed, names = [], {r["id"]: model_name(r) for r in local + clouds}
+    k = next((r["vs_ref"] / r["capability"] for r in local + clouds if r.get("vs_ref") and r.get("capability")), None)   # raw -> % of Opus
+    ranked = {r["id"]: r.get("vs_ref") for r in local}
     for j in q:
         if j["status"] == "running":
             feed.append(f"<li><span class='live'>●</span> <b>{esc(j['model'])}</b> <span class='q'>{f"measuring {j['done']}/{j['total']}" if j['total'] else "starting"}</span><span class='when'>now</span></li>")
     for rec in sorted(report.results.load_all(host) + report.results.load_all("cloud"), key=lambda x: x.get("created", ""), reverse=True):
         su, s = rec.get("suite", {}), rec.get("summary", {})
         if rec.get("kind") != "suite" or report.version_of(su) != suite_version or report.scale(su.get("tier")) != report.scale(tier) \
-                or su.get("blocks"):
-            continue   # only results comparable with the ranking above
+                or su.get("blocks") or ((rec.get("host") or {}).get("id") != "cloud" and irt.unfinished(rec)):
+            continue   # only finished results comparable with the ranking above
         rid = (rec.get("recipe") or {}).get("id", "?")
         cloud = (rec.get("host") or {}).get("id") == "cloud"
         tps = (s.get("speed") or {}).get("decode_tps")
         nm = names.get(rid, rid)
         name = f"<a href='recipe-{esc(rid)}.html'>{esc(nm)}</a>" if rid in {r["id"] for r in local} else f"<b>{esc(nm)}</b>"
+        cap = s.get("capability") or 0
+        this = f"{cap * k:.0f}% of Opus in this run" if k else f"{cap:.1f} this run"
+        pooled = f" (ranking: {ranked[rid]:.0f}%)" if ranked.get(rid) is not None and k and abs(ranked[rid] - cap * k) >= 1 else ""
         feed.append(f"<li>{name} <span class='fv' title='the score of this one run; the ranking pools every run of the model'>"
-                    f"{s.get('capability', 0):.1f} this run{f' · {tps:.0f} tok/s' if tps else ''}</span>"
+                    f"{this}{pooled}{f' · {tps:.0f} tok/s' if tps else ''}</span>"
                     f"<span class='when'>{'cloud' if cloud else esc((rec.get('host') or {}).get('gpu', '?').replace('NVIDIA GeForce ', ''))} · {_ago(rec.get('created', ''))}</span></li>")
         if len(feed) >= 6:
             break
