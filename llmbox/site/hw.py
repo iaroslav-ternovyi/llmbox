@@ -102,11 +102,11 @@ def hw_page(name: str, board: dict, meta: dict, users: dict, site: str) -> str:
                  f'<pre class="cmd" id="cmd">{esc(one)}\nllmbox test</pre><button class="btn solid" data-copy-from="cmd">COPY</button></section>')
     first = _first(ent.get("credit"), users)
     body = f'''
-<section class="panel hd hwp"><div><div class="crumb"><a href="index.html">Models</a> / <a href="index.html#map">hardware</a> / {esc(name)}</div>
+<section class="panel hd hwp"><div><div class="crumb"><a href="hardware.html">Hardware</a> / {esc(name)}</div>
  <h1>What runs best on {esc(_a(name))}</h1>{answer}
  <p class="q">{first + " · " if first else ""}new results: <a href="{feed}">RSS</a></p></div></section>
 {state}{table}{runs}'''
-    return _page(f"llmbox · {name}", "MODELS", body, ("pages.css", "hardware.css"), ("runpage.js",),
+    return _page(f"llmbox · {name}", "HARDWARE", body, ("pages.css", "hardware.css"), ("runpage.js",),
                  about=f"The local AI model that runs best on {_a(name)}, measured by people with one or predicted, with the settings to run it.",
                  head=f'<link rel="alternate" type="application/rss+xml" title="llmbox · {esc(name)}" href="{feed}">')
 

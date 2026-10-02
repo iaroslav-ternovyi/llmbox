@@ -14,7 +14,7 @@ from .words import esc
 ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 
 
-TAB_LINKS = {"MODELS": "index.html", "NEW": "new.html", "COMPARE": "compare.html", "METHOD": "method.html"}
+TAB_LINKS = {"MODELS": "index.html", "HARDWARE": "hardware.html", "NEW": "new.html", "COMPARE": "compare.html", "METHOD": "method.html"}
 
 
 def asset_url(name: str) -> str:
@@ -55,7 +55,7 @@ def _page(title: str, tab: str, body: str, css: tuple = (), js: tuple = (), data
     page in a folder, r/<id>, and 404.html, which Pages serves at any missing address); such a page has no #anchors.
     head: more of the head (a page's feed link)."""
     links = dict(TAB_LINKS, **(links or {}))
-    nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in ("MODELS", "NEW", "COMPARE", "METHOD"))
+    nav = "".join(f'<a class="{"on" if t == tab else ""}" href="{esc(links.get(t) or "#")}">{t}</a>' for t in TAB_LINKS)
     styles = "".join(f'<link rel="stylesheet" href="{asset_url(c)}">' for c in ("fonts.css", "osc.css") + tuple(css))
     from ..public import stats
     counter = f'<script src="{asset_url("stats.js")}" data-stats="{esc(stats())}"></script>' if stats() else ""   # before the page's scripts: they count events

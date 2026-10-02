@@ -8,8 +8,11 @@
   function mark() {
     for (const c of map.querySelectorAll(".cell.you")) { c.classList.remove("you"); const y = c.querySelector(".yt"); if (y) y.remove(); }
     pin.textContent = ""; pin.hidden = true;
-    const name = sel && sel.value, c = name && [...map.querySelectorAll(".cells .cell")].find(x => x.dataset.e === name);
-    if (!c) { rss.href = "#box"; rss.textContent = "RSS for your card: pick it above"; return; }
+    // the box picked on the home page (its picker is not on the hardware page): the saved one
+    let name = sel && sel.value;
+    if (!sel) try { name = (JSON.parse(localStorage.getItem("llmbox-box") || "null") || {}).gpu; } catch (e) {}
+    const c = name && [...map.querySelectorAll(".cells .cell")].find(x => x.dataset.e === name);
+    if (!c) { rss.href = sel ? "#box" : "index.html#box"; rss.textContent = "RSS for your card: pick it first"; return; }
     c.classList.add("you");
     const y = document.createElement("span"); y.className = "yt"; y.textContent = "YOU";
     const n = c.querySelector(".new"); if (n) n.remove();

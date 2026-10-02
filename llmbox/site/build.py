@@ -92,10 +92,12 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     board, run_pages, images, noindex = _people_runs(out_dir, host, order, meta, {rid: os.path.basename((local[rid].get("model") or {}).get("file") or "") for rid in order})
     written += run_pages
     written += _entries(out_dir, board, meta)
-    from .hwmap import map_panel
+    from .hwmap import hardware_page as hardware_index   # (hardware_page is a model's page on other computers)
     from .people import users as _users
     from ..hosts import HOME as _HOME
-    written.append(home(out_dir, host, suite_version, tier, all_rs, data, map_panel(board, _users(os.path.join(_HOME, "intake", "users.json")))))
+    w("hardware.html", hardware_index(board, _users(os.path.join(_HOME, "intake", "users.json"))))
+    written.append(home(out_dir, host, suite_version, tier, all_rs, data,
+                        (sum(1 for e in board["entries"].values() if e["machines"]), len(board["entries"]))))
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
     w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
     from .install import account_page, install_page, privacy_page, terms_page
@@ -128,7 +130,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     # kinds of file, so a folder with other things in it keeps them
     keep = {os.path.relpath(p, out_dir) for p in written}
     for f in os.listdir(out_dir):
-        if f not in keep and re.fullmatch(r"(index|new|method|compare|people|install|account|privacy|terms|404|(recipe|run|hardware|compare|hw)-.+|u-[0-9a-f]{8})\.html|[a-z0-9]+\.(css|js)", f):
+        if f not in keep and re.fullmatch(r"(index|hardware|new|method|compare|people|install|account|privacy|terms|404|(recipe|run|hardware|compare|hw)-.+|u-[0-9a-f]{8})\.html|[a-z0-9]+\.(css|js)", f):
             os.remove(os.path.join(out_dir, f))
     rdir = os.path.join(out_dir, "r")
     for f in os.listdir(rdir) if os.path.isdir(rdir) else []:   # a run page whose records are gone (card.draw keeps the images)

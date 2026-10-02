@@ -152,9 +152,9 @@ def _trust(local: list[dict]) -> str:
 
 
 def home(out_dir: str, host: str = "box", suite_version: str | None = None, tier: str = "quick", rs: list[dict] | None = None,
-         sd: dict | None = None, map_html: str = "") -> str:
-    """The home page: best for your box, the hardware map (hwmap.py), the chart, the ranking by use, the settings'
-    worth, the latest results, what's new."""
+         sd: dict | None = None, measured: tuple | None = None) -> str:
+    """The home page: best for your box, the chart, the ranking by use, the settings' worth, the latest results, what's
+    new. measured: (entries measured, of how many) for the line that leads to the hardware map (hardware.html)."""
     from .. import suite as _s
     suite_version = suite_version or _s.VERSION
     rs = rs if rs is not None else report.rows(host, suite_version=suite_version, tier=tier)
@@ -186,7 +186,7 @@ the best model for it, how fast it answers, how close it gets to Claude, and one
  <input id="bwn" placeholder="GB/s" size="5" aria-label="measured RAM read speed, GB/s" title="your measured RAM read speed (llmbox host add)">
  <span id="boxnote" class="q">speeds measured on this box</span><span id="fitsum" class="q"></span></section>
 <section class="panel pickp" id="pick" aria-live="polite"></section>
-{map_html}
+{f'<p class="tomap"><a href="hardware.html">Every graphics card and Mac: {measured[0]} of {measured[1]} measured so far, the rest predicted →</a></p>' if measured else ""}
 <section class="panel chart hero"><h2 class="ch2">Smarter or faster: what runs best on your box</h2>
  <div id="scatter">{_scatter(local)}</div>
  <p class="cap">Each point is a model with the settings it was measured with. Higher = closer to Claude Opus 5.5 on the same tasks;
@@ -205,7 +205,7 @@ the best model for it, how fast it answers, how close it gets to Claude, and one
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "index.html")
     with open(path, "w") as f:
-        f.write(_page("llmbox · What should I run on my box?", "MODELS", body, ("home.css",), ("plan.js", "home.js") + (("map.js",) if map_html else ()), data))
+        f.write(_page("llmbox · What should I run on my box?", "MODELS", body, ("home.css",), ("plan.js", "home.js"), data))
     return path
 
 
