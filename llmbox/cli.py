@@ -725,9 +725,18 @@ def cmd_bench(a: argparse.Namespace) -> None:
         known = {f.rsplit(".", 1)[0] for f in bank.a} | {f"{b_}.{k_}" for b_, k_, _l in _suite.QUICK_ITEMS}
         bank = irt.with_provisional(bank, _suite.families(known))
         pr = tuple(float(x) for x in a.prior.split(",")) if a.prior else None   # default: the bank's population prior
+        have = {}   # the blocks this recipe's earlier runs answered: one it lacks goes first (bench.run_adaptive)
+        if a.host and not a.set:
+            from . import report as _report
+            for x in (_report.current_pool().get((a.recipe or a.model, a.host)) or {}).get("rows") or []:
+                have[x["block"]] = have.get(x["block"], 0) + 1
+            gaps = [b for b in bank.weights if have and not have.get(b)]
+            if gaps:
+                print(f"  earlier runs have no answers in {', '.join(gaps)}: those go first", flush=True)
         res = bench.run_adaptive(a.endpoint, a.model, bank, budget_min=a.budget, target=a.target, prior=pr,
                                  seed0=7000 + 1000 * a.seed,   # --seed: fresh instances for a repeated adaptive run
-                                 api_key=None, progress=lambda m: print(m, flush=True), jsonl_path=jl, explore=a.explore, blocks=a.block)
+                                 api_key=None, progress=lambda m: print(m, flush=True), jsonl_path=jl, explore=a.explore, blocks=a.block,
+                                 have=have)
     else:
         res = bench.run(a.endpoint, a.model, tier=a.tier, seed0=a.seed, blocks=a.block, jsonl_path=jl,
                         progress=lambda m: print(m, flush=True), resume=a.resume, rerun=a.rerun, parallel=a.parallel)

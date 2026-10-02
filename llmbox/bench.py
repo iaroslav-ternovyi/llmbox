@@ -450,11 +450,15 @@ EXPLORE = 6   # provisional families tried per adaptive run (v0.11: new tools le
 
 def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, target: float = 5.0, prior: tuple | None = None,
                  seed0: int = 7000, api_key: str | None = None, progress=print, jsonl_path: str | None = None,
-                 min_per_block: int = 1, max_per_family: int = 2, explore: int | None = None, blocks: list[str] | None = None) -> dict:
+                 min_per_block: int = 1, max_per_family: int = 2, explore: int | None = None, blocks: list[str] | None = None,
+                 have: dict | None = None) -> dict:
     """Adaptive run (llmbox/irt.py): after every task, the family with the most information per expected second at the
     current estimate; fresh seeds, so a family can be drawn again (at most max_per_family times). Stops when the 95%
     interval of the capability is within +-target points or the time budget is spent. The capability is reported on
-    the quick suite's scale (expected weighted score of its task families at the estimated theta)."""
+    the quick suite's scale (expected weighted score of its task families at the estimated theta).
+    have: {block: answers} the model already has from earlier runs: a block it lacks goes first, so a slow model whose
+    40 minutes reach 7 tasks fills the blocks its last run missed instead of answering the same cheap ones again (a model
+    enters the ranking once its answers cover every block)."""
     from . import irt
     if blocks:   # some blocks only (the model has the others already): their families, calibrated and provisional
         prov_keep = [f for f in bank.provisional if bank.block.get(f) in blocks]
@@ -481,6 +485,8 @@ def run_adaptive(base_url: str, model: str, bank, budget_min: float = 45.0, targ
         if spent >= budget_min * 60 or (on_target and (not prov or len(explored) >= min(quota, len(prov)))):
             break
         short = [b for b in bank.weights if counts.get(b, 0) < min_per_block and b in set(bank.block.values())]   # blocks this run can reach
+        missing = [b for b in short if not (have or {}).get(b)]
+        short = missing or short   # the blocks no run has answered yet first, then this run's own coverage
         # an item that failed at once (HTTP 502 while the server restarts) says nothing about its time: 0 s made a
         # family free and crashed the choice (K2 Horizon, 2026-09-29)
         timed = [r for r in rows if not r.get("error") and r["seconds"] > 0]
