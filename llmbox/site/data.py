@@ -189,7 +189,8 @@ def task_flags(rec: dict) -> dict:
     scanner = cache.key(open(loopdetect.__file__).read())   # a changed detector re-scans
     out = {}
     for r in rec.get("rows", []):
-        cut = bool(r.get("reasoning_cut")) or "I have reasoned enough" in (r.get("reasoning_tail") or "")
+        # out of room: the reasoning reserve cut the thinking, or the reply ran into the output cap (finish_reason length)
+        cut = bool(r.get("reasoning_cut")) or "I have reasoned enough" in (r.get("reasoning_tail") or "") or r.get("finish_reason") == "length"
         loop = False
         f = os.path.join(td, r["id"] + ".json.gz") if td else ""
         if f and os.path.exists(f):   # scanning the saved thinking is slow: cached by the file's size and time
