@@ -146,6 +146,30 @@ def _name_of(rec: dict) -> str:
     return model_name({"id": (rec.get("recipe") or {}).get("id") or "?", "hf_repo": m.get("hf_repo"), "file": m.get("file"), "host": rec.get("host")})
 
 
+def bits_of(q: str) -> str:
+    """'UD-Q4_K_XL' -> '4-bit', 'IQ3_XXS' -> '3-bit', 'BF16' -> '16-bit', '' when unknown."""
+    m = re.search(r"(?:I?Q|PQ)(\d)|(?:BF|F)(16)", q or "")
+    return f"{m.group(1) or m.group(2)}-bit" if m else ""
+
+
+def plain_line(rid: str, fname: str | None, sh: dict | None, name: str, kind: str) -> str:
+    """A ranking row's second line in plain words: 'UD-Q4_K_XL (4-bit) · MTP (drafts ahead, faster) · MoE: 35B, runs like 3B · fine-tune'."""
+    q = _quant(fname).split(" ")[0]
+    b = bits_of(q)
+    parts = [f"{q} ({b})" if b else q]
+    if VARIANT.get(rid):
+        parts.append(VARIANT[rid])
+    if fname and "MTP" in fname.upper():
+        parts.append("MTP (drafts ahead, faster)")
+    if sh and sh.get("moe") and sh.get("active") and sh.get("params"):
+        parts.append(f'MoE: {sh["params"] / 1e9:.0f}B, runs like {sh["active"] / 1e9:.0f}B')
+    elif sh and sh.get("params") and not re.search(r"\d[bB](?=$|[-_. ])", name):
+        parts.append(f'{sh["params"] / 1e9:.0f}B')
+    if kind != "release":
+        parts.append({"uncensored": "uncensored remix"}.get(kind, kind))
+    return " · ".join(parts)
+
+
 def _size(sh: dict | None, name: str = "") -> str:
     """What the name does not say already: '9B dense', 'MoE, 4B active', '103B MoE, 6B active' (the GGUF's own counts)."""
     if not sh or not sh.get("params") or re.search(r"A\d+(\.\d+)?B", name):   # 35B-A3B says it all

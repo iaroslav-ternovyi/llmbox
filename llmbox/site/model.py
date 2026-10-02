@@ -379,8 +379,10 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
              f"<span class='sub'>short chat{f' · {float(deep):.0f} at 32k of context' if deep != '-' else ''}</span><span class='src'>measured on our test PC</span></div>"
              f"<div id='vfit'><span class='sc'>Fits</span><b>{'✓ ' + str(round(shp['ctx'] / 1024)) + 'k' if shp.get('ctx') else '—'}</b>"
              f"<span class='sub'>context on our test PC</span><span class='src'>{esc(ref_box)}</span></div>"
-             f"<div><span class='sc'>Reliability</span><b>{n_cut + n_loop}<small> of {len(pool)}</small></b>"
-             f"<span>answers {'where the thinking ran out of room (' + str(n_cut) + ') or looped (' + str(n_loop) + ')' if n_cut + n_loop else 'with a thinking problem: none'}</span>"
+             f"<div><span class='sc'>Finished</span><b>{(100 * (1 - (n_cut + n_loop) / len(pool)) if pool else 100):.0f}%</b>"
+             f"<span>{len(pool) - n_cut - n_loop} of {len(pool)} answers"
+             + (f"; {n_cut + n_loop} got stuck ({', '.join(x for x in (f'{n_cut} ran out of thinking room' if n_cut else '', f'{n_loop} looped' if n_loop else '') if x)})" if n_cut + n_loop else ", none got stuck")
+             + "</span>"
              f"<span class='src'>{runs_n} run{'s' if runs_n != 1 else ''} · {ctx['solved_h']:.0f} tasks solved per hour</span></div>")
     body = f'''
 <section class="panel title"><div><div class="crumb"><a href="index.html">Models</a> / {esc(nm)}</div>
