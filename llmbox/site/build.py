@@ -72,6 +72,8 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
         fl = {x.get("created"): task_flags(x) for x in runs}
         rel[rid] = (sum(1 for x in pool if ((fl.get(x.get("_run")) or {}).get(x["id"]) or {}).get("cut") or ((fl.get(x.get("_run")) or {}).get(x["id"]) or {}).get("loop")), len(pool))
         counted = {c: sum(1 for x in pool if x.get("_run") == c) for c in made}
+        from .. import irt as _irt
+        skipped = [(x, why) for _p, x in suite_files if (x.get("recipe") or {}).get("id") == rid and (why := _irt.unfinished(x))]
         hours = sum((x["summary"].get("wall_minutes") or 0) for x in runs) / 60
         rival = next((o for o in order if o != rid), None)
         from .words import caveat as _caveat
@@ -79,7 +81,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
             "rs": rs, "clouds": clouds, "ranks": ranks, "med": med, "look": look, "shape": data["recipes"].get(rid), "ref_hw": ref_hw, "ref_box": ref_box,
             "pool_rows": pool, "flags": fl, "runs": runs, "counted": counted, "solved_h": sum(x["summary"].get("solved") or 0 for x in runs) / hours if hours else 0,
             "opt": opts.get(rid), "model_now": now, "on_hf": avail, "cmp": _cmp_href(rid, rival) if rival else "#", "community": cs.get(rid),
-            "variants": shared.get(rid), "users": people_names, "api": _API.rstrip("/")}))
+            "variants": shared.get(rid), "users": people_names, "api": _API.rstrip("/"), "skipped": skipped}))
         for x in runs:
             w(f"run-{x['id'][:8]}.html", run_page(rid, x, ref, fl[x.get("created")]))
         if rid in data["recipes"]:

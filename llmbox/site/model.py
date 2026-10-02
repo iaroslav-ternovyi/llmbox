@@ -289,7 +289,8 @@ def _talk_panel(rid: str) -> str:
             'Readers can report a comment: three reports hide it until the operator looks (<a href="terms.html#comments">rules</a>).</p></section>')
 
 
-def _runs_panel(runs: list[dict], ref: dict | None, counted: dict) -> str:
+def _runs_panel(runs: list[dict], ref: dict | None, counted: dict, skipped: list | None = None) -> str:
+    """The runs whose answers make the score; below them the runs that do not count, with why (an unfinished test)."""
     rows = []
     for x in sorted(runs, key=lambda r: r.get("created", ""), reverse=True):
         s, h, rt = x["summary"], x.get("host") or {}, x.get("runtime") or {}
@@ -302,7 +303,8 @@ def _runs_panel(runs: list[dict], ref: dict | None, counted: dict) -> str:
                     f"<td>{counted.get(x.get('created'), 0)}</td><td>{_pct(vs)}</td><td>{(s.get('speed') or {}).get('decode_tps') or 0:.0f}</td></tr>")
     return ('<section class="panel runs"><div class="lbl">Runs</div><div class="tw"><table><tr><th class="l">RUN</th><th class="l">SUITE</th><th class="l">BOX</th>'
             '<th>ANSWERS<br><span class="faint">counted</span></th><th>THIS RUN<br><span class="faint">% of Opus</span></th><th>TOK/S</th></tr>' + "".join(rows)
-            + '</table></div><p class="q rn">The score at the top pools every answer from these runs that still counts in this version of the test. '
+            + "".join(f"<tr class='nc'><td class='l'>{esc(_ago(x.get('created', '')))}</td><td class='l' colspan='5'>not counted, an unfinished test: "
+                      f"{esc(why)} ({(x.get('summary') or {}).get('items') or 0} answers)</td></tr>" for x, why in skipped or []) + '</table></div><p class="q rn">The score at the top pools every answer from these runs that still counts in this version of the test. '
             'Answers to tasks that changed since a run are left out.</p></section>')
 
 
@@ -391,7 +393,7 @@ def recipe_page(rid: str, rec: dict, ref: dict | None, ctx: dict) -> str:
 <div id="run"></div>{_run_panel(rid, rec, ctx["model_now"], ctx["on_hf"])}
 {_settings_panel(rcp, ctx["opt"])}
 {_shared_panel(rid, ctx.get("variants") or [], ctx.get("community"), ctx.get("users") or {}, ours, k)}
-{_runs_panel(ctx["runs"], ref, ctx["counted"])}
+{_runs_panel(ctx["runs"], ref, ctx["counted"], ctx.get("skipped"))}
 {_talk_panel(rid)}'''
     about = (f"{nm} {variant(rid, m.get('file'), full=True)}: {_pct(vs)} of Claude Opus 5.5 on real work (coding, tools, documents, writing)"
              + (f", {tps:.0f} tok/s on {ref_box}" if tps else "") + ". The file, and the settings to run it in llama.cpp, LM Studio or Ollama.")

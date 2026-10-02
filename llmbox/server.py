@@ -839,6 +839,9 @@ def check(rec: dict) -> str | None:
         if not isinstance(sm, dict) or (sm.get("capability") is not None and not _num(sm.get("capability"), 0, 100)) or \
                 (ci is not None and not (isinstance(ci, list) and len(ci) == 2 and all(_num(x, 0, 100) for x in ci))):
             return "the quality run's summary is malformed"
+        why = irt.unfinished(rec)
+        if why:
+            return f"the quality test did not finish: {why}"
         return None
     sp = (rec.get("speed") if rec.get("kind") == "speed" else ((rec.get("runs") or {}).get("llmbox") or {})) or {}
     if not isinstance(sp, dict):

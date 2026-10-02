@@ -100,10 +100,15 @@ assert not os.path.exists("/private/tmp/x-speed-" + str(rec["recipe"]["id"]) + "
 # a quality run's summary is read by the cards: malformed ones are refused
 from llmbox import irt  # noqa: E402
 q0 = {"schema": results.SCHEMA, "kind": "suite", "id": "q-1", "created": rec["created"], "host": rec["host"], "model": rec["model"], "recipe": rec["recipe"],
-      "suite": {"content_hash": next(iter(irt.RELEASES)), "tier": "adaptive", "seed0": 7000}, "rows": [{"id": "tools.dedupe.L8.7000"}]}
+      "suite": {"content_hash": next(iter(irt.RELEASES)), "tier": "adaptive", "seed0": 7000, "budget_min": 10, "target": 2.5}, "rows": [{"id": "tools.dedupe.L8.7000"}]}
 for bad in ([1, 2, 3], "x", {"capability": 64.0, "capability_ci95": [40, "x"]}, {"capability": 640.0}):
     assert "summary is malformed" in (server.check(dict(q0, summary=bad)) or ""), bad
-assert server.check(dict(q0, summary={"capability": 64.8, "capability_ci95": [39.6, 80.1]})) is None
+assert server.check(dict(q0, summary={"capability": 64.8, "capability_ci95": [39.6, 80.1], "wall_minutes": 10.2})) is None
+# an unfinished test is refused: stopped on a coarser target, a one-minute run, an interrupted one
+assert "did not finish" in server.check(dict(q0, suite=dict(q0["suite"], target=5), summary={"capability": 20.0, "capability_ci95": [15, 25], "wall_minutes": 3.0}))
+assert "did not finish" in server.check(dict(q0, suite=dict(q0["suite"], budget_min=1), summary={"capability": 60.0, "capability_ci95": [40, 80], "wall_minutes": 1.1}))
+assert "did not finish" in server.check(dict(q0, summary={"capability": 60.0, "capability_ci95": [40, 80], "wall_minutes": 4.0, "stopped": "interrupted"}))
+assert server.check(dict(q0, summary={"capability": 60.0, "capability_ci95": [58, 62], "wall_minutes": 6.0})) is None   # reached +-2.5 early
 # the outlier check uses the server's own prediction when it has one, not the figure the sender wrote
 fast = dict(rec, speed=dict(rec["speed"], decode_tps=900.0), prediction={"decode_tps_no_spec": 10000.0})
 assert server.outlier_flags(fast) == [] and server.outlier_flags(fast, predict=lambda r: 60.0) == ["outlier"]

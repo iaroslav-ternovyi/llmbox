@@ -120,6 +120,29 @@ def counted(row: dict) -> dict | None:
     return None if row.get("pending") or row.get("error") else row
 
 
+STANDARD_TARGET = 2.5    # the +- points a quality test aims for (llmbox test, llmbox bench): its time budget ends it first
+MIN_BUDGET = 10.0         # minutes: the shortest quality test (llmbox test's default)
+
+
+def unfinished(r: dict) -> str | None:
+    """Why an adaptive quality run is not a finished test, or None. A test is finished when it ran its time budget (10
+    minutes at least), or reached the standard +-2.5 before that, and nothing stopped it. A run stopped on a coarser
+    target, a one-minute smoke test or an interrupted run stays on disk and on the model's page, and scores nothing.
+    A run of chosen blocks only (adding answers to one block) is a different thing and not judged here."""
+    su, s = r.get("suite") or {}, r.get("summary") or {}
+    if not isinstance(su, dict) or not isinstance(s, dict) or su.get("tier") != "adaptive" or su.get("blocks"):
+        return None
+    if s.get("stopped"):
+        return f"stopped before the end ({str(s['stopped'])[:80]})"
+    budget, wall = su.get("budget_min") or 0, s.get("wall_minutes") or 0
+    if budget < MIN_BUDGET:
+        return f"a {budget:g}-minute run; a test takes at least {MIN_BUDGET:g}"
+    ci = s.get("capability_ci95") or [0, 100]
+    if wall < 0.9 * budget and ((su.get("target") or 5) > STANDARD_TARGET or (ci[1] - ci[0]) / 2 > STANDARD_TARGET):
+        return f"stopped after {wall:.0f} of its {budget:g} minutes"
+    return None
+
+
 def pool(hosts_: tuple = ("box", "cloud", "community")) -> dict:
     """{(recipe id, host): [rows]}: every answer, from any suite version and any run (fixed, adaptive, one block only),
     to a task family that is unchanged in the current suite (llmbox/famfp.py). Text-graded answers from another version
@@ -135,6 +158,8 @@ def pool(hosts_: tuple = ("box", "cloud", "community")) -> dict:
         for f, r in results.files(h):
             su = r.get("suite") or {}
             if r.get("kind") != "suite" or su.get("tier") not in ("quick", "adaptive", "medium", "deep") or not su.get("content_hash"):
+                continue
+            if h != "cloud" and unfinished(r):   # an unfinished test counts nowhere (the frontier references run on their own terms)
                 continue
             where = h   # (never reassign h: it names the folder for every file after this one)
             if h == "community":
