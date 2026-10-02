@@ -171,6 +171,12 @@ try:
     check(False, "a model id outside the pattern is not found")
 except urllib.error.HTTPError as e:
     check(e.code == 404, "a model id outside the pattern is not found")
+code, r = it.comment(alice, json.dumps({"rid": "qwen36-al", "body": "🙂" * 2000}, ensure_ascii=False).encode())
+check(code == 201, "2000 emoji are a comment")
+req = urllib.request.Request(f"{base}/api/v1/comments", data=json.dumps({"rid": "qwen36-al", "body": "🙂" * 1999 + "!"}, ensure_ascii=False).encode(),
+                             method="POST", headers={"Authorization": "Bearer " + it._issue({"id": 1, "login": "alice"})["key"], "Content-Type": "application/json"})
+with urllib.request.urlopen(req) as resp:
+    check(resp.status == 201, "and fit in a request")
 srv.shutdown()
 
 # ---- check() refuses malformed overrides

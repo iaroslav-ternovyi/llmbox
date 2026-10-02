@@ -961,7 +961,9 @@ def handler(intake: Intake):
                     return self._json(*intake.revoke(self.headers["Authorization"]))
                 return self._json(*(intake.forget(u) if self.path.endswith("forget") else intake.me(u, body or None)))
             m = re.fullmatch(r"/api/v1/comments(?:/(\d{1,12})/(delete|report))?|/api/v1/votes", self.path)
-            if m and n <= 8192:
+            if m:
+                if n > 16384:   # 2000 characters of 4-byte UTF-8 and the JSON around them fit
+                    return self._json(413, {"error": "too long"})
                 u = intake.user_of(self.headers.get("Authorization"))
                 if not u:
                     return self._json(401, {"error": "sign in with GitHub first"})
