@@ -28,10 +28,13 @@ t = re.sub(r"<[^>]+>", "", h)
 assert "What runs best on an RTX 3060 12 GB" in t and "Best here: qwen36-al · 82% of Claude Opus 5.5 · 44 tok/s" in t, t[:900]
 assert "the median of 6 machines (RAM 45–65 GB/s)" in t and "with 64 GB of DDR5-5600 RAM (60 GB/s)" in t, t[:900]
 assert "first: @octo · first on this card" in t and 'href="r/000000000001.html"' in h
-assert re.search(r'<td class="l" data-h="group">RAM 45–65 GB/s</td><td data-h="machines">6</td>', h), h
+# every model here, best score first: the measured median where there is one, else the prediction, and the line that runs the best
+assert re.search(r'<tr class="me">.*qwen36-al.*BEST HERE.*<td data-h="score">82%</td><td data-h="tok/s"><b>44</b> <span class="q">measured ×6</span>', h), h
+assert re.search(r'qwen35-9b.*<b class="pred">~\d+</b> <span class="q">predicted</span>', h) and "install.sh | sh -s -- qwen36-al" in t
+assert t.index("Every model on") < t.index("Recent runs") < t.index("Own one?")   # measuring it yourself comes last
 assert 'href="r/aaaaaaaaaaaa.html"' in h and "not confirmed" in t   # recent runs, the outlier marked
 assert '<link rel="alternate" type="application/rss+xml" title="llmbox · RTX 3060 12 GB" href="feeds/rtx-3060-12gb.xml">' in h
-assert "Add yours" in t and "Be the first" not in t
+assert "Add yours" in t and "Measure it" not in t
 h = hw.hw_page("RTX 4060 8 GB", b, META, users, SITE)
 assert "first: u-0000000b · first on this card" in re.sub(r"<[^>]+>", "", h) and 'href="u-0000000b.html"' in h   # not public: the handle
 h = hw.hw_page("RTX 3080 10 GB", b, META, users, SITE)
@@ -40,7 +43,7 @@ assert "Nobody has measured an RTX 3080 10 GB yet" in t and "FIRST ON THIS CARD"
 assert f"{SITE}/install.sh | sh\nllmbox test" in t and "first:" not in t
 h = hw.hw_page("RX 7900 XTX 24 GB", b, META, users, SITE)
 t = re.sub(r"<[^>]+>", "", h)
-assert "tok/s, rough" in t and "AMD timing comes after launch" in t and "llmbox test" not in t, t[:900]
+assert "tok/s, rough" in t and "Measuring on AMD comes after launch" in t and "llmbox test" not in t, t[:900]
 h = hw.hw_page("Mac M3 Ultra", b, META, users, SITE)
 assert "What runs best on a Mac M3 Ultra" in h and "with 96 GB of memory" in h and "FIRST ON THIS MAC" in h
 h = hw.hw_page("RTX 5070 12 GB", b, META, users, SITE)

@@ -26,6 +26,7 @@ def index() -> dict:
 
 
 FASTER, CLOSE = 1.3, 5.0   # the pick trades score for speed only for a model this much faster and this close to the best
+USABLE_TPS = 20.0          # tok/s in a short chat: a reply you can read as it comes. Slower models are picked only when nothing is faster
 
 
 def engines_of(prof: dict | None) -> set:
@@ -40,13 +41,20 @@ def choose(ok: list[dict]) -> tuple[dict, str]:
     measurably apart from it and at most CLOSE points below runs at least FASTER times as fast 32k into a session.
     A model needing an engine this machine does not have is never the recommendation."""
     ok = [x for x in ok if not x.get("needs")] or ok
+    usable = [x for x in ok if (x.get("t2") or 0) >= USABLE_TPS]
+    slow = f"; nothing here reaches {USABLE_TPS:.0f} tok/s, so it suits jobs you leave running more than a chat" if not usable else ""
+    skipped = ok[0] if usable and usable[0] is not ok[0] else None
+    ok = usable or ok
     top = ok[0]
     long = lambda x: min(x["t2"], x["td"] or x["t2"])
     quick = [x for x in ok[1:] if x.get("tied") and x["use_score"] >= top["use_score"] - CLOSE and long(x) >= FASTER * long(top)]
     if quick:
         b = max(quick, key=long)
         return b, f"{top['use_score'] - b['use_score']:.0f} points below the best score, not measurably apart from it, and {long(b) / long(top):.1f}x as fast here"
-    return top, "the best score among the models that fit"
+    if skipped:
+        return top, (f"the best score among the models that write at reading speed here ({USABLE_TPS:.0f}+ tok/s); "
+                     f"{skipped.get('name') or skipped['id']} scores higher at ~{skipped['t2']:.0f} tok/s")
+    return top, "the best score among the models that fit" + slow
 
 
 def entry_spec(name: str, ram_gb: int = 64, ram_bw: float = 60.0) -> E.HostSpec:

@@ -21,3 +21,13 @@ assert [x["use_score"] for x in coding] == sorted((x["use_score"] for x in codin
 assert sum(x["fits"] for x in pick.rank(small, 8, "all")) < len(ok), "an 8 GB card with 16 GB RAM fits fewer models"
 print(f"{len(ok)} fit a 24 GB card, best {ok[0]['name']}")
 print("all passed")
+
+# the pick: a model too slow to read along is recommended only when nothing reaches reading speed (pick.USABLE_TPS)
+from llmbox import pick as _p  # noqa: E402
+_slow = {"id": "big", "name": "Big", "use_score": 90, "t2": 7.0, "td": 5.0, "tied": False}
+_fast = {"id": "mid", "name": "Mid", "use_score": 80, "t2": 35.0, "td": 30.0, "tied": False}
+b, why = _p.choose([_slow, _fast])
+assert b["id"] == "mid" and "reading speed" in why and "Big scores higher at ~7" in why, (b, why)
+b, why = _p.choose([_slow, dict(_fast, t2=12.0, td=10.0)])
+assert b["id"] == "big" and "nothing here reaches 20" in why, (b, why)
+print("usable-speed pick ok")

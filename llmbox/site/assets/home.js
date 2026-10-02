@@ -113,11 +113,14 @@ function drawPick(pts) {   // the answer first: the best model for the picked bo
   if (!ok.length) { $("#pick").innerHTML = `<p class="q">No measured model fits this box.</p>`; return; }
   const rng = p => { const k = p.vs / p.cap; return [p.ci[0] * k, Math.min(100, p.ci[1] * k)]; };
   // as llmbox pick: the best score, unless a model not measurably apart from it, at most 5 points below, is 1.3x as fast
-  const top = ok.reduce((a, b) => (b.vs > a.vs ? b : a));
+  // as llmbox pick: only models that write at reading speed (20+ tok/s) when any does (pick.USABLE_TPS)
+  const usable = ok.filter(p => p.t2 >= 20), pool = usable.length ? usable : ok;
+  const first = ok.reduce((a, b) => (b.vs > a.vs ? b : a)), top = pool.reduce((a, b) => (b.vs > a.vs ? b : a));
   const long = p => Math.min(p.t2, p.td || p.t2);
-  const quick = ok.filter(p => p !== top && rng(p)[1] >= rng(top)[0] && p.vs >= top.vs - 5 && long(p) >= 1.3 * long(top));
+  const quick = pool.filter(p => p !== top && rng(p)[1] >= rng(top)[0] && p.vs >= top.vs - 5 && long(p) >= 1.3 * long(top));
   const best = quick.length ? quick.reduce((a, b) => (long(b) > long(a) ? b : a)) : top;
-  const why = best === top ? "the best score among the models that fit" :
+  const why = best === top && first !== top ? `the best score among the models that write at reading speed here (20+ tok/s); ${esc(first.model || first.name)} scores higher at ~${Math.round(first.t2)} tok/s` :
+    best === top ? "the best score among the models that fit" + (usable.length ? "" : "; nothing here reaches 20 tok/s, so it suits jobs you leave running more than a chat") :
     `${Math.round(top.vs - best.vs)} points below the best score, not measurably apart from it, and ${(long(best) / long(top)).toFixed(1)}× as fast here`;
   const cmd = `curl --proto '=https' --tlsv1.2 -fsSL ${DATA.site}/install.sh | sh -s -- ${best.id}`;   // words.CURL
   const use = document.querySelector(".seg button.on");

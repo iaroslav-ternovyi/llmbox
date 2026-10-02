@@ -75,7 +75,7 @@ def build(box_records: list[dict], community_records: list[dict], models: list[t
                                     # the box measured before launch: a record of it without a date still came first
                                     "badge": hwclass.first_badge(name, after_reference=box_first is not None and box_first <= holder["at"])} if holder else None,
                          "testable": hwclass.entry_kind(name) not in ("amd", "chip")}   # AMD timing comes after launch
-        entries[name]["best"] = _best(name, models, sets, start_bw)
+        entries[name]["best"] = _best(name, models, sets, start_bw, entries[name])
 
     runs = {}
     for r in rows:
@@ -94,12 +94,19 @@ def build(box_records: list[dict], community_records: list[dict], models: list[t
     return {"entries": entries, "sets": sets, "runs": runs, "other": other_list}
 
 
-def _best(name: str, models: list[tuple], sets: dict, start_bw: float) -> dict | None:
+def _best(name: str, models: list[tuple], sets: dict, start_bw: float, ent: dict | None = None) -> dict | None:
     """The entry's cell: the pick rule's best model at the picker's start values, and its number - the median of the
-    entry's comparison class with the most machines for that model, else its prediction."""
+    entry's comparison class with the most machines for that model, else its prediction. ent gets "models": every
+    listed model on this hardware, best score first (the hardware page's list)."""
     kind = hwclass.entry_kind(name)
     hw = pick.entry_spec(name, 64, start_bw)
     ranked = pick.rank_rows(hw, None, models, "all", None, kind == "mac", {"llama.cpp"})
+    if ent is not None:
+        def got(rid):   # the measured median of this model here: the comparison class with the most machines
+            vs = sorted((v for (r, c), v in sets.items() if r == rid and hwclass.display_class(c) == name), key=lambda v: -v["machines"])
+            return (vs[0]["median"], vs[0]["machines"]) if vs else (None, 0)
+        ent["models"] = [dict(rid=x["id"], name=x.get("name") or x["id"], score=x.get("score"), fits=bool(x["fits"]), t2=x.get("t2"),
+                              td=x.get("td"), ctx=x.get("ctx"), measured=got(x["id"])[0], machines=got(x["id"])[1]) for x in ranked]
     ok = [x for x in ranked if x["fits"] and x.get("use_score") is not None]
     if not ok:
         return None

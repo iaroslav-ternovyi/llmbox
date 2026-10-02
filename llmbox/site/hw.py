@@ -52,60 +52,83 @@ def _first(credit: dict | None, users: dict) -> str:
     return f'first: <a href="{esc(credit["user"])}.html">{who}</a> · {esc(credit["badge"].lower())} · <a href="r/{esc(credit["sid"])}.html">the run</a>'
 
 
+def _cap(t: str) -> str:   # str.capitalize() would lower the rest ("64 gb of ddr5")
+    return t[:1].upper() + t[1:]
+
+
 def hw_page(name: str, board: dict, meta: dict, users: dict, site: str) -> str:
+    from urllib.parse import quote
     ent = board["entries"][name]
     slug, best, testable = ent["slug"], ent.get("best"), ent["testable"]
     num, measured = number(best)
     one = f"{CURL} {site}/install.sh | sh"
     feed = f"feeds/{slug}.xml"
-    # the answer
+    # the answer: the best model here, its number, and the line that runs it
     if best:
-        sc = f' · {best["score"]:.0f}% of Claude Opus 5.5' if best.get("score") is not None else ""
+        sc = f' · <b class="sco">{best["score"]:.0f}%</b> of Claude Opus 5.5' if best.get("score") is not None else ""
         if measured:
             n = best["machines"]
             ref_only = n == 1 and board["sets"].get((best["rid"], best["group"]), {}).get("ref")
-            how = ("measured on llmbox's own PC" if ref_only else "measured on 1 machine" if n == 1 else f"the median of {n} machines") + f" ({esc(group(best['group']))})"
+            how = ("measured on our test PC" if ref_only else "measured on 1 machine" if n == 1 else f"the median of {n} machines") + f" ({esc(group(best['group']))})"
         elif testable:
             how = "predicted from the model file and the memory speeds; nobody has measured it here yet"
         else:
             how = "a rough prediction: there are no public runs of AMD cards to check it against yet"
+        cmd = f"{CURL} {site}/install.sh | sh -s -- {best['rid']}"
         answer = (f'<p class="best">Best here: <a href="recipe-{esc(best["rid"])}.html">{esc(best["name"])}</a>{sc} · '
-                  f'<b class="{"" if measured else "pred"}">{esc(num)}</b> tok/s{"" if testable or measured else ", rough"}</p><p class="q">{how}; {esc(start_values(name))}.</p>')
+                  f'<b class="{"" if measured else "pred"}">{esc(num)}</b> tok/s{"" if testable or measured else ", rough"}</p>'
+                  f'<p class="q">{how}; {esc(start_values(name))}. {_cap(esc(best.get("why") or ""))}.</p>'
+                  f'<div class="runit"><span class="sc">Run it</span><div class="copy"><pre class="cmd" id="runcmd">{esc(cmd)}</pre>'
+                  f'<button class="btn cpy" type="button" data-copy-from="runcmd">COPY</button></div>'
+                  f'<p class="q">Linux or a Mac: installs llmbox and this model with its settings fitted to your computer, then starts it. '
+                  f'Windows, LM Studio or Ollama: <a href="recipe-{esc(best["rid"])}.html#run">the settings for each</a>.</p></div>')
     else:
         answer = f'<p class="best">No listed model fits {esc(start_values(name))}.</p>'
-    # what has been measured: per model and comparison group
-    groups = sorted(((rid, c, v) for (rid, c), v in board["sets"].items() if hwclass.display_class(c) == name),
-                    key=lambda x: (-x[2]["machines"], -x[2]["median"]))
-    rows = "".join(f'<tr><td class="l" data-h="model"><a href="recipe-{esc(rid)}.html">{esc((meta.get(rid) or {}).get("name") or rid)}</a></td>'
-                   f'<td class="l" data-h="group">{esc(group(c))}{" · reference" if v["ref"] else ""}</td>'
-                   f'<td data-h="machines">{v["machines"]}</td><td data-h="tok/s"><b>{v["median"]:.0f}</b></td></tr>' for rid, c, v in groups)
-    table = (f'<section class="panel"><div class="lbl">Measured here</div><div class="tw"><table class="grp"><tr><th class="l">MODEL</th>'
-             f'<th class="l">COMPARISON GROUP</th><th>MACHINES</th><th>TOK/S</th></tr>{rows}</table></div>'
-             '<p class="q pad0">A group is the card plus the RAM speed; each machine counts once (the median of its runs); '
-             '"reference" includes llmbox\'s own PC.</p></section>') if groups else ""
+    # every listed model here, best score first: measured where someone measured it, else predicted
+    rows = []
+    for m in ent.get("models") or []:
+        t2 = m["measured"] or m["t2"]
+        times = f" ×{m['machines']}" if m["machines"] > 1 else ""
+        spd = (f'<b>{m["measured"]:.0f}</b> <span class="q">measured{times}</span>'
+               if m["measured"] else f'<b class="pred">~{m["t2"]:.0f}</b> <span class="q">predicted</span>' if m["fits"] and m["t2"] else "—")
+        slow = m["fits"] and t2 and t2 < 20
+        fit = (f'✓ {round((m["ctx"] or 0) / 1024)}k' if m["fits"] else '<span class="no">✗ too big</span>')
+        me = best and m["rid"] == best["rid"]
+        score = f"{m['score']:.0f}%" if m["score"] is not None else "—"
+        cv = (meta.get(m["rid"]) or {}).get("caveat")
+        cav = f'<a class="cav" href="recipe-{esc(m["rid"])}.html" title="{esc(cv)}">⚠ flawed test</a>' if cv else ""
+        rows.append(f'<tr class="{"me" if me else ""}{" nofit" if not m["fits"] else ""}"><td class="l" data-h="model"><a href="recipe-{esc(m["rid"])}.html">{esc(m["name"])}</a>'
+                    f'{"<span class=tag>BEST HERE</span>" if me else ""}{cav}</td>'
+                    f'<td data-h="score">{score}</td>'
+                    f'<td data-h="tok/s">{spd}{" <span class=no>slow</span>" if slow else ""}</td><td data-h="fits">{fit}</td></tr>')
+    models = (f'<section class="panel"><div class="lbl">Every model on {esc(_a(name))}</div><div class="tw"><table class="grp hwm"><tr><th class="l">MODEL</th>'
+              f'<th>SCORE<br><span class="faint">% of Claude Opus</span></th><th>SPEED<br><span class="faint">tok/s, short chat</span></th><th>FITS<br><span class="faint">context</span></th></tr>'
+              + "".join(rows) + '</table></div>'
+              f'<p class="q pad0">{_cap(esc(start_values(name)))}. 20 tok/s reads comfortably; under that it is marked slow. '
+              f'Other RAM? <a href="index.html#gpu={esc(quote(name))}">The Models page lists them for your exact box</a>.</p></section>') if rows else ""
     recent = sorted((r for r in board["runs"].values() if r["entry"] == name), key=lambda r: r["at"], reverse=True)[:20]
     runs = ("<section class=\"panel\"><div class=\"lbl\">Recent runs</div><ul class=\"runs\">"
             + "".join(f'<li><a href="r/{esc(r["sid"])}.html">{esc(r["at"][:10])} · {esc((meta.get(r["rid"]) or {}).get("name") or r["rid"])} · '
                       f'{r["t2"]:.0f} tok/s{" · not confirmed" if r["outlier"] else ""}</a></li>' for r in recent)
             + "</ul></section>") if recent else ""
     if not testable:
-        state = (f'<section class="panel pad"><div class="lbl">AMD</div><p>AMD timing comes after launch: llmbox cannot measure '
-                 f'{esc(_a(name))} yet. This page and <a href="{feed}">its feed</a> will say when it can.</p></section>')
+        state = (f'<section class="panel pad"><div class="lbl">AMD</div><p>Measuring on AMD comes after launch: llmbox cannot time '
+                 f'{esc(_a(name))} yet, so these numbers are predictions. This page and <a href="{feed}">its feed</a> will say when it can.</p></section>')
     elif not ent["machines"]:
         badge = hwclass.first_badge(name)
-        state = (f'<section class="panel pad"><div class="lbl">Be the first</div><p>Nobody has measured {esc(_a(name))} yet. '
-                 f'Sign in with GitHub when llmbox asks and your result card says <b>{esc(badge)}</b>.</p>'
-                 f'<pre class="cmd" id="cmd">{esc(one)}\nllmbox test</pre><button class="btn solid" data-copy-from="cmd">COPY</button></section>')
+        state = (f'<section class="panel pad"><div class="lbl">Own one? Measure it</div><p>Nobody has measured {esc(_a(name))} yet: the numbers above are predictions. '
+                 f'About 20 minutes; sign in with GitHub when llmbox asks and your result card says <b>{esc(badge)}</b>.</p>'
+                 f'<div class="copy"><pre class="cmd" id="cmd">{esc(one)}\nllmbox test</pre><button class="btn cpy" type="button" data-copy-from="cmd">COPY</button></div></section>')
     else:
-        state = (f'<section class="panel pad"><div class="lbl">Add yours</div><p class="q">{ent["machines"]} machine{"s" if ent["machines"] > 1 else ""} so far. '
+        state = (f'<section class="panel pad"><div class="lbl">Own one? Add yours</div><p class="q">{ent["machines"]} machine{"s" if ent["machines"] > 1 else ""} so far. '
                  f'Yours adds to the median, and your result gets a page and a card.</p>'
-                 f'<pre class="cmd" id="cmd">{esc(one)}\nllmbox test</pre><button class="btn solid" data-copy-from="cmd">COPY</button></section>')
+                 f'<div class="copy"><pre class="cmd" id="cmd">{esc(one)}\nllmbox test</pre><button class="btn cpy" type="button" data-copy-from="cmd">COPY</button></div></section>')
     first = _first(ent.get("credit"), users)
     body = f'''
 <section class="panel hd hwp"><div><div class="crumb"><a href="hardware.html">Hardware</a> / {esc(name)}</div>
  <h1>What runs best on {esc(_a(name))}</h1>{answer}
- <p class="q">{first + " · " if first else ""}new results: <a href="{feed}">RSS</a></p></div></section>
-{state}{table}{runs}'''
+ <p class="q">{first + " · " if first else ""}get told when it is measured or a better model comes: <a href="{feed}">RSS</a></p></div></section>
+{models}{runs}{state}'''
     return _page(f"llmbox · {name}", "HARDWARE", body, ("pages.css", "hardware.css"), ("runpage.js",),
                  about=f"The local AI model that runs best on {_a(name)}, measured by people with one or predicted, with the settings to run it.",
                  head=f'<link rel="alternate" type="application/rss+xml" title="llmbox · {esc(name)}" href="{feed}">')
