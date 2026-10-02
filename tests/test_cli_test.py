@@ -62,6 +62,8 @@ serving.served = served
 
 def fake_main(argv):   # the speed and bench steps write their records, as the real ones do
     calls.append(argv[0])
+    if argv[0] == "speed":
+        state["depths"] = [argv[i + 1] for i, x in enumerate(argv) if x == "--depth"]
     assert "--speed-probe" not in argv, argv   # step 1 timed every depth; a second probe cost a Mac ~15 minutes
     kind = "speed" if argv[0] == "speed" else "suite"
     rec = {"schema": results.SCHEMA, "kind": kind, "id": f"{kind}-1", "recipe": {"id": argv[1]}, "speed": {"decode_tps": state.get("dec", 40.0)},
@@ -102,6 +104,13 @@ state.update(key="k")
 out, code = test()
 assert code == 0 and calls.count("speed") == 1 and calls.count("bench") == 1 and not asked("Sign in"), (out, calls)
 assert ("send", 2) in calls and "1/3 speed" in out and "3/3 where this stands" in out, (out, calls)
+assert state["depths"] == ["32000", "80000"], state["depths"]
+# a Mac is timed at 32k only: its prompt reading makes 80k half the test (M2 Max: 8 of 16 minutes)
+MAC = {"vendor": "apple", "name": "Apple M2 Max", "vram_mib": 32768, "unified": True, "apple_gpu_cores": 38}
+state.update(prof=profile(MAC))
+out, code = test()
+assert code == 0 and state["depths"] == ["32000"], (code, state["depths"], out[-500:])
+state.update(prof=profile(NV))
 
 # 2 anonymous on a terminal, no: speed only, then the send; the offer names the badge (nobody measured an RTX 3080 10 GB)
 state.update(key=None, answers=["n", "y"])

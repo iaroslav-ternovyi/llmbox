@@ -390,7 +390,10 @@ def cmd_test(a: argparse.Namespace) -> None:
     import time as _t
     t0 = _t.time()
     print(f"1/{steps} speed of {rid} on {host}", flush=True)
-    main(["speed", rid, "--host", host, "--depth", "32000", "--depth", "80000", "--unload"])
+    # a Mac reads a prompt at a few hundred tokens a second: 80k alone took 8 of an M2 Max's 16 minutes (2026-10-02), so a
+    # Mac is timed at 32k (what its card and page show) and leaves the 80k figure to the machines that read fast
+    mac = (prof["hw"].get("gpus") or [{}])[0].get("vendor") == "apple"
+    main(["speed", rid, "--host", host, "--depth", "32000"] + ([] if mac else ["--depth", "80000"]) + ["--unload"])
     if quality:
         budget = a.budget or (40 if a.full else 10)
         print(f"\n2/{steps} quality: adaptive test, {budget:g} minutes" + ("" if a.full else " (--full: 40 minutes, a narrower range)"), flush=True)
