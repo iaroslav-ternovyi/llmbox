@@ -1,6 +1,7 @@
 """llmbox audit (llmbox/audit.py) on a scratch home and a scratch site: an unreadable result is an error, results
 newer than the last backup a warning; a site page with a home folder is an error, one model with two speeds an error,
-a link to a missing page a warning; a model with a caveat gets its findings as notes.
+a link to a missing page a warning, a torn HTML entity or a figure labelled 32k but predicted at another depth an error;
+a model with a caveat gets its findings as notes.
 Run: python3 tests/test_audit.py"""
 import json
 import os
@@ -38,6 +39,15 @@ assert any(x["level"] == "error" and "home folder" in x["what"] for x in f), wha
 assert any(x["level"] == "error" and "m1: one model, different speeds: model page 59, home 56" in x["what"] for x in f), what
 assert not any("m2: one model" in x["what"] for x in f), "a model with no figure on home is not compared with the next row's figure"
 assert any(x["level"] == "warn" and "gone.html" in x["what"] for x in f), what
+
+# a torn entity (an &-less "ldquo;") and a speed labelled 32k but predicted at another depth are errors
+site2 = tempfile.mkdtemp()
+open(os.path.join(site2, "index.html"), "w").write('<p>slower (the speed)ldquo;at 32k</p><script>const DATA = {"recipes": {"a": {"deepK": 32}, '
+                                                   '"ling": {"deepK": 96}}};</script><p>&ldquo;fine&rdquo;</p>')
+w2 = " | ".join(x["what"] for x in audit.check_site(site2))
+assert "torn HTML entity: index.html" in w2 and "ling 96k" in w2 and "a 32k" not in w2, w2
+open(os.path.join(site2, "index.html"), "w").write('<p>&ldquo;fine&rdquo; &amp; &#8220;ok&#8221;</p>')
+assert not any("torn" in x["what"] for x in audit.check_site(site2)), "real entities are fine"
 
 ex = audit._Explained(lambda rid: "flawed" if rid == "k2" else "")
 ex.append(audit._f("warn", "tests", "k2: never tuned"))

@@ -85,6 +85,18 @@ def check_tests(host: str = "box") -> list[dict]:
             r = by_created.get(cr)
             if r and irt.unfinished(r):
                 out.append(_f("error", "tests", f"{rid}: an unfinished run is counted ({cr[:16]}: {irt.unfinished(r)})", "irt.pool must skip it"))
+    # measured and finished, yet on no ranking: its answers miss a block (a slow model's 40 minutes reach 7 tasks)
+    from . import suite as _suite
+    ranked_ids = {r["id"] for r in ranked}
+    for rid, runs in counted.items():
+        if rid not in ranked_ids:
+            have = {x["block"] for x in pool[(rid, host)]["rows"]}
+            gaps = [b for b in _suite.WEIGHTS if b not in have]
+            if gaps and _on_box(host, rid) is False:   # its file is gone (a retired model): listed as measured, nothing to run
+                out.append(_f("info", "tests", f"{rid}: not ranked (no answers in {', '.join(gaps)}) and its file is gone from {host}"))
+            elif gaps:
+                out.append(_f("warn", "tests", f"{rid}: measured ({len(pool[(rid, host)]['rows'])} answers) but not ranked: no answers in {', '.join(gaps)}",
+                              f"llmbox bench {rid} --host {host} --recipe {rid} --adaptive --budget 40 --seed <n> (missing blocks go first)"))
     # the standard test on the box
     for r in recs:
         su, s = r.get("suite") or {}, r.get("summary") or {}
@@ -106,7 +118,7 @@ def check_tests(host: str = "box") -> list[dict]:
             out.append(_f("warn", "tests", f"{rid}: never tuned (no llmbox optimize record)", f"llmbox optimize {rid} --host {host} --retune, then a probe"))
         elif opts[0]["created"] > newest_run:
             out.append(_f("warn", "tests", f"{rid}: tuned only after its quality runs ({opts[-1]['created'][:16]})", "re-test it with the tuned settings"))
-        p = report.latest_probe(recs, rid)
+        p = report.speed_probe(recs, rid, host)
         if not p:
             here = _on_box(host, rid)
             out.append(_f("warn" if here is not False else "info", "speed",
@@ -231,6 +243,21 @@ def check_site(site: str) -> list[dict]:
         seen = {k: v.group(1) for k, v in (("model page", m), ("home", h), ("RTX 5070 page", c)) if v}
         if len(set(seen.values())) > 1:
             out.append(_f("error", "site", f"{rid}: one model, different speeds: " + ", ".join(f"{k} {v}" for k, v in seen.items()), "one source for the figure"))
+    # text broken by a bad replace: an entity without its & ("the “long” speed)ldquo;at 32k" on the home page)
+    torn = [os.path.relpath(p, site) for p in pages if re.search(r"[^&#\w](?:ldquo|rdquo|rsquo|lsquo|nbsp|mdash|ndash|middot|hellip|frac34);",
+                                                                 open(p, encoding="utf-8").read())]
+    if torn:
+        out.append(_f("error", "site", f"{len(torn)} page(s) with a torn HTML entity: {', '.join(torn[:4])}", "fix the text in the page's source"))
+    # every "at 32k" figure predicted at 32k: a calibration from another depth labelled 32k (Ling's 96k) is wrong on every box
+    m = re.search(r"const DATA = (\{.*?\});</script>", home, re.S)
+    if m:
+        try:
+            deep = {rid: r.get("deepK") for rid, r in json.loads(m.group(1)).get("recipes", {}).items() if r.get("deepK") not in (None, 32)}
+        except ValueError:
+            deep = {}
+        if deep:
+            out.append(_f("error", "site", "speeds labelled 'at 32k' predicted at another depth: " + ", ".join(f"{k} {v}k" for k, v in list(deep.items())[:5]),
+                          "fit.calibration(at_k=32) must predict at 32k"))
     built = os.path.getmtime(os.path.join(site, "index.html")) if home else 0
     newest = max((os.path.getmtime(p) for p in glob.glob(os.path.join(HOME, "results", "*", "*.json"))), default=0)
     if newest > built:
@@ -238,21 +265,27 @@ def check_site(site: str) -> list[dict]:
     return out
 
 
-def backup(host: str = "box", home: str = HOME) -> str:
+def backup(host: str = "box", home: str = HOME, keep: int = 14) -> str:
     """A second copy of what cannot be measured again (results, saved thinking, run logs, recipes, task bank) on the
-    given machine, under ~/llmbox-backup; the mark the data check reads. Returns rsync's last line."""
+    given machine: a dated tar.gz under ~/llmbox-backup (the newest `keep` stay), so a file deleted or broken here
+    survives in the copies before it; the mark the data check reads. Only ssh and tar (the box has no rsync)."""
     import subprocess
     from . import hosts
     ssh = hosts.load(host).get("ssh")
     if not ssh:
         raise SystemExit(f"{host} has no ssh address: back up elsewhere")
     dirs = [d for d in ("results", "traces", "runs", "recipes", "irt", "reader-traces", "cloud-runs") if os.path.isdir(os.path.join(home, d))]
-    r = subprocess.run(["rsync", "-a", "--relative", *[os.path.join(home, ".", d) for d in dirs], f"{ssh}:llmbox-backup/"],
-                       capture_output=True, text=True, timeout=3600)
-    if r.returncode:
-        raise SystemExit(f"backup failed: {(r.stderr or r.stdout).strip()[-300:]}")
-    open(os.path.join(home, BACKUP_MARK), "w").write(time.strftime("%Y-%m-%dT%H:%M:%S") + f" {ssh}:llmbox-backup\n")
-    return f"{', '.join(dirs)} -> {ssh}:llmbox-backup"
+    name = f"llmbox-{time.strftime('%Y-%m-%dT%H%M%S')}.tar.gz"
+    tar = subprocess.Popen(["tar", "czf", "-", "-C", home, *dirs], stdout=subprocess.PIPE)
+    remote = (f"mkdir -p llmbox-backup && cat > llmbox-backup/{name}.part && gzip -t llmbox-backup/{name}.part && "
+              f"mv llmbox-backup/{name}.part llmbox-backup/{name} && ls -1t llmbox-backup/llmbox-*.tar.gz | tail -n +{keep + 1} | xargs -r rm -f && "
+              f"du -h llmbox-backup/{name} | cut -f1")
+    r = subprocess.run(["ssh", ssh, remote], stdin=tar.stdout, capture_output=True, text=True, timeout=3600)
+    tar.stdout.close()
+    if tar.wait() or r.returncode:
+        raise SystemExit(f"backup failed: {(r.stderr or r.stdout).strip()[-300:] or 'tar failed'}")
+    open(os.path.join(home, BACKUP_MARK), "w").write(time.strftime("%Y-%m-%dT%H:%M:%S") + f" {ssh}:llmbox-backup/{name}\n")
+    return f"{', '.join(dirs)} -> {ssh}:llmbox-backup/{name} ({r.stdout.strip()})"
 
 
 def run(host: str = "box", site: str | None = None) -> list[dict]:
