@@ -43,7 +43,7 @@ def _ranking(local: list[dict], clouds: list[dict], ref: dict | None, ranks: dic
         col, kind = family((sd["recipes"].get(rid) or {}).get("arch"))[1], _kind(r.get("hf_repo"))
         sub = " · ".join(x for x in (variant(rid, r["file"], full=True), _size(sd["recipes"].get(rid), nm), kind if kind != "release" else "") if x)
         cav = (caveats or {}).get(rid)
-        cav_html = f"<span class='cav' title='{esc(cav)}'>⚠ not directly comparable</span>" if cav else ""
+        cav_html = f"<span class='cav' title='{esc(cav)}'>⚠ flawed test: ▾ for why</span>" if cav else ""
         body.append(f"<tr class='mr' data-rid='{esc(rid)}' data-g='{grp}'><td class='rk' title='{tip}'>{pl}</td>"
                     f"<td class='l mod'><div class='mw'>{_marker(col, kind)}<a class='m' href='recipe-{esc(rid)}.html'>{esc(nm)}</a><span class='qt'>{esc(sub)}</span>{cav_html}</div></td>"
                     f"<td class='sco'>{_pct(r.get('vs_ref'))}</td><td class='spd r'>{_spd(r['speed'])}</td><td class='fit r'>—</td>"

@@ -95,4 +95,4 @@
 /* the way to the hardware map (hardware.html) */
 .tomap{margin:18px 0 0}.tomap a{display:inline-block;padding:10px 0;color:var(--soft);border-bottom:1px solid var(--line)}.tomap a:hover{color:var(--amber);border-color:var(--amber)}
 /* a result that is not directly comparable: shown with why (a recipe's caveat) */
-.cav{display:block;font:500 11px var(--mono);letter-spacing:.04em;color:var(--t-mid);margin-top:2px;cursor:help}.cavp{font-size:13px;color:var(--soft);margin:4px 0 10px}
+.mw .cav{grid-column:2}.cav{display:block;font:500 11px var(--mono);letter-spacing:.04em;color:var(--t-mid);margin-top:2px;cursor:help}.cavp{font-size:13px;color:var(--soft);margin:4px 0 10px}
