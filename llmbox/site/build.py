@@ -35,7 +35,7 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     rs = [r for r in all_rs if r["host"].get("id") != "cloud" and not r.get("partial")]
     set_variants(host, rs)   # the same file measured with other settings (K2-Horizon high / medium): named apart
     data = shape_data(rs, host)
-    written = copy_assets(out_dir) + [home(out_dir, host, suite_version, tier, all_rs, data)]
+    written = copy_assets(out_dir)
     recs = load_records(host, suite_version, tier)
     local_run, ref = recs["local"], recs["ref"]
     allrecs = report.results.load_all(host)
@@ -92,6 +92,10 @@ def _build(out_dir: str, host: str, suite_version: str, tier: str) -> list[str]:
     board, run_pages, images, noindex = _people_runs(out_dir, host, order, meta, {rid: os.path.basename((local[rid].get("model") or {}).get("file") or "") for rid in order})
     written += run_pages
     written += _entries(out_dir, board, meta)
+    from .hwmap import map_panel
+    from .people import users as _users
+    from ..hosts import HOME as _HOME
+    written.append(home(out_dir, host, suite_version, tier, all_rs, data, map_panel(board, _users(os.path.join(_HOME, "intake", "users.json")))))
     ref_row = next((r for r in all_rs if r["host"].get("id") == "cloud" and ref and r["id"] == (ref.get("recipe") or {}).get("id")), None)
     w("method.html", method_page(ref, opts, set(local), ref_row, rs, look))
     from .install import account_page, install_page, privacy_page, terms_page
