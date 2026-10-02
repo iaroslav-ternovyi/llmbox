@@ -397,8 +397,9 @@ def cmd_test(a: argparse.Namespace) -> None:
         from . import serving
         with serving.served(host, rid) as url:   # llmbox serves the recipe itself: no llama-swap needed
             print(f"  serving {rid} at {url}", flush=True)
+            # no second speed probe: step 1 timed it at every depth (on a Mac the probe's 96k prompt alone took ~9 minutes)
             main(["bench", rid, "--host", host, "--recipe", rid, "--endpoint", url, "--adaptive", "--budget", str(budget),
-                  "--target", "2.5", "--seed", str(seed), "--speed-probe"])
+                  "--target", "2.5", "--seed", str(seed)])
     mine = [(p, r) for p, r in results.files(host) if os.path.getmtime(p) >= t0 and r.get("kind") in submit.KINDS
             and (r.get("recipe") or {}).get("id") == rid]   # this test's records only, not the machine's history
     print(f"\n{steps}/{steps} where this stands", flush=True)

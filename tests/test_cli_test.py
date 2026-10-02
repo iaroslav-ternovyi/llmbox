@@ -62,6 +62,7 @@ serving.served = served
 
 def fake_main(argv):   # the speed and bench steps write their records, as the real ones do
     calls.append(argv[0])
+    assert "--speed-probe" not in argv, argv   # step 1 timed every depth; a second probe cost a Mac ~15 minutes
     kind = "speed" if argv[0] == "speed" else "suite"
     rec = {"schema": results.SCHEMA, "kind": kind, "id": f"{kind}-1", "recipe": {"id": argv[1]}, "speed": {"decode_tps": state.get("dec", 40.0)},
            "prediction": {"decode_tps_no_spec": 30.0}}
