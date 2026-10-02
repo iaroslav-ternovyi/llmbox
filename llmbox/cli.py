@@ -319,48 +319,146 @@ def cmd_pick(a: argparse.Namespace) -> None:
 
 
 def cmd_test(a: argparse.Namespace) -> None:
-    """The measurement of a model on this machine: speed, a quality test (10 minutes, or 40 with --full), where it stands
-    against machines like it and against the model's published score, then - on a yes - the upload."""
+    """The measurement of a model on this machine: speed; a quality test (10 minutes, or 40 with --full) when it can
+    count - signed in, or kept here with --no-submit (on a terminal the test offers to sign in first; declined, it is
+    skipped); where it stands against machines like it and the model's published score; then, on a yes, the upload.
+    With no model: llmbox's pick for this computer, installed first. Not on AMD yet: timing there comes after launch."""
     import random
-    from . import irt, recipe as rc, submit, suite
+    from . import account, hwclass, irt, recipe as rc, registry, results, submit, suite, wizard
     host = a.host or _only_host()
+    prof = hosts.load(host)
+    cls = hwclass.of_host(results.host_fingerprint(prof))
+    entry = hwclass.display_class(cls)   # the picker entry: the site's map cell, card page and feed (None: other machines)
+    feed = f"{registry.DEFAULT_URL.rstrip('/')}/feeds/{hwclass.SLUGS[entry]}.xml" if entry else None
+    if wizard.stops_timing(prof):   # before anything is downloaded
+        best = None
+        try:
+            wizard._fresh_registry(lambda m: None)
+            best = wizard.best_for(prof, a.recipe)[0]
+        except SystemExit:
+            pass
+        raise SystemExit("AMD timing isn't supported yet (planned after launch). Nothing was downloaded."
+                         + (f" Predicted for your card: ~{best['t2']:.0f} tok/s, rough." if best else "")
+                         + (f" New results for your card: {feed}" if feed else ""))
+    rid = a.recipe
+    if not rid:   # llmbox's pick for this computer, as the guided start chooses it
+        wizard._fresh_registry(print)
+        best, why, _ok = wizard.best_for(prof)
+        if not best:
+            raise SystemExit("none of the measured models fits this computer's memory yet")
+        rid = best["id"]
+        print(f"llmbox's pick for this computer: {best['name']} ({why})")
+        if rid not in set(rc.ids(host)):
+            print(f"  {best['name']} · {best.get('size_gb') or '?'} GB to download")
+            if wizard._ask("Download and install it?", "y", a.yes) != "y":
+                raise SystemExit(f"nothing installed; later: llmbox install {rid} --from registry --host {host} --apply")
+            from . import install
+            if install.run(rid, registry.REGISTRY, host, dry_run=False):
+                raise SystemExit(1)
     try:
-        rc.load(host, a.recipe)
+        rc.load(host, rid)
     except OSError:
-        raise SystemExit(f"{a.recipe} is not installed on {host}: llmbox install {a.recipe} --from registry --host {host} --apply")
+        raise SystemExit(f"{rid} is not installed on {host}: llmbox install {rid} --from registry --host {host} --apply")
     ch = irt.canonical(suite.content_hash())
     if ch not in irt.RELEASES:
         raise SystemExit(f"this llmbox's tasks ({suite.VERSION}, {ch}) are not a released version: update llmbox")
     if not irt.load(ch):
         raise SystemExit("no task bank for this version here: llmbox recipe pull")
     server = a.server or submit.DEFAULT_SERVER
-    seed = None if a.no_submit else submit.fresh_seed(server)
-    if seed is None and not a.no_submit:
-        print(f"{server} did not answer: the test runs on a seed of its own, and its answers are filed but not pooled")
-    from . import account
-    if not a.no_submit and not account.key_for(server):
-        print("not signed in: the quality run is filed but counts toward the model's score only from an account (llmbox login)")
-    seed = seed if seed is not None else random.randrange(10**6, 10**9)
+    seen = _entry_seen(entry)
+    predicted = _start_line(prof, entry, cls, rid, seen)
+    tty = sys.stdin.isatty() and not a.yes
+    signed = bool(account.key_for(server))
+    quality = signed or a.no_submit   # a quality run counts only from an account; kept here, it is for this person alone
+    if not quality and tty:
+        badge = entry and seen is False
+        offer = (f"Nobody has measured {_a(entry)} {entry} yet. Sign in with GitHub and your card says {hwclass.first_badge(entry)}; "
+                 "your quality result counts too. Sign in?" if badge else "Sign in with GitHub so your quality result counts?")
+        if wizard._ask(offer, "y", False) == "y":
+            account.login(server)
+            signed = quality = bool(account.key_for(server))
+    if not quality:
+        print("not signed in: the speed test runs; the 10-minute quality test is skipped (it counts only from an account: "
+              "`llmbox login` first to include it)")
+    seed = None
+    if quality:
+        seed = None if a.no_submit else submit.fresh_seed(server)
+        if seed is None and not a.no_submit:
+            print(f"{server} did not answer: the test runs on a seed of its own, and its answers are filed but not pooled")
+        seed = seed if seed is not None else random.randrange(10**6, 10**9)
+    steps = 3 if quality else 2
     import time as _t
     t0 = _t.time()
-    print(f"1/3 speed of {a.recipe} on {host}", flush=True)
-    main(["speed", a.recipe, "--host", host, "--depth", "32000", "--depth", "80000", "--unload"])
-    budget = a.budget or (40 if a.full else 10)
-    print(f"\n2/3 quality: adaptive test, {budget:g} minutes" + ("" if a.full else " (--full: 40 minutes, a narrower range)"), flush=True)
-    from . import serving
-    with serving.served(host, a.recipe) as url:   # llmbox serves the recipe itself: no llama-swap needed
-        print(f"  serving {a.recipe} at {url}", flush=True)
-        main(["bench", a.recipe, "--host", host, "--recipe", a.recipe, "--endpoint", url, "--adaptive", "--budget", str(budget),
-              "--target", "2.5", "--seed", str(seed), "--speed-probe"])
-    from . import results
+    print(f"1/{steps} speed of {rid} on {host}", flush=True)
+    main(["speed", rid, "--host", host, "--depth", "32000", "--depth", "80000", "--unload"])
+    if quality:
+        budget = a.budget or (40 if a.full else 10)
+        print(f"\n2/{steps} quality: adaptive test, {budget:g} minutes" + ("" if a.full else " (--full: 40 minutes, a narrower range)"), flush=True)
+        from . import serving
+        with serving.served(host, rid) as url:   # llmbox serves the recipe itself: no llama-swap needed
+            print(f"  serving {rid} at {url}", flush=True)
+            main(["bench", rid, "--host", host, "--recipe", rid, "--endpoint", url, "--adaptive", "--budget", str(budget),
+                  "--target", "2.5", "--seed", str(seed), "--speed-probe"])
     mine = [(p, r) for p, r in results.files(host) if os.path.getmtime(p) >= t0 and r.get("kind") in submit.KINDS
-            and (r.get("recipe") or {}).get("id") == a.recipe]   # this test's records only, not the machine's history
-    print("\n3/3 where this stands", flush=True)
-    _standing(host, a.recipe, [r for _p, r in mine])
+            and (r.get("recipe") or {}).get("id") == rid]   # this test's records only, not the machine's history
+    print(f"\n{steps}/{steps} where this stands", flush=True)
+    _standing(host, rid, [r for _p, r in mine], entry, predicted)
     if a.no_submit:
         print("not sent (--no-submit): `llmbox submit` sends it later")
         return
-    submit.ask_and_send([p for p, _r in mine], host, server, yes=a.yes)
+    if signed and entry and seen is False and tty:   # the credit shows a hash unless the person chooses their name
+        me = account.whoami(server) or {}
+        if not me.get("public") and wizard._ask(f"You may be the first on {entry}. Show your GitHub name on your llmbox profile and runs, "
+                                                "including as the first there?", "n", False) == "y":
+            account.set_public(server, True)
+    sp = next((r for _p, r in mine if r.get("kind") == "speed"), None)
+    pred = ((sp or {}).get("prediction") or {}).get("decode_tps_no_spec")
+    dec = ((sp or {}).get("speed") or {}).get("decode_tps")
+    if pred and dec and dec > 2 * pred:   # the server flags it the same way (server.outlier_flags)
+        print(f"  over twice the prediction (~{pred:.0f} tok/s): it will be published as not confirmed")
+    try:
+        sent = submit.ask_and_send([p for p, _r in mine], host, server, yes=a.yes)
+    except SystemExit as e:
+        print(f"not sent: {e}. Saved; `llmbox submit` sends it later.")
+        return
+    if sent:
+        print("  post it on r/LocalLLaMA or X" + (f" · new results for your card: {feed}" if feed else ""))
+
+
+def _a(name: str) -> str:   # "an RTX 3080", "a Mac M4"
+    return "an" if name.startswith(("RTX", "RX")) else "a"
+
+
+def _entry_seen(entry: str | None) -> bool | None:
+    """Whether anyone measured any model on this picker entry, from the model list (None: unknown, or other machines)."""
+    from . import hwclass, pick
+    if not entry:
+        return None
+    try:
+        recipes = pick.index()["recipes"]
+    except SystemExit:
+        return None
+    return any(hwclass.display_class(k) == entry for e in recipes for k in (e.get("measured") or {}))
+
+
+def _start_line(prof: dict, entry: str | None, cls: str, rid: str, seen: bool | None) -> float | None:
+    """The first line of a test: whether this machine is measured yet, and what is predicted. Returns the prediction."""
+    from . import hwclass, wizard
+    try:
+        row = wizard.best_for(prof, rid)[0] or {}
+    except SystemExit:
+        row = {}
+    pred = row.get("t2") if not row.get("measured") else None
+    name = entry or hwclass.label(cls)
+    if row.get("measured"):
+        print(f"{name}: {row['measured']} machine{'s' if row['measured'] != 1 else ''} measured with this model · median {row['t2']:.0f} tok/s")
+    elif seen:
+        print(f"{name}: measured with other models; this one is predicted ~{row['t2']:.0f} tok/s" if row.get("t2") else f"{name}: measured with other models")
+    elif entry:
+        print(f"{name}: nobody has measured one yet" + (f" · predicted ~{row['t2']:.0f} tok/s" if row.get("t2") else ""))
+    else:
+        print(f"{name}: not on the site's hardware map yet" + (f" · predicted ~{row['t2']:.0f} tok/s" if row.get("t2") else ""))
+    return pred
 
 
 def cmd_run(a: argparse.Namespace) -> None:
@@ -420,9 +518,12 @@ def cmd_stop(a: argparse.Namespace) -> None:
         print("nothing llmbox started is running")
 
 
-def _standing(host: str, rid: str, recs: list[dict]) -> None:
+def _standing(host: str, rid: str, recs: list[dict], entry: str | None = None, predicted: float | None = None) -> None:
     """This machine against machines like it (the registry's per-class medians), and this run's quality against the
-    model's published score: the same file and settings should score the same, so a clear miss means a setup problem."""
+    model's published score: the same file and settings should score the same, so a clear miss means a setup problem.
+      RTX 4070 Ti Super 16 GB · Qwen3.6-35B-A3B UD-Q4_K_XL
+        63 tok/s in a short chat · 41 at 32k context · predicted ~52
+        machines like it (RTX 4070 Ti Super 16 GB · RAM 45-65 GB/s): median 61 tok/s (14 machines)"""
     from . import hwclass, pick, results as res
     e = next((x for x in pick.index()["recipes"] if x["id"] == rid), {}) if os.path.exists(
         os.path.join(hosts.HOME, "recipes", "registry", "index.json")) else {}
@@ -430,16 +531,14 @@ def _standing(host: str, rid: str, recs: list[dict]) -> None:
     sp = next((r["speed"] for r in recs if r.get("kind") == "speed" and (r.get("speed") or {}).get("decode_tps")), None)
     same = (e.get("measured") or {}).get(cls)
     if sp:
-        print(f"  speed: {sp['decode_tps']:.0f} tokens/s" + (f"; machines like it ({hwclass.label(cls)}): median {same[0]:.0f} of {same[3]}"
-                                                            if same else "; the first of its kind here - nobody has sent this hardware yet"))
-        expected = same[0] if same else None
-        if not expected:   # nobody measured this class yet: the prediction for this machine
-            prof = hosts.load(host)
-            cpu = prof["hw"].get("cpu") or {}
-            row = next((x for x in pick.rank(hosts.spec(prof), cpu.get("cores") or cpu.get("threads"), "all", cls, cls.startswith("apple-"),
-                                             pick.engines_of(prof)) if x["id"] == rid), {})
-            expected = row.get("t2")
-        slow = pick.slow_note(sp["decode_tps"], expected)
+        deep = min((d for d in sp.get("depth") or [] if d.get("decode_tps") and 24000 <= (d.get("depth") or 0) < 48000),
+                   key=lambda d: abs(d["depth"] - 32000), default=None)
+        print(f"{entry or hwclass.label(cls)} · {e.get('name') or rid}")
+        print(f"  {sp['decode_tps']:.0f} tok/s in a short chat" + (f" · {deep['decode_tps']:.0f} at 32k context" if deep else "")
+              + (f" · predicted ~{predicted:.0f}" if predicted else ""))
+        print(f"  machines like it ({hwclass.label(cls)}): median {same[0]:.0f} tok/s ({same[3]} machine{'s' if same[3] != 1 else ''})" if same
+              else f"  the first with this model on {hwclass.label(cls)}")
+        slow = pick.slow_note(sp["decode_tps"], same[0] if same else predicted)
         if slow:
             print(slow)
     q = next((r for r in recs if r.get("kind") == "suite"), None)
@@ -1081,7 +1180,7 @@ def main(argv: list[str] | None = None) -> None:
     so.set_defaults(fn=cmd_stop)
 
     te = command("test", "measure a model on this machine and send it: speed, the 40-minute quality test, the upload")
-    te.add_argument("recipe", help="an installed recipe (llmbox install <id> --from registry ...)")
+    te.add_argument("recipe", nargs="?", help="an installed recipe (default: llmbox's pick for this computer, installed first)")
     te.add_argument("--host", help="this machine's name (default: the only one registered)")
     te.add_argument("--full", action="store_true", help="the 40-minute quality test (default: 10 minutes)")
     te.add_argument("--budget", type=float, help="minutes for the quality test (overrides --full)")

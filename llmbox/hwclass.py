@@ -164,6 +164,14 @@ def entry_kind(name: str) -> str:
         "amd" if any(name == a[0] for a in AMD_CARDS) else "card"
 
 
+def first_badge(name: str, after_reference: bool = False) -> str:
+    """The "first" badge for a picker entry (the result card, the CLI's sign-in offer): per kind of machine, and FIRST
+    USER ON THIS CARD where llmbox's own reference PC measured the entry before anyone."""
+    if after_reference:
+        return "FIRST USER ON THIS CARD"
+    return {"mac": "FIRST ON THIS MAC", "chip": "FIRST ON THIS CHIP"}.get(entry_kind(name), "FIRST ON THIS CARD")
+
+
 def mac_memory(name: str, want: int = 64) -> int:
     """The memory (GB) a Mac entry is taken to have: want if the chip is sold with it, else the nearest size it is
     sold with (a tie goes to the smaller)."""

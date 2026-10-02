@@ -17,6 +17,7 @@ from __future__ import annotations
 import getpass
 import gzip
 import json
+import time
 import os
 import re
 import socket
@@ -167,12 +168,27 @@ def run(paths: list[str], host: str | None, server: str, dry_run: bool, out=prin
     for (_p, r) in todo:
         led[r["id"]] = res.get("id")
     json.dump(led, open(LEDGER, "w"), indent=1)
+    from . import registry
+    if res.get("page"):   # its own page and card, at once: until it is published the page shows the place in the queue
+        when = _clock(res.get("live_at"))
+        out(f"sent · your page and card: {registry.DEFAULT_URL.rstrip('/')}/{res['page']}")
+        out(f"  live at about {when} ({res.get('ahead', 0)} ahead); until then it shows your place in the queue" if when
+            else "  until it is published the page shows its place in the queue")
+        return 0
     wait = (f"{res['ahead']} submission(s) ahead; on the site in about {res['site_within_min']} minutes" if "ahead" in res
             else "on the site within about 20 minutes")   # an older server
     out(f"sent {len(todo)} record(s): {wait} (a quality test is re-graded on the server first) - status: {server.rstrip('/')}{res['url']}"
         if res.get("url") else f"sent {len(todo)} record(s): submission {res.get('id')} {res.get('status')}")
-    from . import registry
     rids = sorted({(r.get("recipe") or {}).get("id") for _p, r in todo} - {None})
     if rids:   # where it shows up (the site rebuilds after the check)
         out("on the site: " + ", ".join(f"{registry.DEFAULT_URL.rstrip('/')}/hardware-{rid}.html" for rid in rids[:3]))
     return 0
+
+
+def _clock(iso: str | None) -> str | None:
+    """The server's UTC time ('2026-10-02T12:20:00Z') as this computer's clock time ('14:20')."""
+    import calendar
+    try:
+        return time.strftime("%H:%M", time.localtime(calendar.timegm(time.strptime(iso or "", "%Y-%m-%dT%H:%M:%SZ"))))
+    except ValueError:
+        return None

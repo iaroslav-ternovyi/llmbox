@@ -6,7 +6,8 @@ The way `fly launch` and `ollama` start: look at the machine, show the plan with
   3. the pick        every measured model fitted here; the best score that fits, and among the models not measurably
                      apart from it the one still fast 32k into a session - with the numbers and the why
   4. install         download (with its progress bar), sha256, the settings fitted to this computer
-  5. measure         optional, 3 minutes: how fast it runs here against machines like it; sent only on a yes
+  5. measure         optional, 3 minutes: how fast it runs here against machines like it; sent only on a yes (not on
+                     AMD yet: timing there comes after launch)
   6. start           it keeps running in the background; the address and how to connect an app
 Every question has a default (Enter), --yes takes them all, and nothing leaves the computer without a yes.
 """
@@ -70,11 +71,32 @@ def _newer(out) -> None:
         out(f"(llmbox {cur} is out, this is {__version__}: `llmbox update` gets it and the newest model list)")
 
 
+def best_for(prof: dict, model: str | None = None) -> tuple[dict | None, str, list[dict]]:
+    """(the model llmbox picks for this computer, or the one asked for; why; every measured model that fits here), from
+    the model list already pulled. The guided start installs the pick; `llmbox test` with no model tests it."""
+    cls = hwclass.of_host(results.host_fingerprint(prof))
+    cpu = prof["hw"].get("cpu") or {}
+    rows = pick.rank(hosts.spec(prof), cpu.get("cores") or cpu.get("threads"), "all", cls, cls.startswith("apple-"), pick.engines_of(prof))
+    ok = [x for x in rows if x["fits"] and x.get("use_score") is not None]
+    if not ok:
+        return None, "", ok
+    if model:
+        return next((x for x in ok if x["id"] == model), None), "the model you asked for", ok
+    best, why = pick.choose(ok)
+    return best, why, ok
+
+
+def stops_timing(prof: dict) -> bool:
+    """An AMD card or a Ryzen AI Max (and no NVIDIA card): llmbox installs and runs models there (the Vulkan build), but
+    timing them - `llmbox test`, the guided start's measuring - comes after launch."""
+    vendors = {g.get("vendor") for g in prof["hw"].get("gpus") or []}
+    return "amd" in vendors and "nvidia" not in vendors
+
+
 def main(yes: bool = False, model: str | None = None, host: str | None = None, plan_only: bool = False, out=print) -> int:
     prof = _this_host(host, out)
     host = prof["name"]
     out(f"This computer: {_machine_line(prof)}")
-    spec = hosts.spec(prof)
     cls = hwclass.of_host(results.host_fingerprint(prof))
     mac = cls.startswith("apple-")
     engine = prof["hw"].get("runtimes") or []
@@ -92,13 +114,10 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
             out("Without llama.cpp nothing can run; `llmbox` again when it is installed.")
     _fresh_registry(out)
     _newer(out)
-    cpu = prof["hw"].get("cpu") or {}
-    rows = pick.rank(spec, cpu.get("cores") or cpu.get("threads"), "all", cls, mac, pick.engines_of(prof))
-    ok = [x for x in rows if x["fits"] and x.get("use_score") is not None]
+    best, why, ok = best_for(prof, model)
     if not ok:
         out("None of the measured models fits this computer's memory yet.")
         return 1
-    best, why = (next((x for x in ok if x["id"] == model), None), "the model you asked for") if model else pick.choose(ok)
     if model and not best:
         out(f"{model}: not among the models that fit here; `llmbox pick` lists them")
         return 1
@@ -155,7 +174,9 @@ def main(yes: bool = False, model: str | None = None, host: str | None = None, p
     rid = best["id"]
     if install.run(rid, registry.REGISTRY, host, dry_run=False, out=out):
         return 1
-    if _ask("\nTime it on this computer and see how it compares with machines like it (about 3 minutes)?", "y", yes) == "y":
+    if stops_timing(prof):
+        out("\nTiming on AMD comes after launch: the model is installed and starts now; `llmbox test` will time it then.")
+    elif _ask("\nTime it on this computer and see how it compares with machines like it (about 3 minutes)?", "y", yes) == "y":
         m = speed.measure(host, rid, depths=[32000], unload=True)
         sp = m.get("speed") or {}
         if sp.get("decode_tps"):
