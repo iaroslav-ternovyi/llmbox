@@ -21,3 +21,12 @@ Deferred on purpose, with the reason and what would bring each back. The launch 
   again later. A posted card should never show a "pending" status that later changed.
 - **Public reference runs.** llama.cpp's published llama-bench runs as a labelled column on hardware pages. Deferred:
   a different method (zero context), common NVIDIA cards only, and the speed predictor already uses them.
+- **The site past a few thousand runs.** Cloudflare Pages takes about 20,000 files per deployment, and every run adds
+  two (its page r/<id>.html and its card r/<id>.png), so deploys start failing near 9,000 runs. The build also loads
+  every saved record into memory (results.files), heavy for thousands of quality runs on the 4 GB server. Not needed
+  for the launch targets (100 submissions in 30 days). Bring back at 5,000 runs or 1 GB of records: cards in R2 or
+  Workers static assets, and an index of records instead of reading them all.
+- **DESIGN.md.** The site's design rules live only in osc.css and in review decisions: amber marks only data, the
+  visitor's own cell and the active control; "~" plus grey means predicted; a solid frame means measured; badges are
+  ink, never amber; the result card's type scale. Write a one-page DESIGN.md from what the launch actually shipped,
+  style rules only (the repo is public), so the step-2 advisor pages and later reviews have one reference.
