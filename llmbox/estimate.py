@@ -98,6 +98,8 @@ class ModelShape:
     q_full_dim: int = 0               # sum over growing-KV layers of query heads * key length: attention's work per context
     q_swa_dim: int = 0                # token (Metal's depth cost); the same over the sliding-window layers
     k_swa_len: int = 0                # the sliding-window layers' key length where it differs (Gemma 4: 256 vs 512)
+    output_tied: int = 0              # bytes of the embedding table used as the output layer (no output.weight: Gemma):
+                                      # read whole on the GPU every token, unlike the embedding lookup's one row
     expert_cpu_eff: float = 1.0       # relative CPU dequant speed of the expert quant type (IQ* are slower)
     context_length: int = 0
     total_params: int = 0
@@ -142,7 +144,7 @@ def stale(cached: dict) -> bool:
     """A cached shape to read again: one that lacks a field its kind of model needs."""
     return (cached.get("arch") in SPARSE_ARCHES and "sparse_bytes" not in cached) or \
         ("q_full_dim" not in cached and bool(cached.get("attn_layers"))) or \
-        ("k_swa_len" not in cached and bool(cached.get("swa_layers")))
+        ("k_swa_len" not in cached and bool(cached.get("swa_layers"))) or "output_tied" not in cached
 
 
 def analyze(headers: list[GGUFHeader]) -> ModelShape:
@@ -192,6 +194,9 @@ def analyze(headers: list[GGUFHeader]) -> ModelShape:
             slow_time += t.nbytes / _cpu_eff(t.ggml_type)
             continue
         s.nonexpert_bytes += t.nbytes
+    names = {t.name for t in tensors}
+    if "output.weight" not in names and "token_embd.weight" in names:   # tied: the output projection is the embedding table
+        s.output_tied = sum(t.nbytes for t in tensors if t.name == "token_embd.weight")
     if s.expert_bytes:  # mixed-type quants (e.g. unsloth UD): effective speed of the whole expert mix
         s.expert_cpu_eff = s.expert_bytes / slow_time
     # Which layers keep a per-token KV cache? Hybrids mix full attention with linear attention / SSM layers,
@@ -291,7 +296,7 @@ def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv
     mib = 1 / 2**20
     kv = s.kv_bytes_per_token(kv_type) * ctx + s.kv_swa_bytes(kv_type, ctx) + s.recurrent_state_bytes * slots
     buf = COMPUTE_BUFFER_MIB.get(ubatch, 2100)
-    gpu_fixed = (s.nonexpert_bytes + kv) * mib + buf + GPU_RESERVE_MIB
+    gpu_fixed = (s.nonexpert_bytes + s.output_tied + kv) * mib + buf + GPU_RESERVE_MIB
     free_for_experts = hw.vram_mib - gpu_fixed
     if not s.is_moe:
         # dense: everything must live on the GPU (we don't run dense models split across RAM)
@@ -300,7 +305,7 @@ def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv
         gpu_frac = 1.0
         ram_used = s.embed_bytes * mib
         reason = "fits in VRAM" if fits else f"dense model needs {need/1024:.1f} GiB VRAM"
-        per_token_gpu = s.nonexpert_bytes
+        per_token_gpu = s.nonexpert_bytes + s.output_tied
         per_token_cpu = 0.0
     else:
         gpu_frac = max(0.0, min(1.0, free_for_experts / (s.expert_bytes * mib))) if s.expert_bytes else 1.0
@@ -312,7 +317,7 @@ def plan(s: ModelShape, hw: HostSpec, ctx: int | None = None, slots: int = 1, kv
                   f"needs {(ram_used + hw.ram_headroom_mib)/1024:.1f} GiB RAM")
         frac = s.n_expert_used / s.n_expert
         per_token_cpu = cpu_expert * frac
-        per_token_gpu = s.nonexpert_bytes + s.expert_bytes * gpu_frac * frac
+        per_token_gpu = s.nonexpert_bytes + s.output_tied + s.expert_bytes * gpu_frac * frac
     vram_used = min(hw.vram_mib, gpu_fixed + (s.expert_bytes * gpu_frac * mib if s.is_moe else s.embed_bytes * mib))
 
     eff, ovh = DECODE[(hw.backend, s.is_moe)]

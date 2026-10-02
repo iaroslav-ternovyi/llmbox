@@ -3,7 +3,7 @@
 hybrid with 8 attention layers of 32), Gemma-3-12B (width 256, 40 of 48 layers windowed) and Gemma-4-E2B (512 global,
 256 windowed). The time a token gains 16k-32k into the context is within 20% of the run's for all four, and the speed
 there within 15% for the three whose short-chat speed the formula has right (Gemma 4's short chat is predicted
-119 tok/s against 71 measured: a separate gap). Before the Metal term the deep speed was 2-2.5x too fast. CUDA and
+111 tok/s against 71 measured: a separate gap, its per-layer embedding tables). Before the Metal term the deep speed was 2-2.5x too fast. CUDA and
 Vulkan are untouched, and a shape read before the query dims were recorded falls back to its attention layers.
 Run: python3 tests/test_metal_depth.py"""
 import json

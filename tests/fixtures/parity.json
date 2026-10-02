@@ -30,7 +30,8 @@
     "active_params": 7936684544,
     "q_full_dim": 32768,
     "q_swa_dim": 0,
-    "k_swa_len": 0
+    "k_swa_len": 0,
+    "output_tied": 0
    },
    "kv_type": "q8_0",
    "ctx": 262144,
@@ -70,7 +71,8 @@
     "active_params": 10759155456,
     "q_full_dim": 32768,
     "q_swa_dim": 163840,
-    "k_swa_len": 0
+    "k_swa_len": 0,
+    "output_tied": 825955200
    },
    "kv_type": "q8_0",
    "ctx": 65536,
@@ -110,7 +112,8 @@
     "active_params": 3084329742,
     "q_full_dim": 40960,
     "q_swa_dim": 102400,
-    "k_swa_len": 256
+    "k_swa_len": 256,
+    "output_tied": 415236096
    },
    "kv_type": "q8_0",
    "ctx": 262144,
@@ -150,7 +153,8 @@
     "active_params": 2946429568,
     "q_full_dim": 40960,
     "q_swa_dim": 0,
-    "k_swa_len": 0
+    "k_swa_len": 0,
+    "output_tied": 0
    },
    "kv_type": "f16",
    "ctx": 262144,
@@ -190,7 +194,8 @@
     "active_params": 3608307264,
     "q_full_dim": 49152,
     "q_swa_dim": 49152,
-    "k_swa_len": 0
+    "k_swa_len": 0,
+    "output_tied": 0
    },
    "kv_type": "q8_0",
    "ctx": 131072,
@@ -230,7 +235,8 @@
     "active_params": 5438713556,
     "q_full_dim": 196608,
     "q_swa_dim": 0,
-    "k_swa_len": 0
+    "k_swa_len": 0,
+    "output_tied": 0
    },
    "kv_type": "q4_0",
    "ctx": 131072,
@@ -270,7 +276,8 @@
     "active_params": 2946429568,
     "q_full_dim": 40960,
     "q_swa_dim": 0,
-    "k_swa_len": 0
+    "k_swa_len": 0,
+    "output_tied": 0
    },
    "kv_type": "q8_0",
    "ctx": 262144,

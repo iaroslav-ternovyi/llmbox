@@ -49,7 +49,7 @@ def new_page(rs: list[dict], data: dict, host: str) -> str | None:
     kv = "q8_0"
 
     def shp(sh: E.ModelShape) -> dict:
-        return {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
+        return {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes + sh.output_tied, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
                 "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used,
                 "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv), "cpuEff": sh.expert_cpu_eff,
                 "kvB": sh.kv_bytes_per_token(kv), "ctx": sh.context_length or 32768, "k2": 1, "kd": 1, "deepK": 32}
