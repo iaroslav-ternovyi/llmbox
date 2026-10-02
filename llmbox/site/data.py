@@ -45,6 +45,23 @@ GPUS = ([(n, v, b, gpu_generation(n)) for n, v, b in GPUS] + [(n, v, b, 1.0, "vu
 RAM_KINDS = [("DDR4-3200", 40), ("DDR5-5600", 60), ("DDR5-6400", 75), ("DDR5-8000", 88)]
 
 
+def gpu_classes() -> dict:
+    """Each discrete card's class prefix ("RTX 5070 12 GB" -> "rtx-5070-12g"), for plan.js classOf: the class people's
+    measurements of a picked box are filed under (hwclass.key)."""
+    from .. import hwclass
+    return {g[0]: hwclass.key(g[0], g[1], vendor="amd" if g[4:5] == ("vulkan",) else "nvidia").split("|")[0]
+            for g in GPUS if g[3] not in ("mac", "apu")}
+
+
+def js_shape(sh, kv: str, ctx: int, cal) -> dict:
+    """What plan.js reads about a model (the pages' DATA): estimate.plan's inputs from its GGUF shape, the KV type and
+    context of its recipe, and its calibration on the reference box. tests/test_parity.py holds the two to each other."""
+    return {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
+            "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used, "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv),
+            "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "swaB": sh.kv_swa_bytes(kv, 1), "swaW": sh.swa_window, "ctx": ctx,
+            "k2": round(cal.k2, 4), "kd": round(cal.kd, 4), "term": cal.term, "deepK": cal.deep_k}
+
+
 def shape_data(local: list[dict], host: str = "box") -> dict:
     """Per recipe: the GGUF shape numbers estimate.plan() uses, plus the calibration measured / predicted on the
     reference box (llmbox.fit, the same numbers `llmbox fit` prints)."""
@@ -61,20 +78,16 @@ def shape_data(local: list[dict], host: str = "box") -> dict:
         sh = F.shape_for(rec, host=hosts.host_of(prof))
         cal = F.calibration(rec, sh, host)
         kv, ctx = rec["placement"]["kv_type"], rec["placement"]["ctx"] or sh.context_length
-        out[r["id"]] = {"moe": sh.is_moe, "nonexp": sh.nonexpert_bytes, "exp": sh.expert_bytes, "embed": sh.embed_bytes,
-                        "layers": sh.n_layers, "nExp": sh.n_expert, "nUsed": sh.n_expert_used, "rec": sh.recurrent_state_bytes + sh.kv_swa_bytes(kv),
-                        "cpuEff": sh.expert_cpu_eff, "kvB": sh.kv_bytes_per_token(kv), "swaB": sh.kv_swa_bytes(kv, 1), "swaW": sh.swa_window, "ctx": ctx, "k2": round(cal.k2, 4), "kd": round(cal.kd, 4), "term": cal.term,
-                        "deepK": cal.deep_k, "size": round((sh.total_bytes or 0) / 1e9, 1),
-                        "arch": sh.arch, "params": int(sh.total_params * (1 - (sh.mtp_bytes or 0) / sh.total_bytes)) if sh.total_bytes else 0,
-                        "active": sh.active_params, "engine": rec["runtime"].get("engine") or "llama.cpp"}
+        out[r["id"]] = dict(js_shape(sh, kv, ctx, cal), size=round((sh.total_bytes or 0) / 1e9, 1), arch=sh.arch,
+                            params=int(sh.total_params * (1 - (sh.mtp_bytes or 0) / sh.total_bytes)) if sh.total_bytes else 0,
+                            active=sh.active_params, engine=rec["runtime"].get("engine") or "llama.cpp")
     return {"recipes": out, "ref": {"gpu": prof["hw"]["gpus"][0]["name"].replace("NVIDIA GeForce ", "") if prof["hw"]["gpus"] else "",
                                     "vram": ref_hw.vram_mib, "ram": ref_hw.ram_mib, "rambw": ref_hw.ram_bw_gbs, "vrambw": ref_hw.vram_bw_gbs},
             "gpus": GPUS, "ramKinds": RAM_KINDS,
             # speeds people measured, per recipe and hardware class: [t2, deep, machines, people] (community_speeds)
             "cm": {rid: {c["class"]: [c["t2"], c["t80"] or c["t32"], c["machines"], c["people"]] for c in cls}
                    for rid, cls in community_speeds(files, host).items()},
-            "gpuClass": {g[0]: hwclass.key(g[0], g[1], vendor="amd" if g[4:5] == ("vulkan",) else "nvidia").split("|")[0]
-                         for g in GPUS if g[3] not in ("mac", "apu")},
+            "gpuClass": gpu_classes(),
             "ramEdges": list(hwclass.RAM_EDGES)}
 
 

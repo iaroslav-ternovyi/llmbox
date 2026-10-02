@@ -49,6 +49,23 @@ def choose(ok: list[dict]) -> tuple[dict, str]:
     return top, "the best score among the models that fit"
 
 
+def entry_spec(name: str, ram_gb: int = 64, ram_bw: float = 60.0) -> E.HostSpec:
+    """A picker entry as a machine, the way the site's picker builds it (plan.js boxFrom): a card with its VRAM and
+    bandwidth plus this much system RAM at this speed; a Mac or a Ryzen AI Max as unified memory (the size nearest
+    ram_gb it is sold with), of which the GPU may use about 3/4 (2/3 on a Mac under 36 GB), at the chip's speed."""
+    from . import hwclass
+    kind = hwclass.entry_kind(name)
+    if kind in ("mac", "chip"):
+        g = next(x for x in hwclass.MACS + hwclass.APUS if x[0] == name)
+        mem = (hwclass.mac_memory(name, ram_gb) if kind == "mac" else min(ram_gb, g[4])) * 1024
+        vram = mem * (0.67 if kind == "mac" and mem < 36864 else 0.75)
+        return E.HostSpec(vram_mib=vram, ram_mib=mem - vram, ram_bw_gbs=float(g[2]), vram_bw_gbs=float(g[2]),
+                          backend="metal" if kind == "mac" else "vulkan", gpu_eff=E.gpu_generation(name) if kind == "mac" else 1.0)
+    g = next(x for x in hwclass.NVIDIA_CARDS + hwclass.AMD_CARDS if x[0] == name)
+    return E.HostSpec(vram_mib=g[1], ram_mib=ram_gb * 1024, ram_bw_gbs=float(ram_bw), vram_bw_gbs=float(g[2]),
+                      backend="vulkan" if kind == "amd" else "cuda", gpu_eff=E.gpu_generation(name) if kind == "card" else 1.0)
+
+
 def rank(hw: E.HostSpec, cores: int | None, use: str = "all", cls: str | None = None, mac: bool = False,
          engines: set | None = None) -> list[dict]:
     """cls: this machine's hardware class (llmbox/hwclass.py): where people measured a model on the same class, their
