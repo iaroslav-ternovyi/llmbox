@@ -1,5 +1,5 @@
 /* the home page: the box picker, the answer, the chart, the ranking */
-.q1{font:600 34px/1.1 "IBM Plex Sans Condensed";margin:26px 0 14px;letter-spacing:.01em}
+.q1{font:600 34px/1.1 var(--cond);margin:26px 0 14px;letter-spacing:.01em}
 .lede{font-size:17px;line-height:1.55;color:var(--soft);max-width:64ch;margin:-2px 0 12px}
 .newbie{border:1px solid var(--line2);margin:0 0 14px;font-size:13px}.newbie summary{cursor:pointer;padding:9px 14px;color:var(--amber);list-style:none}
 .newbie summary::-webkit-details-marker{display:none}.newbie summary::before{content:"+ ";color:var(--muted)}.newbie[open] summary::before{content:"− "}
@@ -10,7 +10,7 @@
 @media (max-width:760px){.newbie .nb{grid-template-columns:1fr}.newbie .gl{grid-template-columns:1fr}.newbie dd{margin-bottom:6px}}
 .boxbar .bl{font-size:12px;color:var(--muted);margin-left:6px}
 .side{display:flex;flex-direction:column;gap:22px;min-width:0}
-.hero{padding:22px 22px 14px;margin:0 0 22px}.hero .ch2{font:600 22px "IBM Plex Sans Condensed";margin:0 0 12px;color:var(--ink)}
+.hero{padding:22px 22px 14px;margin:0 0 22px}.hero .ch2{font:600 22px var(--cond);margin:0 0 12px;color:var(--ink)}
 .hero .cap{font-size:12.5px;line-height:1.6;color:var(--muted);max-width:110ch;margin:8px 4px 2px}
 #scatter{position:relative}.scatter2{width:100%;height:auto;display:block}
 .scatter2 .gl{stroke:#1d1e19}.scatter2 .axl{stroke:#3a3b33}.scatter2 .ax{fill:#85817a;font-size:12px}.scatter2 .axt{fill:#8b877b;font-size:12px}
@@ -24,14 +24,14 @@
 
 .boxbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;border:1px solid var(--line);background:var(--panel)}
 .boxbar .sc{margin-right:4px}
-.boxbar select,.boxbar input{background:#0b0c09;color:var(--ink);border:1px solid var(--line);padding:6px 8px;font:13px "IBM Plex Mono"}
+.boxbar select,.boxbar input{background:#0b0c09;color:var(--ink);border:1px solid var(--line);padding:6px 8px;font:13px var(--mono)}
 .boxbar select:focus,.boxbar input:focus{border-color:var(--amber)}.boxbar select:disabled,.boxbar input:disabled{opacity:.35}
 .boxbar #boxnote{margin-left:auto}.boxbar #fitsum{color:var(--soft)}.boxbar #fitsum:before{content:"· ";color:var(--faint)}
 .rhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding:18px 16px 6px}
 .seg{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.seg .sc{margin-right:8px}
-.seg button{background:none;border:1px solid transparent;color:var(--muted);font:12px "IBM Plex Mono";padding:5px 10px;cursor:pointer;white-space:nowrap}
+.seg button{background:none;border:1px solid transparent;color:var(--muted);font:12px var(--mono);padding:5px 10px;cursor:pointer;white-space:nowrap}
 .seg button:hover{color:var(--ink)}.seg button.on{color:var(--amber);border-color:var(--amber-dim)}
-#find{background:#0b0c09;color:var(--ink);border:1px solid var(--line);padding:6px 10px;font:12.5px "IBM Plex Mono";width:190px}
+#find{background:#0b0c09;color:var(--ink);border:1px solid var(--line);padding:6px 10px;font:12.5px var(--mono);width:190px}
 #find:focus{border-color:var(--amber)}.rank tr[hidden]{display:none!important}
 .cmp{display:flex;align-items:center;gap:12px}.cmp .btn[aria-disabled=true]{opacity:.4;pointer-events:none}
 .rnote{padding:8px 16px 0;font-size:12px;color:var(--faint)}.rnote.unr{color:var(--muted)}.rnote.unr b{color:var(--soft);font-weight:500}
@@ -43,7 +43,7 @@
 .rank tr.mr{cursor:pointer}.rank tr.mr:hover td,.rank tr.open td{background:rgba(255,255,255,.022)}
 .rank td.sco,.rank th.sch{width:31%;min-width:230px}
 .sch .fp{align-items:flex-end}.sch .num{font:inherit;color:inherit;width:auto;white-space:nowrap}
-.rank td.spd b{display:block;font:500 17px "IBM Plex Mono";color:var(--ink)}.rank td.spd b.pred{color:var(--soft)}
+.rank td.spd b{display:block;font:500 17px var(--mono);color:var(--ink)}.rank td.spd b.pred{color:var(--soft)}
 .rank td.spd small{display:block;font-size:11px;color:var(--faint)}
 .rank td.fit{font-size:12.5px;color:var(--soft);white-space:nowrap}.rank td.fit .no{color:var(--red)}
 .rank td.act{white-space:nowrap;width:60px}
@@ -62,7 +62,7 @@
  .rank tr.mr td{display:block;border:0;padding:2px 0;min-width:0;width:auto;background:none!important}
  .rank td.rk{grid-area:rk;padding-top:4px}.rank td.mod{grid-area:mod}.rank td.act{grid-area:act;text-align:right}.rank td.sco{grid-area:sco;padding:8px 0 6px}
  .rank td.spd{grid-area:spd;text-align:left}.rank td.fit{grid-area:fit;text-align:left;padding-top:4px}.rank td.so{grid-area:so;font-size:12px}
- .rank td.spd b{font-size:15px}.fp .num{font-size:15px}.fp .trk s{top:0;bottom:0}.rank td.spd b::after{content:" tok/s";font:400 11px "IBM Plex Mono";color:var(--faint)}
+ .rank td.spd b{font-size:15px}.fp .num{font-size:15px}.fp .trk s{top:0;bottom:0}.rank td.spd b::after{content:" tok/s";font:400 11px var(--mono);color:var(--faint)}
  .rank tr.gs{border-top:1px dashed rgba(255,176,0,.6)}.rank tr.gs td{border-top:0}
  .rank tr.cloud{display:grid;grid-template-columns:24px minmax(0,1fr) minmax(0,1.3fr);grid-template-areas:"rk mod sco";column-gap:12px;align-items:center;border-bottom:1px solid var(--line2);padding:4px 0}
  .rank tr.cloud td{display:block;border:0;padding:2px 0;min-width:0;width:auto}.rank tr.cloud td.spd,.rank tr.cloud td.fit,.rank tr.cloud td.so,.rank tr.cloud td.act{display:none}
@@ -87,7 +87,7 @@
  .q1{font-size:26px}.boxbar #boxnote{margin-left:0;width:100%}.boxbar select{max-width:100%;min-width:0}.boxbar #gpu{width:100%}
 }
 .pickp{padding:16px 18px}.pk{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:18px;align-items:center}
-.pk h2{margin:4px 0 6px;font-size:22px}.pk h2 small{color:var(--muted);font-size:13px;font-weight:400;white-space:nowrap}.pk p{margin:0}
+.pk h2{margin:4px 0 6px;font:600 24px/1.2 var(--cond)}.pk h2 small{color:var(--muted);font-size:13px;font-weight:400;white-space:nowrap}.pk p{margin:0}
 .pkc{position:relative}.pkc pre.cmd{margin:0;background:#0b0c09;border:1px solid var(--line);padding:12px 88px 12px 14px;font-size:12.5px;white-space:pre-wrap;overflow-wrap:anywhere}
 .pkc .cpy{position:absolute;top:7px;right:8px}.pkc .q{margin-top:6px;font-size:12px}
 @media (max-width:760px){.pk{grid-template-columns:minmax(0,1fr)}.pkc pre.cmd{padding-right:14px}.pkc .cpy{position:static;margin-top:8px}}
